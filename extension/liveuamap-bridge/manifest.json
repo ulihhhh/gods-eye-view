@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "GEV Liveuamap Bridge",
+  "version": "0.2.0",
+  "description": "Relays liveuamap.com map data from your own browser tabs to a local God's Eye View dev server. Local prototype only — not for redistribution.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["*://*.liveuamap.com/*"],
+      "js": ["reader.js"],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.liveuamap.com/*"],
+      "js": ["relay.js"],
+      "world": "ISOLATED",
+      "run_at": "document_idle"
+    }
+  ]
+}

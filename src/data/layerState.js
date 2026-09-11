@@ -241,6 +241,12 @@ const OPTION_GROUPS = Object.freeze({
       decode: (value) => (/^\d{1,3}$/.test(value) ? normalizeVolume(Number(value) / 100) : null),
     }),
   ]),
+  // Prototype layer (see src/data/liveuamap.js) — local exploration only.
+  liveuamap: Object.freeze([
+    booleanOption('showLabels', 'l', true),
+    booleanOption('showFields', 'f', true),
+    booleanOption('verifiedOnly', 'v', false),
+  ]),
 });
 
 const TRACKING_OPTION_KEY_BY_LAYER = Object.freeze({
@@ -280,6 +286,7 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'cctv', token: 'c', disposition: 'enabled+options', optionOwner: 'cctv' }),
   Object.freeze({ id: 'earthquakes', token: 'e', disposition: 'enabled-only' }),
   Object.freeze({ id: 'flights', token: 'f', disposition: 'enabled+options', optionOwner: 'flights' }),
+  Object.freeze({ id: 'liveuamap', token: 'n', disposition: 'enabled+options', optionOwner: 'liveuamap' }),
   Object.freeze({ id: 'local-dams', token: 'q', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-datacenters', token: 'd', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-firms', token: 'w', disposition: 'enabled-only' }),
