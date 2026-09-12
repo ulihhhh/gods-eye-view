@@ -2,6 +2,7 @@ import { DataLayerManager } from '../data/manager.js';
 import flightsLayer from '../data/flights.js';
 import militaryFlightsLayer from '../data/militaryFlights.js';
 import earthquakesLayer from '../data/earthquakes.js';
+import localAdsbLayer from '../data/localAdsb.js';
 import satellitesLayer from '../data/satellites.js';
 import rocketLaunchesLayer from '../data/rocketLaunches.js';
 import trafficLayer from '../data/traffic.js';
@@ -35,6 +36,7 @@ export function createStandaloneData({
   dataManager.register(flightsLayer);
   dataManager.register(militaryFlightsLayer);
   dataManager.register(earthquakesLayer);
+  dataManager.register(localAdsbLayer);
   dataManager.register(satellitesLayer);
   dataManager.register(rocketLaunchesLayer);
   rocketLaunchesLayer.attachDataManager(dataManager);
