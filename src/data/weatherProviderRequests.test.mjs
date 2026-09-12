@@ -57,11 +57,18 @@ test('normalizes a real station record into the flat shape the frontend renders'
     altitudeM: 32,
     observedAtMs: Date.parse('2026-09-11T21:00:00+0000'),
     temperatureC: 24,
+    temperatureMinC: 24,
+    temperatureMaxC: 24.6,
+    dewPointC: 19.1,
     humidityPct: 74,
     pressureHpa: 1017.4,
+    pressureSeaLevelHpa: 1021.1,
     windSpeedMs: 1.1,
     windDirectionDeg: 202,
+    windDirectionStdDevDeg: 24,
+    windSpeedStdDevMs: 0.4,
     windGustMs: 3.9,
+    windGustDirectionDeg: 230,
     precipitationMm: 0,
   });
 });

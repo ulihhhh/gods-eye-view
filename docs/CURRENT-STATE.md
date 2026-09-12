@@ -239,14 +239,43 @@ fetching, trailing-24-hour filtering and partial-success caching are unchanged.
 `aemet-stations` (token `h`, `enabled-only`) polls `/api/aemet/stations`
 (`server/providers/weather/aemet.js`) and renders one colored point per live
 Spanish station (~850 after dedup and the 3-hour staleness filter, confirmed
-against the real upstream), clamped to ground, colored by a stepped
-temperature palette (blue ≤0°C through red >30°C; unknown temperature reads
-neutral gray). Clicking a point sets `entity.description`, but this app runs
-with `infoBox: false` (`src/app/viewer.js`), so that description is currently
-inert — no on-click detail card is wired yet. The full reading (temperature,
-humidity, pressure, wind, gust, precipitation, altitude, observed time) is
-available via `layer.getAnalystRecords()` for the analyst query engine, and
-via each entity's `properties` bag, but not yet surfaced by any click UI.
+against the real upstream), colored by a continuous temperature gradient
+(`TEMPERATURE_COLOR_STOPS`, -10°C to 40°C, linearly interpolated; unknown
+temperature reads neutral gray). Per-station points use normal depth testing
+against the globe, so a station on the far side of Earth is correctly hidden
+(verified: flying to Spain's antipode near New Zealand shows zero of the 766
+loaded stations on screen). Points use `heightReference:
+Cesium.HeightReference.RELATIVE_TO_GROUND` with a fixed 2 m offset, not
+`CLAMP_TO_GROUND` (which visibly sinks a point into sloped terrain once real
+elevation data is loaded and the camera is close) and not a one-time
+`scene.sampleHeight()` snapshot baked into a static position (tried second —
+`bikeshare.js` uses that approach successfully, but only because it samples
+for stations near wherever the camera already is; sampling all ~850 stations
+nationwide regardless of camera position meant most samples silently failed
+against not-yet-loaded terrain tiles, and which stations succeeded vs. fell
+back changed between polls depending on where the camera had been, which
+looked exactly like stations sitting at "inexact positions" and drifting as
+the camera moved). `RELATIVE_TO_GROUND` has Cesium re-clamp continuously
+against whatever terrain is actually loaded at render time — the same
+mechanism `CLAMP_TO_GROUND` already uses, just with real clearance — so
+there is no stale snapshot to go wrong.
+
+Clicking a station follows this app's real click-to-inspect pattern (copied
+from `bikeshare.js`, since this app runs Cesium with `infoBox: false` and the
+built-in InfoBox is not used anywhere): a `ScreenSpaceEventHandler` picks the
+station, hides its base point, adds one enlarged highlight point (the only
+per-station point exempted from depth testing — a deliberate one-marker
+exception, not the default), and publishes a floating in-world card via the
+shared `worldOverlay` host (`variant: 'selected'`) showing every reading
+AEMET's feed carries for that station: temperature (with its trailing-hour
+min/max and dew point), humidity, wind (speed/direction, gust speed/
+direction, and turbulence std-dev), both station and sea-level-corrected
+pressure, precipitation, and altitude. Pick ownership is registered/
+unregistered via `pickRegistry.js` on enable/disable. A refresh (every 5 min)
+re-resolves an open selection against the fresh data rather than leaving it
+pointed at a destroyed entity, or clears it if that station drops out of the
+feed. The full reading is also available via `layer.getAnalystRecords()` for
+the analyst query engine.
 
 The proxy performs AEMET's required two-step fetch (an envelope response
 naming a second `datos` URL) and decodes that second response as

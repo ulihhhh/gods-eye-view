@@ -1,4 +1,10 @@
 import * as Cesium from 'cesium';
+import { registerPickOwner, resolvePickId, unregisterPickOwner } from './pickRegistry.js';
+import {
+  clearOverlaySource,
+  setOverlayEntries,
+  setOverlaySourceVisible,
+} from '../overlays/worldOverlay.js';
 
 /**
  * AEMET OpenData live weather station pins — Spain only (~850 stations).
@@ -7,55 +13,224 @@ import * as Cesium from 'cesium';
  * which already dedups AEMET's raw ~12-trailing-hourly-rows-per-station feed
  * down to one current reading per station and hides the two-step
  * envelope/datos fetch. This layer's only job is turning that flat station
- * list into colored points with a click-through InfoBox — no polling
- * cadence tricks, no camera-proximity gating (unlike bikeshare's nationwide
+ * list into colored points with click-to-inspect — no polling cadence
+ * tricks, no camera-proximity gating (unlike bikeshare's nationwide
  * multi-city scale, ~850 fixed points nationwide is cheap to just keep live).
+ *
+ * Click-to-inspect follows bikeshare.js's pattern exactly (this app runs
+ * Cesium with `infoBox: false`, so the built-in InfoBox is not an option):
+ * a `ScreenSpaceEventHandler` picks a station, hides its base point, and
+ * shows a bigger highlighted point plus a floating detail card through the
+ * shared worldOverlay host (`variant: 'selected'`) — the same in-world card
+ * mechanism bikeshare's station selection and earthquakes' magnitude labels
+ * both already use, not a DOM sidebar or the disabled Cesium InfoBox.
  */
+
+export const AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID = 'aemet-stations-selected';
+export const AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
+  cohortLimit: 1,
+  collisionCapacity: 0,
+  moving: false,
+});
+
+const DEFAULT_OVERLAY_HOST = Object.freeze({
+  setEntries: setOverlayEntries,
+  setVisible: setOverlaySourceVisible,
+  clearSource: clearOverlaySource,
+});
 
 const API_URL = '/api/aemet/stations';
 
-const COLOR_UNKNOWN = Cesium.Color.fromCssColorString('#91a4b4').withAlpha(0.75);
+const COLOR_UNKNOWN_RGB = [145, 164, 180];
 const COLOR_OUTLINE = Cesium.Color.BLACK.withAlpha(0.6);
+const POINT_ALPHA = 0.92;
+/**
+ * Vertical offset (m) above ground, via `heightReference: RELATIVE_TO_GROUND`
+ * (not CLAMP_TO_GROUND, and not a one-time `scene.sampleHeight()` snapshot —
+ * see below for why both of those were tried and replaced).
+ *
+ * History, so this isn't re-litigated: `CLAMP_TO_GROUND` (height 0) visibly
+ * sank points into sloped terrain once real elevation data, not just the
+ * ellipsoid, was loaded and the camera was close. The first fix sampled real
+ * terrain height once per station via `scene.sampleHeight()` and baked it
+ * into a static position — bikeshare.js does the same thing successfully,
+ * but bikeshare only samples for stations near wherever the camera ALREADY
+ * is (camera-proximity-gated per-city loading), so the relevant terrain
+ * tiles are essentially always already loaded. This layer samples all ~850
+ * stations across all of Spain regardless of camera position — most samples
+ * land on terrain tiles that aren't loaded yet and silently fail, falling
+ * back to a flat ellipsoid height, and WHICH stations succeed vs. fall back
+ * depends on wherever the camera happened to be during that specific 5-min
+ * poll. Different polls landing on different tiles-loaded state is exactly
+ * what looked like points sitting at "inexact positions" and drifting as the
+ * camera moved. `RELATIVE_TO_GROUND` fixes this at the root: Cesium
+ * maintains the clamp continuously against whatever terrain is ACTUALLY
+ * loaded at render time (the same mechanism CLAMP_TO_GROUND already uses),
+ * so there is no stale one-time sample to go wrong.
+ */
+const POINT_HEIGHT_OFFSET_M = 2.0;
 
 /**
- * Stepped temperature palette, coldest to hottest — matches this codebase's
- * existing stepped-band convention (see earthquakes.js's depth bands,
- * bikeshare.js's availability bands) rather than a smooth gradient.
+ * Smooth temperature gradient, coldest to hottest. Anchor stops chosen for a
+ * readable spread across the temperatures AEMET's Spain network actually
+ * reports (roughly -10°C mountain lows to 40°C+ summer highs), linearly
+ * interpolated between neighbors — a genuinely continuous gradient rather
+ * than the small number of visually-identical stepped bands this started
+ * with. Exported and pure (plain RGB bytes, no Cesium) so it's testable
+ * without a Cesium.Color round-trip.
  */
-function temperatureColor(temperatureC) {
-  if (temperatureC == null || !Number.isFinite(temperatureC)) return COLOR_UNKNOWN;
-  if (temperatureC <= 0) return Cesium.Color.fromCssColorString('#3b6cff');
-  if (temperatureC <= 10) return Cesium.Color.fromCssColorString('#3bb6ff');
-  if (temperatureC <= 20) return Cesium.Color.fromCssColorString('#3bffb0');
-  if (temperatureC <= 25) return Cesium.Color.fromCssColorString('#ffe23b');
-  if (temperatureC <= 30) return Cesium.Color.fromCssColorString('#ff9d3b');
-  return Cesium.Color.fromCssColorString('#ff3b3b');
+export const TEMPERATURE_COLOR_STOPS = Object.freeze([
+  Object.freeze({ c: -10, rgb: [40, 60, 170] }),
+  Object.freeze({ c: 0, rgb: [59, 108, 255] }),
+  Object.freeze({ c: 10, rgb: [59, 182, 255] }),
+  Object.freeze({ c: 18, rgb: [70, 220, 190] }),
+  Object.freeze({ c: 24, rgb: [140, 230, 90] }),
+  Object.freeze({ c: 28, rgb: [255, 210, 60] }),
+  Object.freeze({ c: 33, rgb: [255, 140, 50] }),
+  Object.freeze({ c: 40, rgb: [230, 40, 40] }),
+]);
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+/**
+ * Interpolate a temperature (°C) to an [r,g,b] byte triple along
+ * TEMPERATURE_COLOR_STOPS. Values outside the range clamp to the nearest
+ * end stop rather than extrapolating. Returns `null` for a non-finite input
+ * — the caller substitutes a neutral "unknown" color, never a guessed one.
+ * @param {number} temperatureC
+ * @returns {[number, number, number]|null}
+ */
+export function temperatureColorRgb(temperatureC) {
+  if (!Number.isFinite(temperatureC)) return null;
+  const stops = TEMPERATURE_COLOR_STOPS;
+  if (temperatureC <= stops[0].c) return stops[0].rgb;
+  if (temperatureC >= stops[stops.length - 1].c) return stops[stops.length - 1].rgb;
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i];
+    const b = stops[i + 1];
+    if (temperatureC >= a.c && temperatureC <= b.c) {
+      const t = (temperatureC - a.c) / (b.c - a.c);
+      return [
+        Math.round(lerp(a.rgb[0], b.rgb[0], t)),
+        Math.round(lerp(a.rgb[1], b.rgb[1], t)),
+        Math.round(lerp(a.rgb[2], b.rgb[2], t)),
+      ];
+    }
+  }
+  return stops[stops.length - 1].rgb; // unreachable, kept for defensiveness
+}
+
+/** RGB bytes → a Cesium.Color at this layer's standard marker alpha. */
+function colorFromRgb([r, g, b], alpha = POINT_ALPHA) {
+  return Cesium.Color.fromBytes(r, g, b, Math.round(alpha * 255));
+}
+
+function temperatureColor(temperatureC, alpha = POINT_ALPHA) {
+  return colorFromRgb(temperatureColorRgb(temperatureC) ?? COLOR_UNKNOWN_RGB, alpha);
 }
 
 function fmt(value, unit, digits = 0) {
   return Number.isFinite(value) ? `${value.toFixed(digits)}${unit}` : '—';
 }
 
-/** Small HTML description for Cesium's default click InfoBox. Pure, exported for tests. */
+/** `fmt(deg, '°')` prefixed with " @ ", or '' when the direction is unknown. */
+function atDeg(direction) {
+  return Number.isFinite(direction) ? ` @ ${direction.toFixed(0)}°` : '';
+}
+
+/** Small HTML description, kept for any future re-enable of Cesium's InfoBox. */
 export function buildAemetStationDescription(station) {
   const observed = Number.isFinite(station?.observedAtMs)
     ? new Date(station.observedAtMs).toLocaleString()
     : 'unknown';
+  const hasRange = Number.isFinite(station?.temperatureMinC) && Number.isFinite(station?.temperatureMaxC);
   return (
     `<table class="cesium-infoBox-defaultTable">`
     + `<tbody>`
     + `<tr><th>Station</th><td>${station?.id ?? '—'}</td></tr>`
-    + `<tr><th>Temperature</th><td>${fmt(station?.temperatureC, '°C', 1)}</td></tr>`
+    + `<tr><th>Temperature</th><td>${fmt(station?.temperatureC, '°C', 1)}`
+    + `${hasRange ? ` (${station.temperatureMinC.toFixed(1)}–${station.temperatureMaxC.toFixed(1)}°C)` : ''}</td></tr>`
+    + `<tr><th>Dew point</th><td>${fmt(station?.dewPointC, '°C', 1)}</td></tr>`
     + `<tr><th>Humidity</th><td>${fmt(station?.humidityPct, '%')}</td></tr>`
     + `<tr><th>Pressure</th><td>${fmt(station?.pressureHpa, ' hPa', 1)}</td></tr>`
-    + `<tr><th>Wind</th><td>${fmt(station?.windSpeedMs, ' m/s', 1)}`
-    + `${Number.isFinite(station?.windDirectionDeg) ? ` @ ${station.windDirectionDeg.toFixed(0)}°` : ''}</td></tr>`
-    + `<tr><th>Gust</th><td>${fmt(station?.windGustMs, ' m/s', 1)}</td></tr>`
+    + `<tr><th>Sea-level pressure</th><td>${fmt(station?.pressureSeaLevelHpa, ' hPa', 1)}</td></tr>`
+    + `<tr><th>Wind</th><td>${fmt(station?.windSpeedMs, ' m/s', 1)}${atDeg(station?.windDirectionDeg)}`
+    + `${Number.isFinite(station?.windSpeedStdDevMs) || Number.isFinite(station?.windDirectionStdDevDeg)
+      ? ` (σ ${fmt(station?.windSpeedStdDevMs, ' m/s', 1)}${atDeg(station?.windDirectionStdDevDeg)})` : ''}</td></tr>`
+    + `<tr><th>Gust</th><td>${fmt(station?.windGustMs, ' m/s', 1)}${atDeg(station?.windGustDirectionDeg)}</td></tr>`
     + `<tr><th>Precipitation</th><td>${fmt(station?.precipitationMm, ' mm', 1)}</td></tr>`
     + `<tr><th>Altitude</th><td>${fmt(station?.altitudeM, ' m')}</td></tr>`
     + `<tr><th>Observed</th><td>${observed}</td></tr>`
     + `</tbody></table>`
   );
+}
+
+/**
+ * Title + detail lines for the in-world selected-station card (worldOverlay
+ * 'selected' variant — see bikeshare.js's buildSelectionLabel for the same
+ * shape). Every field the raw AEMET record carries is represented somewhere
+ * here — nothing held back for "the card would get cluttered," per an
+ * explicit call: show it all, let missing fields fall out of their segment
+ * quietly rather than printing a placeholder for every reading a station
+ * simply doesn't report. Pure, exported for tests.
+ * @param {object} station
+ * @returns {{title: string, details: string[]}}
+ */
+export function buildAemetStationSelectionCopy(station) {
+  const title = station?.name || station?.id || 'Station';
+  const hasRange = Number.isFinite(station?.temperatureMinC) && Number.isFinite(station?.temperatureMaxC);
+  const details = [
+    `${fmt(station?.temperatureC, '°C', 1)}`
+      + `${hasRange ? ` (${station.temperatureMinC.toFixed(1)}–${station.temperatureMaxC.toFixed(1)})` : ''}`
+      + `${Number.isFinite(station?.dewPointC) ? ` · dew ${station.dewPointC.toFixed(1)}°C` : ''}`
+      + ` · ${fmt(station?.humidityPct, '% RH')}`,
+    `Wind ${fmt(station?.windSpeedMs, ' m/s', 1)}${atDeg(station?.windDirectionDeg)}`
+      + `${Number.isFinite(station?.windSpeedStdDevMs) || Number.isFinite(station?.windDirectionStdDevDeg)
+        ? ` (σ${fmt(station?.windSpeedStdDevMs, ' m/s', 1)}${atDeg(station?.windDirectionStdDevDeg)})` : ''}`
+      + `${Number.isFinite(station?.windGustMs)
+        ? ` · gust ${station.windGustMs.toFixed(1)} m/s${atDeg(station?.windGustDirectionDeg)}` : ''}`,
+    `${fmt(station?.pressureHpa, ' hPa', 1)}`
+      + `${Number.isFinite(station?.pressureSeaLevelHpa) ? ` · MSL ${station.pressureSeaLevelHpa.toFixed(1)} hPa` : ''}`,
+    `${fmt(station?.precipitationMm, ' mm', 1)} precip`
+      + `${Number.isFinite(station?.altitudeM) ? ` · ${station.altitudeM.toFixed(0)} m altitude` : ''}`,
+  ];
+  return { title, details };
+}
+
+/**
+ * Build the protected selected-station overlay entry. Mirrors
+ * createBikeshareSelectedOverlayEntry's field set exactly.
+ * @param {string} id
+ * @param {Cesium.Cartesian3} position
+ * @param {object} station
+ * @returns {object|null}
+ */
+export function createAemetStationSelectedOverlayEntry(id, position, station) {
+  if (!id || !position) return null;
+  const { title, details } = buildAemetStationSelectionCopy(station);
+  return {
+    id: String(id),
+    position,
+    variant: 'selected',
+    selected: true,
+    protected: true,
+    paintLane: 'selected',
+    collisionGroup: 'ambient-card',
+    priority: Number.MAX_SAFE_INTEGER,
+    title,
+    details,
+    accent: '#ffe23b',
+    interactive: false,
+    anchorRadiusPx: 9,
+    minAnchorGapPx: 11,
+    verticalOnly: true,
+    placement: 'above',
+    edgeFade: 'keyhole',
+    horizonCull: true,
+    terrainOcclusion: false,
+  };
 }
 
 /** Validate the proxy's payload shape before replacing the last good snapshot. */
@@ -72,11 +247,122 @@ export function normalizeAemetStationsPayload(payload) {
   return rows;
 }
 
-export function createAemetStationsLayer() {
+export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = {}) {
+  let _viewer = null;
   let _dataSource = null;
   let _count = 0;
   let _lastUpdate = null;
   let _lastError = null;
+  let _enabled = false;
+  /** @type {Map<string, object>} station id -> its latest normalized record */
+  let _stationById = new Map();
+  /** @type {string|null} currently selected station id, or null */
+  let _selectedId = null;
+  /** @type {Cesium.Entity|null} the enlarged highlight point for the selection */
+  let _selectedEntity = null;
+  /** @type {Cesium.ScreenSpaceEventHandler|null} */
+  let _clickHandler = null;
+
+  /**
+   * A station's world position. The height component is `POINT_HEIGHT_OFFSET_M`
+   * — meaningless on its own, but `heightReference: RELATIVE_TO_GROUND` on
+   * the point graphics (see the entity-build loop in update() and the
+   * highlight in _selectStation) tells Cesium to treat it as an offset above
+   * whatever terrain is actually loaded, recomputed continuously rather than
+   * sampled once. See POINT_HEIGHT_OFFSET_M's comment for why a one-time
+   * `scene.sampleHeight()` snapshot (tried first) was wrong for this layer.
+   */
+  function _stationPosition(station) {
+    return Cesium.Cartesian3.fromDegrees(station.lon, station.lat, POINT_HEIGHT_OFFSET_M);
+  }
+
+  function _clearSelection() {
+    if (_selectedId) {
+      const original = _dataSource?.entities.getById(`aemet-station:${_selectedId}`);
+      if (original?.point) original.point.show = true;
+    }
+    if (_selectedEntity && _viewer) _viewer.entities.remove(_selectedEntity);
+    _selectedId = null;
+    _selectedEntity = null;
+    overlayHost.clearSource(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID);
+  }
+
+  function _selectStation(id) {
+    const station = _stationById.get(id);
+    const original = _dataSource?.entities.getById(`aemet-station:${id}`);
+    if (!station || !original?.position || !_viewer) return;
+    _clearSelection();
+    _selectedId = id;
+    original.point.show = false;
+    const position = original.position.getValue(Cesium.JulianDate.now());
+    _selectedEntity = _viewer.entities.add({
+      position,
+      point: {
+        pixelSize: 14,
+        color: temperatureColor(station.temperatureC, 1),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        // Same RELATIVE_TO_GROUND treatment as the base point (see
+        // POINT_HEIGHT_OFFSET_M) — the raw `position` above only carries the
+        // small offset value, not a real height, until this reference tells
+        // Cesium to clamp it against whatever terrain is loaded right now.
+        heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+        // Only the ONE selected marker skips depth testing, so it stays
+        // legible when highlighted — every other station point below keeps
+        // normal depth testing against the globe (see the entity-build loop
+        // in update()); that is what makes the far side of Earth correctly
+        // hide its stations instead of showing through, as it did before.
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    const entry = createAemetStationSelectedOverlayEntry(id, position, station);
+    if (entry) {
+      overlayHost.setEntries(
+        AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID,
+        [entry],
+        AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_OPTIONS,
+      );
+    }
+  }
+
+  function _onKeyDown(e) {
+    if (e.key === 'Escape' && _selectedId) _clearSelection();
+  }
+
+  // Real Cesium.ScreenSpaceEventHandler/document listeners need a real
+  // browser DOM (throws "document is not defined" under plain Node) — same
+  // constraint bikeshare.js's own click handler has, which is why its tests
+  // exercise _selectStation/_clearSelection directly rather than through
+  // enable(). Guarded rather than assumed, so enable()/disable() stay safe
+  // to call from a headless/fake-viewer test without a DOM, and this stays
+  // real defensive behavior in production too (no canvas yet ⇒ no handler).
+  const hasDom = () => typeof document !== 'undefined';
+
+  function _installClickHandler(viewer) {
+    if (_clickHandler || !hasDom() || !viewer?.scene?.canvas) return;
+    _clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    _clickHandler.setInputAction((click) => {
+      const picked = viewer.scene.pick(click.position);
+      if (picked) {
+        if (picked.id === _selectedEntity) return; // clicking the highlight itself: no-op
+        const pickedId = resolvePickId(picked);
+        if (pickedId?.startsWith('aemet-station:')) {
+          _selectStation(pickedId.slice('aemet-station:'.length));
+          return;
+        }
+      }
+      if (_selectedId) _clearSelection();
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    document.addEventListener('keydown', _onKeyDown);
+  }
+
+  function _removeClickHandler() {
+    if (_clickHandler) {
+      _clickHandler.destroy();
+      _clickHandler = null;
+    }
+    if (hasDom()) document.removeEventListener('keydown', _onKeyDown);
+  }
 
   const layer = {
     id: 'aemet-stations',
@@ -86,21 +372,34 @@ export function createAemetStationsLayer() {
     updateInterval: 300000,
 
     init(viewer) {
+      _viewer = viewer;
       _dataSource = new Cesium.CustomDataSource('aemet-stations');
       _dataSource.show = false;
       viewer.dataSources.add(_dataSource);
       _count = 0;
       _lastUpdate = null;
       _lastError = null;
+      _enabled = false;
+      _stationById = new Map();
+      overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, false);
       console.log('[Data:AemetStations] Initialized');
     },
 
     enable(viewer) {
+      _enabled = true;
       if (_dataSource) _dataSource.show = true;
+      overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, true);
+      _installClickHandler(viewer);
+      registerPickOwner('aemet-stations', (pickedId) => String(pickedId).startsWith('aemet-station:'));
     },
 
     disable(viewer) {
+      _enabled = false;
+      _clearSelection();
       if (_dataSource) _dataSource.show = false;
+      overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, false);
+      _removeClickHandler();
+      unregisterPickOwner('aemet-stations');
     },
 
     async update(viewer) {
@@ -124,17 +423,28 @@ export function createAemetStationsLayer() {
         }
 
         const nextEntities = [];
+        const nextStationById = new Map();
         for (const station of stations) {
+          nextStationById.set(station.id, station);
           nextEntities.push(new Cesium.Entity({
             id: `aemet-station:${station.id}`,
-            position: Cesium.Cartesian3.fromDegrees(station.lon, station.lat),
+            position: _stationPosition(station),
             point: {
               pixelSize: 7,
               color: temperatureColor(station.temperatureC),
               outlineColor: COLOR_OUTLINE,
               outlineWidth: 1,
-              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              // RELATIVE_TO_GROUND, not CLAMP_TO_GROUND or a one-time
+              // sampleHeight() snapshot — see POINT_HEIGHT_OFFSET_M's
+              // comment for the full history of why. This keeps the point
+              // continuously clamped against whatever terrain is actually
+              // loaded, with a small real clearance so it doesn't sink into
+              // a slope up close.
+              heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+              // Deliberately NOT disableDepthTestDistance here: normal depth
+              // testing against the globe is what hides a station on the far
+              // side of Earth. Only the one selected highlight (see
+              // _selectStation) is exempted from that.
             },
             name: station.name || station.id,
             description: buildAemetStationDescription(station),
@@ -144,6 +454,15 @@ export function createAemetStationsLayer() {
 
         _dataSource.entities.removeAll();
         for (const entity of nextEntities) _dataSource.entities.add(entity);
+        _stationById = nextStationById;
+
+        // A refresh must not silently drop an open selection — re-resolve it
+        // against the fresh data (which also means the card's numbers update
+        // live) rather than leaving it pointed at now-destroyed entities.
+        if (_selectedId) {
+          if (_stationById.has(_selectedId)) _selectStation(_selectedId);
+          else _clearSelection();
+        }
 
         _count = stations.length;
         _lastUpdate = Date.now();
@@ -158,13 +477,19 @@ export function createAemetStationsLayer() {
     },
 
     destroy(viewer) {
+      _clearSelection();
+      _removeClickHandler();
+      unregisterPickOwner('aemet-stations');
+      overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, false);
       if (_dataSource) {
         viewer.dataSources.remove(_dataSource, true);
         _dataSource = null;
       }
+      _stationById = new Map();
       _count = 0;
       _lastUpdate = null;
       _lastError = null;
+      _viewer = null;
     },
 
     /**
@@ -190,10 +515,18 @@ export function createAemetStationsLayer() {
           lon: get('lon'),
           altitudeM: get('altitudeM'),
           temperatureC: get('temperatureC'),
+          temperatureMinC: get('temperatureMinC'),
+          temperatureMaxC: get('temperatureMaxC'),
+          dewPointC: get('dewPointC'),
           humidityPct: get('humidityPct'),
           pressureHpa: get('pressureHpa'),
+          pressureSeaLevelHpa: get('pressureSeaLevelHpa'),
           windSpeedMs: get('windSpeedMs'),
           windDirectionDeg: get('windDirectionDeg'),
+          windSpeedStdDevMs: get('windSpeedStdDevMs'),
+          windDirectionStdDevDeg: get('windDirectionStdDevDeg'),
+          windGustMs: get('windGustMs'),
+          windGustDirectionDeg: get('windGustDirectionDeg'),
           precipitationMm: get('precipitationMm'),
           observedAtMs: get('observedAtMs'),
         });
@@ -207,6 +540,21 @@ export function createAemetStationsLayer() {
         lastUpdate: _lastUpdate,
         error: _lastError,
       };
+    },
+
+    // Test-only hooks: exercise the real selection state machine directly,
+    // bypassing Cesium.ScreenSpaceEventHandler/document (unavailable under
+    // plain Node — see hasDom() above), the same way bikeshare.js's own
+    // tests bypass its click handler. Not part of the layer contract other
+    // callers should use.
+    _selectStationForTest(id) {
+      _selectStation(id);
+    },
+    _clearSelectionForTest() {
+      _clearSelection();
+    },
+    _selectedIdForTest() {
+      return _selectedId;
     },
   };
   return layer;

@@ -45,8 +45,11 @@ function finiteOrNull(value) {
  * @param {object} raw One element of the `datos` JSON array.
  * @returns {{id: string, name: string|null, lat: number, lon: number,
  *   altitudeM: number|null, observedAtMs: number|null, temperatureC: number|null,
- *   humidityPct: number|null, pressureHpa: number|null, windSpeedMs: number|null,
- *   windDirectionDeg: number|null, windGustMs: number|null, precipitationMm: number|null}|null}
+ *   temperatureMinC: number|null, temperatureMaxC: number|null, dewPointC: number|null,
+ *   humidityPct: number|null, pressureHpa: number|null, pressureSeaLevelHpa: number|null,
+ *   windSpeedMs: number|null, windDirectionDeg: number|null, windDirectionStdDevDeg: number|null,
+ *   windSpeedStdDevMs: number|null, windGustMs: number|null, windGustDirectionDeg: number|null,
+ *   precipitationMm: number|null}|null}
  */
 export function normalizeAemetStationRecord(raw) {
   const id = String(raw?.idema ?? '').trim();
@@ -63,11 +66,25 @@ export function normalizeAemetStationRecord(raw) {
     altitudeM: finiteOrNull(raw?.alt),
     observedAtMs: Number.isFinite(observedAtMs) ? observedAtMs : null,
     temperatureC: finiteOrNull(raw?.ta),
+    // Trailing-hour min/max, not a daily extreme — AEMET's own field names
+    // (tamin/tamax) don't say over what window; treat as short-term only.
+    temperatureMinC: finiteOrNull(raw?.tamin),
+    temperatureMaxC: finiteOrNull(raw?.tamax),
+    dewPointC: finiteOrNull(raw?.tpr),
     humidityPct: finiteOrNull(raw?.hr),
     pressureHpa: finiteOrNull(raw?.pres),
+    // Sea-level-corrected — comparable across stations at different
+    // altitudes, unlike raw station pressure above.
+    pressureSeaLevelHpa: finiteOrNull(raw?.pres_nmar),
     windSpeedMs: finiteOrNull(raw?.vv),
     windDirectionDeg: finiteOrNull(raw?.dv),
+    // Turbulence/gustiness indicators, not a reading of anything directly —
+    // kept for completeness (analyst records, future use) but deliberately
+    // left out of the compact click-to-inspect card.
+    windDirectionStdDevDeg: finiteOrNull(raw?.stddv),
+    windSpeedStdDevMs: finiteOrNull(raw?.stdvv),
     windGustMs: finiteOrNull(raw?.vmax),
+    windGustDirectionDeg: finiteOrNull(raw?.dmax),
     precipitationMm: finiteOrNull(raw?.prec),
   };
 }

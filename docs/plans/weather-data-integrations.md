@@ -195,19 +195,78 @@ and CAP-format province warning polygons (severity-coded).
   live in the Browser pane against the real API: 757 fresh stations (after
   the 3-hour staleness filter) rendered as temperature-colored points across
   Spain, toggle on/off both verified to work cleanly with no console errors.
-- **Known gap, not blocking**: clicking a station sets `entity.description`,
-  but this app runs Cesium with `infoBox: false`
-  (`src/app/viewer.js:18`) — discovered only once live-testing click
-  behavior, not from reading code beforehand. The description is currently
-  inert; the full reading is available via `getAnalystRecords()` and each
-  entity's `properties` bag, but no click-to-inspect UI is wired to it yet.
-  This app's real per-layer click handling goes through
-  `src/data/pickRegistry.js` plus a bespoke camera-tracking flow per layer
-  (flights/military/bikeshare/CCTV) rather than a generic info-card widget —
-  wiring real click-to-inspect for a static ground station (which shouldn't
-  need camera-tracking the way a moving aircraft does) needs its own look at
-  how this app actually surfaces picked-entity detail, deferred rather than
-  guessed at under this pass's time budget.
+- **Click-to-inspect, color gradient, and globe occlusion — fixed 2026-09-12.**
+  Three follow-up issues found via live use, all resolved:
+  - **Click-to-inspect**: `entity.description` was inert (this app runs
+    Cesium with `infoBox: false`, `src/app/viewer.js:18`). Replaced with this
+    app's actual click-to-inspect pattern, copied from `bikeshare.js`: a
+    `Cesium.ScreenSpaceEventHandler` picks a station (via
+    `pickRegistry.resolvePickId`), hides its base point, adds one enlarged
+    highlight point, and publishes a floating in-world card through the
+    shared `worldOverlay` host (`variant: 'selected'`) — the same mechanism
+    bikeshare's station selection and earthquakes' magnitude labels already
+    use. Registers/unregisters pick ownership on enable/disable so other
+    layers' click handlers recognize an AEMET pick isn't empty space. A
+    refresh (every 5 min) re-resolves an open selection against the fresh
+    station data rather than dropping it or pointing at a destroyed entity.
+    Verified live: clicking a station shows name, temp, humidity, wind,
+    pressure, precipitation, and altitude in a card anchored above it.
+  - **Color gradient**: replaced the 6-band stepped palette with a
+    continuous linear interpolation across 8 temperature stops
+    (`TEMPERATURE_COLOR_STOPS`, -10°C to 40°C) — two nearby temperatures
+    (e.g. 24.0°C and 24.4°C) that used to render identically now render
+    visibly different colors. Verified live: the scatter across Spain shows
+    a smooth cyan→green→yellow→orange gradient rather than a few flat bands.
+  - **Globe occlusion**: the real bug was `disableDepthTestDistance:
+    Number.POSITIVE_INFINITY` applied to EVERY station point, which
+    explicitly disables depth testing — that's what made stations render
+    through the far side of the globe. Removed from the per-station points
+    (normal depth testing against the globe now correctly occludes them);
+    kept ONLY on the one enlarged selection-highlight marker, matching
+    `bikeshare.js`'s exact convention (a selected marker staying legible is a
+    deliberate one-marker exception, not the default for hundreds of
+    points). Verified live: flying the camera to New Zealand (Spain's
+    antipode) shows zero stations on screen despite the layer still holding
+    766 of them.
+  - 7 new tests covering the gradient, selection copy/overlay-entry shape,
+    the full select/clear/refresh-persistence flow, pick-ownership
+    registration, and a source-text regression pin asserting exactly one
+    `disableDepthTestDistance:` usage in the file (so a future edit can't
+    silently reintroduce it on the per-station points).
+- **Terrain height — two more rounds, fixed 2026-09-12.** The globe-occlusion
+  fix above removed `disableDepthTestDistance` but left `heightReference:
+  CLAMP_TO_GROUND` in place, which turned out to visibly sink points into
+  sloped terrain once real elevation data (not the ellipsoid) loaded and the
+  camera got close. First fix: copy `bikeshare.js`'s approach exactly — a
+  one-time `viewer.scene.sampleHeight()` per station, baked into a static
+  position. This introduced a NEW bug reported from live use: points showed
+  at "inexact positions" and drifted as the camera moved. Root cause:
+  `sampleHeight` only succeeds against terrain tiles already loaded near
+  wherever the camera currently is — fine for bikeshare, which only samples
+  for stations near an already-close camera (per-city proximity gating), but
+  wrong for ~850 stations spread across all of Spain regardless of camera
+  position. Most samples silently failed and fell back to a flat
+  ellipsoid height; WHICH stations succeeded vs. fell back changed between
+  the 5-minute polls depending on where the camera had been, which is
+  exactly what looked like drifting. **Final fix**: `heightReference:
+  Cesium.HeightReference.RELATIVE_TO_GROUND` with a fixed 2 m offset,
+  applied to both the base points and the selection highlight. This has
+  Cesium re-clamp continuously against whatever terrain is actually loaded
+  at render time — the same mechanism `CLAMP_TO_GROUND` already uses, just
+  with real clearance — so there is no one-time snapshot left to go stale.
+  The `_stationPosition`/`sampleHeight` machinery was removed entirely; the
+  position is now just `Cartesian3.fromDegrees(lon, lat, 2.0)`, with
+  `heightReference` doing all the real work. One test rewritten to pin the
+  configuration (`heightReference` on both markers) rather than a fake
+  `sampleHeight` snapshot, since there's no snapshot left to fake.
+- **AEMET field coverage — completed 2026-09-12.** Reviewed every field the
+  raw AEMET record carries against what was shown; added the four gaps: dew
+  point (`tpr`), gust direction (`dmax`), sea-level-corrected pressure
+  (`pres_nmar`), and trailing-hour min/max temperature plus wind std-dev
+  (`tamin`/`tamax`/`stdvv`/`stddv`) — extended into
+  `normalizeAemetStationRecord`, the click-to-inspect card, the HTML
+  description, and `getAnalystRecords()`. Nothing from the raw feed is
+  withheld now.
 - **Also deferred, matching every other layer's own bring-up**: voice-tool
   wiring (`GEV_REALTIME_TOOLS` / `src/voice/gevActions.js`).
 - Docs updated in this same pass per `CONTRIBUTING.md`:

@@ -14,12 +14,18 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 ## [Unreleased]
 
 - Add a live AEMET Weather Stations layer (~850 Spanish stations, colored by
-  current temperature, click for wind/humidity/pressure/altitude) behind a new
-  `/api/aemet/stations` proxy. Handles AEMET's two-step envelope/datos fetch
-  and its ISO-8859-15-encoded response server-side, dedups the feed's trailing
-  hourly rows to one current reading per station, and serves stale data on
-  upstream failure. Requires a free `AEMET_API_KEY`, now offered in the POWER
-  UP panel alongside the other provider keys.
+  a continuous temperature gradient) behind a new `/api/aemet/stations`
+  proxy. Handles AEMET's two-step envelope/datos fetch and its
+  ISO-8859-15-encoded response server-side, dedups the feed's trailing hourly
+  rows to one current reading per station, and serves stale data on upstream
+  failure. Requires a free `AEMET_API_KEY`, now offered in the POWER UP panel
+  alongside the other provider keys. Points use a live ground-relative height
+  clamp (`RELATIVE_TO_GROUND`, not `CLAMP_TO_GROUND` or a one-time terrain
+  snapshot), so they neither sink into sloped terrain up close nor drift to
+  inexact positions as the camera moves. Clicking a station shows a floating
+  card with temperature (plus its trailing-hour min/max and dew point),
+  humidity, wind (speed/direction, gust speed/direction, and turbulence
+  std-dev), both station and sea-level pressure, precipitation, and altitude.
 
 - Add an expiry countdown/expired badge to the POWER UP panel for keys with a
   known validity window (currently AEMET's 3-month issue cycle) — shown only
