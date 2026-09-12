@@ -234,6 +234,37 @@ throws, that source reports failure without a contradictory success entry.
 The existing per-record append continues to support large feeds; sequential
 fetching, trailing-24-hour filtering and partial-success caching are unchanged.
 
+## AEMET Weather Stations (2026-09-12)
+
+`aemet-stations` (token `h`, `enabled-only`) polls `/api/aemet/stations`
+(`server/providers/weather/aemet.js`) and renders one colored point per live
+Spanish station (~850 after dedup and the 3-hour staleness filter, confirmed
+against the real upstream), clamped to ground, colored by a stepped
+temperature palette (blue ≤0°C through red >30°C; unknown temperature reads
+neutral gray). Clicking a point sets `entity.description`, but this app runs
+with `infoBox: false` (`src/app/viewer.js`), so that description is currently
+inert — no on-click detail card is wired yet. The full reading (temperature,
+humidity, pressure, wind, gust, precipitation, altitude, observed time) is
+available via `layer.getAnalystRecords()` for the analyst query engine, and
+via each entity's `properties` bag, but not yet surfaced by any click UI.
+
+The proxy performs AEMET's required two-step fetch (an envelope response
+naming a second `datos` URL) and decodes that second response as
+`ISO-8859-15` rather than UTF-8 — confirmed against the live API, whose
+`Content-Type` header actually says `text/plain;charset=ISO-8859-15`; UTF-8
+decoding it mangles accented station names (e.g. "VANDELLÓS" renders as
+"VANDELL�S"). The raw feed carries up to ~12 trailing hourly rows per
+station, not one row per station; `src/data/weatherProviderRequests.js`
+dedups to the most recent `fint` per `idema` before caching. Cache TTL 20
+min, memory + disk (`.gev-cache/aemet-stations.json`), serve-stale-on-failure,
+matching `firmsProxy`. Keyless: `/api/aemet/stations` → 503 `{error:'no_key'}`;
+the layer reports `AEMET_API_KEY not configured` and stays empty rather than
+fabricating data.
+
+Voice-tool wiring (`GEV_REALTIME_TOOLS` / `src/voice/gevActions.js`) is not
+yet done for this layer, matching every other still-pending item tracked in
+`docs/plans/weather-data-integrations.md`.
+
 ## Installations and map-source guidance
 
 - On an uncached Overpass failure, mapped installations keep their existing

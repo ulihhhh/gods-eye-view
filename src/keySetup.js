@@ -94,6 +94,26 @@ function buildRow(documentRef, key) {
     badge.title = 'Supplied by your environment, Keychain, or launcher — change it where it was set';
     head.append(badge);
   }
+  if (key.expiry) {
+    // A key on a known validity window (e.g. AEMET's 3 months) gives no
+    // provider-side notice when it lapses — it just starts failing. Only
+    // shown once this panel has actually recorded an issue date for it.
+    const badge = documentRef.createElement('span');
+    badge.className = key.expiry.expired
+      ? 'key-setup-expiry expired'
+      : key.expiry.warning
+        ? 'key-setup-expiry warning'
+        : 'key-setup-expiry';
+    badge.textContent = key.expiry.expired
+      ? 'expired'
+      : key.expiry.daysRemaining === 1
+        ? 'expires tomorrow'
+        : `expires in ${key.expiry.daysRemaining}d`;
+    badge.title = key.expiry.expired
+      ? 'This key has passed its provider-side validity window — get a new one and paste it below'
+      : `Valid until ${new Date(key.expiry.expiresAtMs).toLocaleDateString()}`;
+    head.append(badge);
+  }
   const get = documentRef.createElement('a');
   get.className = 'key-setup-get';
   get.href = key.getUrl;

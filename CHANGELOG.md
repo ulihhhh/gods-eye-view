@@ -13,6 +13,18 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 
 ## [Unreleased]
 
+- Add a live AEMET Weather Stations layer (~850 Spanish stations, colored by
+  current temperature, click for wind/humidity/pressure/altitude) behind a new
+  `/api/aemet/stations` proxy. Handles AEMET's two-step envelope/datos fetch
+  and its ISO-8859-15-encoded response server-side, dedups the feed's trailing
+  hourly rows to one current reading per station, and serves stale data on
+  upstream failure. Requires a free `AEMET_API_KEY`, now offered in the POWER
+  UP panel alongside the other provider keys.
+
+- Add an expiry countdown/expired badge to the POWER UP panel for keys with a
+  known validity window (currently AEMET's 3-month issue cycle) — shown only
+  once a key has actually been saved through the panel, never guessed.
+
 - Separate terrain, traffic, FIRMS and GBFS middleware into focused provider
   modules, preserving local configuration, routes and cache/error behavior.
 

@@ -60,17 +60,159 @@ only if GIBS's 3–6 h latency over Europe proves insufficient later.
   map" in this app** — a new capability, not a variation on an existing one.
   See [Architecture — NASA GIBS](#architecture--nasa-gibs) below.
 
+## Layer summary — what's actually shipping
+
+Four toggleable things, each independent, each gets the standard toggle-panel
+button for free (`dataManager.register(...)` + a `LAYER_STATE_REGISTRY`
+entry — no manual panel UI, per `_renderToggles()` in `src/data/manager.js`,
+confirmed still true post-refactor: `src/standalone/data.js` is the actual
+registration site now, not `main.js`).
+
+| Layer | Shows | Coverage | Disposition | Toggle |
+|---|---|---|---|---|
+| `aemet-stations` | Live station pins, colored by current temperature; click for wind/humidity/pressure | Spain only (~250 AEMET stations) | `enabled-only` | Single click, on/off |
+| `aemet-warnings` | Province/zone polygons tinted by avisos severity (green/yellow/orange/red) | Spain only | `enabled-only` | Single click, on/off |
+| `global-weather` | Same marker style as `aemet-stations`, backed by Open-Meteo instead of a real station network | Everywhere *except* Spain (resolves the Option-1/2 question below) | `enabled-only` | Single click, on/off |
+| `satellite-weather` | Translucent NASA GIBS true-color cloud-cover tiles over the current basemap | Global | `enabled+options` | Single click on/off; product choice (v1: true-color only) via the same chip mechanism CCTV/flights/satellites already use |
+
+**Resolving the two open design questions from the first pass**, so this is
+buildable rather than still-undecided:
+
+- **Open-Meteo point source → Option 1, world-cities grid, not click-to-query.**
+  A toggleable layer fits this app's existing mental model (every other
+  source is a panel button, not a special interaction), and reusing
+  `aemet-stations`' rendering code is cheap. Points come from Natural Earth's
+  "populated places" dataset — already a credited, public-domain source in
+  this app (`NATURAL_EARTH_CREDIT`, used today for region boundaries), so
+  adding its points layer is a licensing non-event, not a new source to
+  vet. Filter to capitals + places above a population threshold (~200–300
+  points worldwide keeps Open-Meteo's free-tier call volume trivial even
+  polled every 10–15 min) and **exclude anything inside Spain's bounding
+  box**, so `aemet-stations` and `global-weather` never show two markers for
+  the same city — they tile together into one seamless worldwide set instead
+  of overlapping.
+- **GIBS v1 product → true-color only.** IR and snow-cover stay real, just
+  deferred: the `enabled+options` disposition and `getRowControls` chip
+  mechanism are already reserved, so adding a product switcher later is a
+  small follow-up, not a registry change.
+
+## How each one turns on/off
+
+Every layer here uses the exact mechanisms every existing layer already
+uses — nothing new to build for basic on/off:
+- **Toggle panel**: one click, per `_renderToggles()`/`setEnabled()` in
+  `src/data/manager.js` — automatic once registered, live entity count shown
+  next to the button.
+- **Share links / persistence**: each gets one `[a-z0-9]` token in
+  `LAYER_STATE_REGISTRY`; enabled-state round-trips through
+  `layerState.js`'s existing encode/decode exactly like every other layer.
+- **Voice**: per `CONTRIBUTING.md`'s pattern for new layers (and the still-
+  open item in `local-usb-sdr.md`'s own plan), each needs a
+  `GEV_REALTIME_TOOLS` entry + `src/voice/gevActions.js` handler — "turn on
+  Spanish weather stations," "show cloud cover," etc. Not needed for A0 to
+  be usable, but expected before the layer is considered done, matching how
+  every existing layer is voice-controllable.
+- **`satellite-weather` only**: also gets a per-layer options chip (product
+  choice) via `getRowControls`, the same row-control mechanism `cctv.js`/
+  `flights.js`/`satellites.js` already implement — no new panel plumbing.
+
+## Which ones make sense together
+
+- **`aemet-stations` + `aemet-warnings`**: the intended default pairing —
+  warnings explain *why* a cluster of stations reads extreme. Both Spain-
+  only, both cheap, no reason to ship one without eventually shipping the
+  other.
+- **`aemet-stations` + `global-weather`**: designed to combine into one
+  continuous worldwide temperature layer — dense/real inside Spain, coarse/
+  interpolated everywhere else, non-overlapping by the Spain bounding-box
+  exclusion above. This is the pairing worth demoing first.
+- **`satellite-weather` + anything**: it's an imagery overlay, not an entity
+  layer, so it never competes for toggle state or visual space with the
+  other three (or with FIRMS, flights, military, etc.) — Cesium renders
+  entities above imagery layers, so warning polygons and station pins stay
+  legible on top of it. The natural flagship demo is Esri/Bing basemap +
+  `satellite-weather` true-color clouds + `aemet-stations` pins, i.e. "real
+  current weather, in 3D, over Spain."
+- **Nothing here conflicts with FIRMS** (`local-firms`) — confirmed out of
+  scope for GIBS specifically to avoid duplicating it (see above), and nothing
+  about these four layers touches fire data.
+
 ## AEMET OpenData (new)
 
 Spain-specific, nothing else here covers it: live station observations
 (temp/wind/humidity/pressure/precip with real lat/lon), municipal forecasts,
 and CAP-format province warning polygons (severity-coded).
 
-### Phase A0 — station layer
+### Phase A0 — station layer — **shipped 2026-09-12**
 
 - `AEMET_API_KEY` (free, requested by email at
   `https://opendata.aemet.es/centrodedescargas/altaUsuario`), server-side
   only, same posture as `FIRMS_MAP_KEY`/`TOMTOM_API_KEY` in `.env.example`.
+  Registered in the "POWER UP" panel's key registry (`src/keySetupCore.mjs`,
+  `id: 'aemet'`, `tier: 'free'`) and documented in `.env.example`.
+  Additionally gained a `validityDays: 90` field and an expiry
+  countdown/expired badge in the panel (`keySetupKeyExpiry`,
+  `KEY_SETUP_EXPIRY_WARNING_DAYS`) — AEMET keys lapse on a fixed cycle with no
+  provider-side warning, unlike every other key here, and a save now records
+  an issue date (`.gev-cache/key-setup-meta.json`, names+timestamps only, no
+  secrets) so the panel can show it. One real bug found and fixed along the
+  way: a dev server process already running when the `aemet` registry entry
+  was added had memoized its "which keys are external" snapshot BEFORE that
+  entry existed, so a pasted AEMET key was misclassified as externally-managed
+  (read-only, no replace/remove) until the process restarted — inherent to
+  `globalThis.__GEV_PROVIDER_ENV_AT_BOOT`'s per-process memoization, not a
+  logic bug, but worth knowing: **adding a new key to the registry needs a
+  process restart, not just a page reload, before it's replaceable.**
+- **Real API verified live** (with the user's actual key) rather than
+  guessed from docs, which corrected several assumptions in this plan's first
+  draft:
+  - **~850 unique stations, not ~250** — `observacion/convencional/todas`
+    returns ~9.8k rows (up to ~12 trailing hourly readings per station), not
+    one row per station. Deduplicated to the most recent `fint` per `idema`.
+  - **The `datos` response is `ISO-8859-15`, not UTF-8** (confirmed via the
+    real `Content-Type` header) — decoding it as UTF-8 silently mangles
+    accented station names ("VANDELLÓS" → "VANDELL�S"). The proxy fetches it
+    as a Buffer and decodes with Node's built-in `latin1`.
+  - Confirmed field names directly: `idema, lon, lat, alt, ubi, fint, ta, hr,
+    pres, vv, dv, vmax, prec` (plus a few unused: `dmax, stdvv, stddv, tamin,
+    tamax, tpr, pres_nmar`).
+  - Confirmed the failure shape: an invalid key returns `{estado: 401,
+    descripcion: "JWT strings must contain exactly 2 period characters..."}`
+    with no `datos` field — AEMET keys are JWTs.
+- Shipped: `src/data/weatherProviderRequests.js` (pure request/normalize,
+  10 tests, one real bug caught by the tests before shipping —
+  `Number(null) === 0` was silently turning a missing sensor reading into a
+  fake zero), `server/providers/weather/aemet.js` + `server/providers/weather.js`
+  index (mirrors `firmsProxy` exactly: memory+disk cache, single-flight,
+  serve-stale, `.gev-cache/aemet-stations.json`, TTL 20 min), registered in
+  `server/providers/local.js`'s `localProviderPlugins()` and covered by a
+  behavioral test in `src/tooling/environmentProviders.test.mjs` (asserts the
+  encoding fix, the dedup, caching, and stale-on-failure — would have failed
+  had the encoding been done as UTF-8).
+- `src/data/aemetStations.js`, the frontend layer (7 tests), registered in
+  `src/data/layerState.js` as `aemet-stations` (token `h`,
+  `REGISTERED_LAYER_IDS` 16→17) and in `src/standalone/data.js` — confirmed
+  live in the Browser pane against the real API: 757 fresh stations (after
+  the 3-hour staleness filter) rendered as temperature-colored points across
+  Spain, toggle on/off both verified to work cleanly with no console errors.
+- **Known gap, not blocking**: clicking a station sets `entity.description`,
+  but this app runs Cesium with `infoBox: false`
+  (`src/app/viewer.js:18`) — discovered only once live-testing click
+  behavior, not from reading code beforehand. The description is currently
+  inert; the full reading is available via `getAnalystRecords()` and each
+  entity's `properties` bag, but no click-to-inspect UI is wired to it yet.
+  This app's real per-layer click handling goes through
+  `src/data/pickRegistry.js` plus a bespoke camera-tracking flow per layer
+  (flights/military/bikeshare/CCTV) rather than a generic info-card widget —
+  wiring real click-to-inspect for a static ground station (which shouldn't
+  need camera-tracking the way a moving aircraft does) needs its own look at
+  how this app actually surfaces picked-entity detail, deferred rather than
+  guessed at under this pass's time budget.
+- **Also deferred, matching every other layer's own bring-up**: voice-tool
+  wiring (`GEV_REALTIME_TOOLS` / `src/voice/gevActions.js`).
+- Docs updated in this same pass per `CONTRIBUTING.md`:
+  `docs/CURRENT-STATE.md`, `DATA_SOURCES.md`, `dataCredits.js`, `CHANGELOG.md`,
+  README's layer table (13→14 layers).
 - New `server/providers/weather/aemet.js`, exporting `aemetStationsProxy()`,
   mirroring `celestrakProxy`/`firmsProxy`: memory + disk cache
   (`.gev-cache/aemet-stations.json`), single-flight `inflight`, TTL sized to
@@ -213,15 +355,13 @@ Concretely:
 
 ## Open questions
 
-- **Open-Meteo map-layer shape** (see above): fixed grid, camera-relative
-  sampling, or click-to-query? Needs a decision before A1/Open-Meteo Option 1
-  code is written.
+Resolved as part of this pass, see [Layer summary](#layer-summary--whats-actually-shipping):
+Open-Meteo's point source (world-cities grid via Natural Earth, Spain
+excluded) and GIBS's v1 product (true-color only). Still genuinely open:
+
 - **AEMET avisos zone geometry source**: confirm the current official
   download location/format/license for the warning-zone polygons (separate
   from the live CAP feed) before Phase A1.
-- **GIBS product choice for v1**: true-color alone, or true-color + IR +
-  snow-cover as switchable options from day one? Affects whether
-  `optionOwner: 'satellite-weather'` needs an enum from the start.
 - **AEMET rate-limit headroom**: 50 req/min shared across stations +
   warnings + (later) forecasts — confirm the cache TTLs proposed above
   actually keep real-world usage well under that cap before shipping A1/A2.

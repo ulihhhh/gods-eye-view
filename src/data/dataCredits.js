@@ -95,6 +95,12 @@ export const DATA_CREDITS = [
       '(CC BY 4.0)',
   },
   {
+    key: 'aemet',
+    html:
+      'Spanish weather stations: © AEMET — ' +
+      '<a href="https://opendata.aemet.es" target="_blank" rel="noopener">opendata.aemet.es</a>',
+  },
+  {
     key: 'google-news-rss',
     html:
       'Cockpit regional headlines: ' +

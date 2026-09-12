@@ -5,6 +5,7 @@ import { terrainHeightsProxy } from 'gods-eye-view/server/providers/terrain';
 import { tomtomProxy } from 'gods-eye-view/server/providers/traffic';
 import { firmsProxy } from 'gods-eye-view/server/providers/firms';
 import { gbfsProxy } from 'gods-eye-view/server/providers/gbfs';
+import { aemetStationsProxy } from '../../server/providers/weather.js';
 import { localProviderPlugins } from '../../server/providers/local.js';
 
 function install(plugin) {
@@ -63,6 +64,7 @@ test('standalone composition mounts every extracted provider exactly once withou
     tomtomProxy,
     firmsProxy,
     gbfsProxy,
+    aemetStationsProxy,
   ])
     assert.equal(plugins.filter((p) => p.name === factory().name).length, 1);
 });
@@ -208,6 +210,58 @@ test('FIRMS retains a large successful source during partial failure and filters
   const stale = json(await request());
   assert.equal(stale.stale, true);
   assert.equal(stale.count, 0);
+});
+
+test('AEMET decodes ISO-8859-15 station names, dedups trailing hourly rows, and caches across the TTL', async (t) => {
+  isolate(t, { AEMET_API_KEY: '' });
+  let now = Date.UTC(2026, 8, 12, 12);
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+  // The real API serves this second response as ISO-8859-15/latin1 — encode
+  // the fixture the same way so decoding it wrong (e.g. as UTF-8) would
+  // actually mangle "VANDELLÓS" and fail the assertion below, not pass by
+  // accident on ASCII-only fixture data.
+  const rows = [
+    { idema: '0002I', lat: 40.95806, lon: 0.871385, alt: 32, ubi: 'VANDELLÓS', fint: '2026-09-12T11:00:00+0000', ta: 20 },
+    { idema: '0002I', lat: 40.95806, lon: 0.871385, alt: 32, ubi: 'VANDELLÓS', fint: '2026-09-12T12:00:00+0000', ta: 24 },
+  ];
+  const datosBuffer = Buffer.from(JSON.stringify(rows), 'latin1');
+  t.mock.method(globalThis, 'fetch', async (raw) => {
+    calls++;
+    const url = new URL(raw);
+    assert.equal(url.hostname, 'opendata.aemet.es');
+    if (url.pathname.endsWith('/datos-fixture')) {
+      return new Response(datosBuffer, { headers: { 'content-type': 'text/plain;charset=ISO-8859-15' } });
+    }
+    assert.equal(url.searchParams.get('api_key'), 'fixture-key');
+    return Response.json({
+      descripcion: 'exito',
+      estado: 200,
+      datos: 'https://opendata.aemet.es/datos-fixture',
+    });
+  });
+  const request = install(aemetStationsProxy());
+  assert.equal((await request()).status, 503);
+  assert.equal(json(await request('/status')).hasKey, false);
+  assert.equal(calls, 0);
+  process.env.AEMET_API_KEY = 'fixture-key';
+
+  const first = json(await request());
+  assert.equal(first.count, 1, 'two trailing hourly rows for the same station dedup to one');
+  assert.equal(first.stations[0].name, 'VANDELLÓS', 'ISO-8859-15 decodes correctly, not as mangled UTF-8');
+  assert.equal(first.stations[0].temperatureC, 24, 'the later fint wins the dedup');
+  assert.equal(calls, 2, 'one envelope fetch + one datos fetch');
+
+  assert.equal(json(await request()).count, 1);
+  assert.equal(calls, 2, 'within TTL: served from cache, no new upstream calls');
+
+  now += 21 * 60_000; // past the 20-minute TTL
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('upstream down');
+  });
+  const stale = json(await request());
+  assert.equal(stale.stale, true);
+  assert.equal(stale.count, 1, 'stale cache beats an empty layer');
 });
 
 test('GBFS keeps host/path/method guards, response caps and distinct information/status cache headers', async (t) => {

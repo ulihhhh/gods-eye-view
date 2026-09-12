@@ -9663,6 +9663,30 @@ body.scene-playback-mode #key-setup {
   white-space: nowrap;
 }
 
+/* A key on a known validity window (AEMET's 3-month issue cycle) that this
+   panel has recorded an issue date for. Default = plenty of runway left;
+   .warning = inside the renewal window; .expired = past it. */
+.key-setup-expiry {
+  padding: 0.05rem 0.3rem;
+  color: rgba(148, 200, 220, 0.7);
+  font-size: 0.5rem;
+  letter-spacing: 0.06rem;
+  text-transform: uppercase;
+  border: 1px solid rgba(148, 200, 220, 0.28);
+  border-radius: 0.3rem;
+  white-space: nowrap;
+}
+
+.key-setup-expiry.warning {
+  color: rgba(255, 200, 120, 0.85);
+  border-color: rgba(255, 200, 120, 0.35);
+}
+
+.key-setup-expiry.expired {
+  color: rgba(255, 130, 120, 0.9);
+  border-color: rgba(255, 130, 120, 0.4);
+}
+
 .key-setup-remove {
   justify-self: start;
   padding: 0.28rem 0.55rem;

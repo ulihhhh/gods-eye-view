@@ -1,4 +1,5 @@
 import { DataLayerManager } from '../data/manager.js';
+import aemetStationsLayer from '../data/aemetStations.js';
 import flightsLayer from '../data/flights.js';
 import militaryFlightsLayer from '../data/militaryFlights.js';
 import earthquakesLayer from '../data/earthquakes.js';
@@ -32,6 +33,7 @@ export function createStandaloneData({
         `Data layers could not be destroyed: ${[...dataManager.layers.keys()].join(', ')}`,
       );
   });
+  dataManager.register(aemetStationsLayer);
   dataManager.register(flightsLayer);
   dataManager.register(militaryFlightsLayer);
   dataManager.register(earthquakesLayer);
