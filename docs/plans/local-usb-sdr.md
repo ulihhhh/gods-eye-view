@@ -163,12 +163,15 @@ following this repo's `<type>/<kebab-description>` naming convention):
 - `src/data/localAdsb.js` + `src/data/localAdsb.test.mjs` — the frontend
   layer (`init/enable/disable/update/destroy/getStats`), tested against a
   fake viewer with `fetch` monkeypatched (7 tests, all passing).
-- `vite.config.js` — `localAdsbProxy()` plugin registered, reads
-  `LOCAL_ADSB_BASE_URL` (default `http://localhost:8080`) **server-side
-  only**, never from the request — deliberate SSRF mitigation given this
-  app's supported LAN-sharing mode (README "Sharing an instance"): a shared
-  instance must not let a visitor redirect the proxy at an arbitrary internal
-  host.
+- `server/providers/aircraft/local-adsb.js` — `localAdsbProxy()` plugin,
+  registered into `server/providers/local.js`'s `localProviderPlugins()`
+  list (post-refactor: `vite.config.js` is now a thin re-export shim, no
+  plugins are registered there directly — see `docs/CODE-BOUNDARIES.md`).
+  Reads `LOCAL_ADSB_BASE_URL` (default `http://localhost:8080`)
+  **server-side only**, never from the request — deliberate SSRF mitigation
+  given this app's supported LAN-sharing mode (README "Sharing an
+  instance"): a shared instance must not let a visitor redirect the proxy
+  at an arbitrary internal host.
 - Full repo test suite still green (2,838 pass, the same 2 pre-existing,
   environment-specific failures reproduce identically with this branch's
   changes removed — unrelated to this work).
@@ -177,10 +180,13 @@ following this repo's `<type>/<kebab-description>` naming convention):
 - `src/data/layerState.js` — registered `local-adsb` (token `l`,
   `enabled-only`), `REGISTERED_LAYER_IDS` count bumped 16 → 17 in
   `layerState.test.mjs`.
-- `src/main.js` — imports and registers the layer with `DataLayerManager`.
-  The toggle-panel UI needed **no manual `index.html`/`ui.js` changes** — the
-  panel is built dynamically from each registered layer's `icon`/`name`, so
-  registering was enough to make it appear.
+- `src/standalone/data.js` (`createStandaloneData`) — imports and registers
+  the layer with `DataLayerManager` (post-refactor: layer registration
+  moved out of `src/main.js`, which is now just a 17-line entry point that
+  constructs and starts the standalone application). The toggle-panel UI
+  needed **no manual `index.html`/`ui.js` changes** — the panel is built
+  dynamically from each registered layer's `icon`/`name`, so registering
+  was enough to make it appear.
 - `LOCAL_ADSB_MOCK=1` (documented in `.env.example`) makes the proxy serve a
   static 4-aircraft fixture near Austin, TX (this app's default camera
   location) instead of fetching a real receiver — for trying the layer
