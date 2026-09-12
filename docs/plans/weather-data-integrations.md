@@ -4,11 +4,15 @@ Status (2026-09-12): **Scope narrowed to AEMET-only, by owner direction.**
 This plan now tracks one PR: connect **every** AEMET OpenData dataset to a
 GEV layer (or record a deliberate, reasoned exception for the handful that
 genuinely don't fit). Phase A0 (Weather Stations), Phase A1 (Weather
-Warnings), and Phase A2 (forecast tooltip) are **shipped** on
-`feat/weather-layers` — see [Phase A0](#phase-a0--station-layer--shipped-2026-09-12),
-[Phase A1](#phase-a1--warnings-overlay-avisos--shipped-2026-09-12), and
-[Phase A2](#phase-a2--forecast-tooltip--shipped-2026-09-12). Phases A3
-through A14 (below) are the complete, concrete criteria for the rest of
+Warnings), Phase A2 (forecast tooltip), and Phase A4 (lightning activity)
+are **shipped** on `feat/weather-layers` — see
+[Phase A0](#phase-a0--station-layer--shipped-2026-09-12),
+[Phase A1](#phase-a1--warnings-overlay-avisos--shipped-2026-09-12),
+[Phase A2](#phase-a2--forecast-tooltip--shipped-2026-09-12), and
+[Phase A4](#phase-a4--lightning-activity--shipped-2026-09-12). **Phase A3
+(radar) is blocked**, not skipped — AEMET's own radar endpoint is currently
+returning a broken cached link server-side; see its section below. Phases
+A5 through A14 (below) are the complete, concrete criteria for the rest of
 this PR — nothing in that list is optional to *decide*, though build order
 and effort vary. Open-Meteo's map layer and NASA GIBS — this plan's original
 other two providers — are **out of this PR's scope** and relegated to
@@ -120,8 +124,8 @@ twice — see A0's own note below).
 | `aemet-stations` | Live station pins, temperature-gradient color, full reading on click | points | A0 | `h` | **shipped** |
 | `aemet-warnings` | Zone polygons tinted by avisos level, phenomena on click | polygons | A1 | `j` | **shipped** |
 | `aemet-forecast` | Next-hours forecast on an existing station/municipio click | click-to-query, no new entities | A2 | *(none — extends A0's click, no new registry row)* | **shipped** |
-| `aemet-radar` | National/regional precipitation radar composite | imagery overlay | A3 | `o` | not started |
-| `aemet-lightning` | Live lightning strikes | points or imagery (shape TBD) | A4 | `p` | not started |
+| `aemet-radar` | National/regional precipitation radar composite | imagery overlay | A3 | `o` | **blocked** — AEMET's own endpoint is currently returning a broken cached link, see phase notes |
+| `aemet-lightning` | Nationwide lightning-composite snapshot (ambient thumbnail, not entities) | pre-rendered image, no coordinates | A4 | `p` | **shipped** |
 | `aemet-fire-risk` | Meteorological forest-fire risk index | imagery overlay or zone polygons (shape TBD) | A5 | `v` | not started |
 | `aemet-maritime` | High-seas + coastal forecast zones | zone polygons + click text | A6 | `y` | not started |
 | `aemet-beaches` | Per-beach forecast (UV, sea temp, waves, wind) | points | A7 | `z` | not started |
@@ -689,7 +693,7 @@ extends A0's existing click-to-inspect card, per the original design.
   failure, not just a simulated one.
 - Voice-tool wiring deferred to [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set), same as every other phase.
 
-### Phase A3 — weather radar composite
+### Phase A3 — weather radar composite — **blocked, live-verification incomplete (2026-09-12)**
 
 - **Endpoints**: `red/radar/raster/nacional`, `red/radar/raster/regional`
   (both confirmed georeferenced — "georreferenciado" in their own API
@@ -700,21 +704,139 @@ extends A0's existing click-to-inspect card, per the original design.
 - **Cadence**: ~10 min refresh per AEMET's own radar update rate — much
   faster than the deferred GIBS layer's 3–6 h, worth a "last updated Xm ago"
   indicator since users will expect radar currency.
-- **Open item**: confirm the actual tile/projection format live (WMS-style
-  tiles vs. a single full-extent image) before committing to
-  `WebMapTileServiceImageryProvider` vs. a simpler single-image overlay.
+- **Blocked on step 1 of the Definition of Done** (live-verify before
+  design): a real pull against `raster/nacional` and `raster/regional`
+  returns a successful envelope (`estado: 200`) each time, but resolving the
+  `datos` short-link (`opendata.aemet.es/opendata/sh/<hash>`) consistently
+  fails with a `429`-wrapped-`500` from AEMET's internal redirector. This is
+  NOT ordinary per-key rate limiting: across 7 attempts spread over 15+
+  minutes with generous spacing, `raster/nacional`'s envelope kept returning
+  the exact same `datos`/`metadatos` hash — AEMET is serving a stale cached
+  envelope pointing at a broken short-link, not regenerating a fresh one.
+  The plain (non-georeferenced) `red/radar/nacional` composite fails even
+  earlier, at the envelope step itself (`estado: 404`, "Error al obtener los
+  datos"). Read as a genuine, current AEMET-side issue with radar delivery
+  specifically — separate from the well-behaved stations/warnings/forecast
+  endpoints already shipped — not something more retries will fix.
+- **What's confirmed despite the block**: an official AEMET conference
+  deck (`Foro de Usuarios — Datos georreferenciados`, 2022, Ángel Silva
+  López) describes AEMET's internal radar georeferencing pipeline as
+  converting the native OPERA composite (HDF5) and regional radars (IRIS)
+  to **GeoTIFF/NetCDF** for georeferenced delivery — a real signal for what
+  `raster/nacional`/`raster/regional` likely serve, but NOT a confirmed
+  byte-for-byte answer for the public OpenData API specifically (that deck
+  describes an exclusive WMS built for ENAIRE, a related but different
+  delivery path). GeoTIFF would need a client-side decoding step Cesium
+  doesn't handle natively, unlike a plain PNG — a real design fork that
+  can't be resolved without an actual successful pull.
+- **Owner decision (2026-09-12)**: rather than keep retrying or guess at a
+  design against an admittedly-broken resource, work moved to
+  [Phase A4](#phase-a4--lightning-activity--shipped-2026-09-12) instead. Revisit this phase once
+  a live pull against `raster/nacional` or `raster/regional` actually
+  succeeds — do not build the frontend/proxy from the GeoTIFF hypothesis
+  above without that confirmation.
+- **Corroborating research, same day**: a live pull hours later returned the
+  **exact same broken short-link hashes** as the original block — not a
+  transient rate limit, something is genuinely stuck server-side.
+  Independently, radarspain.es (a commercial Spanish radar/lightning
+  viewer) attributes its own rich radar mosaic to **"Radares españoles AEMET
+  vía EUMETNET"** — the real per-site ODIM-HDF5 volumes it decodes
+  client-side come from the **EUMETNET OPERA** radar-exchange network, not
+  AEMET's public OpenData REST API — and its own frame metadata explicitly
+  labels a `"Fuente de contingencia AEMET Legacy GIF"` fallback for radars
+  it can't reach via EUMETNET, i.e. the exact `red/radar/raster/*` family
+  this phase targets; several of those fallback entries carried an
+  identical, suspiciously-small byte count at the time of this check —
+  external corroboration that this specific AEMET delivery path is
+  degraded right now, not something wrong with our own key or request
+  pattern. AEMET's official API client repo
+  (`gitlab.aemet.es/opendata/API`) separately confirms 429s are a known,
+  common issue AEMET's own docs recommend mitigating via RSS/Atom feeds —
+  radar has no such feed (confirmed by searching AEMET's own RSS/Atom
+  directory), so that mitigation doesn't apply here.
+- **Real alternative worth its own future investigation, not started**:
+  EUMETNET's OPERA composite is apparently available under a CC BY 4.0
+  license per radarspain.es's own credit line — potentially a much richer
+  radar source (real per-site reflectivity volumes, not one flattened GIF)
+  than anything AEMET's public OpenData API exposes, via a completely
+  different host/access mechanism this pass didn't research. Noted here so
+  it isn't lost; would need its own live-verification pass before any
+  design commitment, same discipline as everything else in this plan.
 
-### Phase A4 — lightning strikes
+### Phase A4 — lightning activity — **shipped 2026-09-12**
 
-- **Endpoint**: `red/rayos/mapa` ("Mapa con los rayos registrados en
-  periodo estándar, último elaborado").
-- **Shape**: unconfirmed — could be a strike-point list (→ points, same
-  click-to-inspect pattern as stations) or a rendered image (→ imagery
-  overlay). This is the first thing to resolve, before any other design
-  decision on this phase.
-- **Build-order rationale**: placed right after radar so both can be
-  verified together against a real storm — see
-  [stacking demos](#which-layers-pair-well-stacking-demos) above.
+Built after A3 was blocked (see above) — not the original "verify radar and
+lightning together against a real storm" build order, since radar's own
+endpoint turned out to be unavailable. Revisit the storm-cell stacking demo
+once A3 unblocks.
+
+- **Endpoint confirmed live**: `red/rayos/mapa` ("Mapa con los rayos
+  registrados en el período de 12 horas anteriores") returns a real
+  `image/gif`, 640×480 — AEMET's own province-outline map with strikes
+  plotted on it and a legend strip baked into the pixels. **Not** a strike-
+  point list, and **not** georeferenced anywhere in the API response (no
+  bounding box in the envelope or the `metadatos` description).
+  Periodicity confirmed: "cada seis horas o 00Z, 06Z, 12Z, 18Z."
+- **Shape resolved differently than either option this plan originally
+  considered**: since it can't be draped as a geo-referenced imagery layer
+  (no bounds) and there are no coordinates to plot as points, this shipped
+  as a single **ambient world-overlay thumbnail** (`variant: 'thumbnail'`,
+  the same mechanism `cctvCards.js` already uses for camera preview images)
+  anchored at a fixed reference point over central Spain — a "picture-in-
+  picture" of the whole-country composite, not an entity layer at all.
+- **One real bug found and fixed via live verification**: the overlay
+  source's `collisionCapacity` was copied from `aemet-stations`' *selected*
+  card (`0` — meaningful only because that entry is separately marked
+  `protected: true`, which bypasses the collision budget). An ordinary
+  ambient entry needs a real non-zero capacity (`1`, matching
+  `satellites.js`'s own single-entry source) or Cesium's collision-avoidance
+  solver silently drops it before painting — confirmed via
+  `worldOverlay.js`'s `getWorldOverlayDiagnostics()` showing
+  `projectedCount: 1` but `selectedCount: 0`/`paintedCount: 0` before the
+  fix, and correct rendering after it.
+- **Proxy is a straight binary pass-through** (`aemetLightningProxy()`) —
+  nothing to parse. TTL 6h matching AEMET's own cadence, **memory-only**
+  cache (deliberately no disk persistence, unlike stations/warnings — an
+  image this infrequently updated has no meaningful "survive a restart"
+  story beyond a fresh fetch's own cost). Frontend re-fetches the actual
+  image only when `/status`'s `lastFetch` timestamp moves, polling cheaply
+  on the normal 5-minute layer interval otherwise.
+- Shipped: `aemetLightningEnvelopeUrl` in `weatherProviderRequests.js` (1
+  test), `aemetLightningProxy()` in `server/providers/weather/aemet.js` (1
+  behavioral test), `src/data/aemetLightning.js` (14 tests covering the
+  freshness-label formatting, the "null lastFetch means never-fetched, not
+  unchanged" bootstrap case, a live-simulated race between a slow image
+  load and a `disable()`, and the click-to-expand toggle below).
+- **Verified live against the real API**: the actual composite image
+  (visible magenta Iberia/Balearics outline, real lightning-strike dots off
+  the Mediterranean coast, AEMET's own legend strip) rendered correctly as
+  the thumbnail, with a live "AEMET LIGHTNING · 2M AGO"-style freshness
+  label; disable/re-enable cycles verified clean (instant redisplay of the
+  cached image on re-enable, no redundant fetch); no console errors.
+- **Click-to-expand — added same day, in response to the ambient card being
+  too small to actually read**: clicking toggles the SAME thumbnail entry
+  between the small ambient card (168×126) and a much larger one (560×420 —
+  close to but still under the source's native 640×480, so this is a
+  canvas scale-up of already-captured pixels, never an upscale past source
+  resolution), wired via `ScreenSpaceEventHandler` +
+  `overlayHost.hitTest`/`hitTestWorldOverlay` (`firmsHeatmap.js`'s ambient-
+  card click pattern — there's no real Cesium entity here for `scene.pick`
+  to find, only the overlay hit-test path is needed). **A second real bug
+  found and fixed live**: the expanded entry initially copied
+  `selected: true` from stations'/warnings' own protected click-to-inspect
+  cards — but `variant: 'thumbnail'` combined with `selected: true` sends
+  `measureOverlayEntry` (`worldOverlayDraw.js`) down the *selected*-card
+  sizing branch instead of the thumbnail one, which never reads
+  `thumbnailWidth`/`thumbnailHeight` — the measured rect collapsed to
+  title-text size and the image drew far outside it (confirmed live: the
+  "expanded" card rendered as an empty title bar, no image visible at all).
+  Fixed by matching `cctvCards.js`'s own thumbnail entries, which hard-code
+  `selected: false` regardless of active/protected state for exactly this
+  reason — `protected: true` alone is what keeps the expanded card pinned
+  past the collision budget. Re-verified live after the fix: full 640×480-
+  detail readable (header URL, legend counts, strike cluster), clean
+  collapse back to the small card on a second click.
+- Voice-tool wiring deferred to Phase A14, same as every other phase.
 
 ### Phase A5 — forest-fire risk forecast
 

@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  AEMET_LIGHTNING_ENVELOPE_URL,
   AEMET_STATIONS_ENVELOPE_URL,
   AEMET_STATION_STALE_MS,
   AEMET_WARNINGS_ENVELOPE_URL,
   AEMET_WARNING_LEVEL_RANK,
+  aemetLightningEnvelopeUrl,
   aemetMunicipioForecastEnvelopeUrl,
   aemetMunicipiosEnvelopeUrl,
   aemetStationsEnvelopeUrl,
@@ -654,4 +656,12 @@ test('filterUpcomingAemetForecastHours drops the past and caps the result', () =
 
 test('filterUpcomingAemetForecastHours tolerates non-array input', () => {
   assert.deepEqual(filterUpcomingAemetForecastHours(null, { dateIso: '2026-09-12', hour: 0 }), []);
+});
+
+test('the lightning envelope URL embeds the key as a query param, matching every other AEMET envelope', () => {
+  assert.equal(
+    aemetLightningEnvelopeUrl('K'),
+    `${AEMET_LIGHTNING_ENVELOPE_URL}?api_key=K`,
+  );
+  assert.ok(!aemetLightningEnvelopeUrl('K').includes('K/'), 'the key is never a path segment');
 });

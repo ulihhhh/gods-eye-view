@@ -1,4 +1,5 @@
 import { DataLayerManager } from '../data/manager.js';
+import aemetLightningLayer from '../data/aemetLightning.js';
 import aemetStationsLayer from '../data/aemetStations.js';
 import aemetWarningsLayer from '../data/aemetWarnings.js';
 import flightsLayer from '../data/flights.js';
@@ -36,6 +37,7 @@ export function createStandaloneData({
   });
   dataManager.register(aemetStationsLayer);
   dataManager.register(aemetWarningsLayer);
+  dataManager.register(aemetLightningLayer);
   dataManager.register(flightsLayer);
   dataManager.register(militaryFlightsLayer);
   dataManager.register(earthquakesLayer);

@@ -632,6 +632,26 @@ export function filterUpcomingAemetForecastHours(hours, civilNow, limit = 6) {
   return hours.filter(isUpcoming).slice(0, Math.max(0, limit));
 }
 
+// ---------------------------------------------------------------------------
+// Lightning (Phase A4) — a fourth AEMET feed, same two-step envelope, but the
+// `datos` payload is opaque: a pre-rendered GIF composite (confirmed live —
+// `image/gif`, 640×480), not raw strike coordinates. AEMET's own metadata
+// describes it as "rayos registrados en el período de 12 horas anteriores",
+// refreshed "cada seis horas o 00Z, 06Z, 12Z, 18Z" — this API exposes no
+// separate strike list, so there is nothing to parse or normalize here
+// beyond building the envelope URL; the image bytes pass straight through
+// the proxy to the browser.
+// ---------------------------------------------------------------------------
+
+/** Nationwide lightning-activity composite envelope. */
+export const AEMET_LIGHTNING_ENVELOPE_URL =
+  'https://opendata.aemet.es/opendata/api/red/rayos/mapa';
+
+/** Build the envelope request URL for a given key. Never logged — embeds the key. */
+export function aemetLightningEnvelopeUrl(apiKey) {
+  return `${AEMET_LIGHTNING_ENVELOPE_URL}?api_key=${encodeURIComponent(apiKey)}`;
+}
+
 export function filterActiveAemetWarnings(zones, now = Date.now()) {
   if (!Array.isArray(zones)) return [];
   const result = [];

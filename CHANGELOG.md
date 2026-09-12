@@ -50,6 +50,16 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   already-open card once it arrives. A slow or failed forecast never blocks
   or replaces the base reading.
 
+- Add an AEMET Lightning Activity layer: a live-updating "picture-in-picture"
+  thumbnail of AEMET's nationwide lightning composite image, floating over
+  Spain, behind a new `/api/aemet/lightning` proxy. Unlike the other AEMET
+  layers this is a single ambient snapshot rather than a polled entity
+  layer — AEMET's feed exposes no strike coordinates, only a pre-rendered
+  image — refetched only when AEMET actually publishes a new one (roughly
+  every 6 hours), with a live "updated Xm/Xh ago" label. Clicking the
+  thumbnail expands it to a much larger, still-crisp size so its baked-in
+  legend and labels are actually readable; clicking again collapses it.
+
 - Separate terrain, traffic, FIRMS and GBFS middleware into focused provider
   modules, preserving local configuration, routes and cache/error behavior.
 

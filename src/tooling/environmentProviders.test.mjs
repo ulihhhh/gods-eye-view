@@ -5,7 +5,12 @@ import { terrainHeightsProxy } from 'gods-eye-view/server/providers/terrain';
 import { tomtomProxy } from 'gods-eye-view/server/providers/traffic';
 import { firmsProxy } from 'gods-eye-view/server/providers/firms';
 import { gbfsProxy } from 'gods-eye-view/server/providers/gbfs';
-import { aemetForecastProxy, aemetStationsProxy, aemetWarningsProxy } from '../../server/providers/weather.js';
+import {
+  aemetForecastProxy,
+  aemetLightningProxy,
+  aemetStationsProxy,
+  aemetWarningsProxy,
+} from '../../server/providers/weather.js';
 import { localProviderPlugins } from '../../server/providers/local.js';
 
 function install(plugin) {
@@ -67,6 +72,7 @@ test('standalone composition mounts every extracted provider exactly once withou
     aemetStationsProxy,
     aemetWarningsProxy,
     aemetForecastProxy,
+    aemetLightningProxy,
   ])
     assert.equal(plugins.filter((p) => p.name === factory().name).length, 1);
 });
@@ -467,6 +473,59 @@ test('AEMET forecast resolves lat/lon to the nearest municipio, filters to upcom
   assert.equal(stale.stale, true);
   assert.equal(stale.municipio.id, '28079', 'the municipio lookup itself needed no re-fetch — stale forecast beats no forecast');
   assert.deepEqual(stale.hours.map((h) => h.hour), [14, 15]);
+});
+
+test('AEMET lightning passes the binary GIF through unmodified, TTLs at 6h, and caches memory-only', async (t) => {
+  isolate(t, { AEMET_API_KEY: '' });
+  let now = Date.UTC(2026, 8, 12, 12);
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+  // A real GIF87a header (magic bytes) — enough to prove the proxy never
+  // touches or reinterprets the bytes, just forwards them.
+  const gifFixture = Buffer.from('47494638376180028001', 'hex');
+  t.mock.method(globalThis, 'fetch', async (raw) => {
+    calls++;
+    const url = new URL(raw);
+    assert.equal(url.hostname, 'opendata.aemet.es');
+    if (url.pathname.endsWith('/lightning-datos-fixture')) {
+      return new Response(gifFixture, { headers: { 'content-type': 'image/gif;charset=ISO-8859-15' } });
+    }
+    assert.equal(url.searchParams.get('api_key'), 'fixture-key');
+    return Response.json({
+      descripcion: 'exito',
+      estado: 200,
+      datos: 'https://opendata.aemet.es/lightning-datos-fixture',
+    });
+  });
+  const request = install(aemetLightningProxy());
+  assert.equal((await request()).status, 503, 'keyless');
+  assert.equal(json(await request('/status')).hasKey, false);
+  assert.equal(calls, 0);
+  process.env.AEMET_API_KEY = 'fixture-key';
+
+  const first = await request();
+  assert.equal(first.status, 200);
+  assert.equal(first.headers['Content-Type'], 'image/gif', 'charset param stripped, bytes untouched');
+  assert.ok(Buffer.from(first.body).equals(gifFixture), 'the GIF bytes pass through byte-for-byte');
+  assert.equal(calls, 2, 'one envelope fetch + one datos fetch');
+
+  const second = await request();
+  assert.equal(calls, 2, 'within the 6h TTL: served from memory cache, no new upstream calls');
+  assert.ok(Buffer.from(second.body).equals(gifFixture));
+
+  const status = json(await request('/status'));
+  assert.equal(status.hasKey, true);
+  assert.equal(status.contentType, 'image/gif');
+  assert.equal(status.stale, false);
+
+  now += 6 * 3600_000 + 60_000; // past the 6-hour TTL
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('upstream down');
+  });
+  const stale = await request();
+  assert.equal(stale.status, 200, 'stale cache beats an error');
+  assert.ok(Buffer.from(stale.body).equals(gifFixture));
+  assert.equal(json(await request('/status')).stale, true);
 });
 
 test('GBFS keeps host/path/method guards, response caps and distinct information/status cache headers', async (t) => {

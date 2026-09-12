@@ -395,6 +395,111 @@ one row per zone (deduped across its ring entities), not one per ring.
 
 Voice-tool wiring is not yet done, same as stations.
 
+## AEMET Lightning Activity (2026-09-12)
+
+`aemet-lightning` (token `p`, `enabled-only`) is architecturally different
+from every other AEMET layer: it is **not** a polled entity/imagery layer,
+but a single always-on "picture-in-picture" thumbnail floating over central
+Spain, because AEMET's `red/rayos/mapa` exposes no strike coordinate list —
+only a pre-rendered GIF composite (confirmed live: `image/gif`, 640×480)
+with a province-outline map, plotted strikes, and a legend strip baked into
+the pixels, and no bounding box anywhere in the API response. That rules out
+draping it as a geo-referenced `Cesium.ImageryLayer` (unlike Phase A3's
+radar, once unblocked) — the only honest placement is a fixed reference
+anchor over the country it depicts.
+
+Implemented by reusing this app's existing world-overlay **thumbnail**
+mechanism (`variant: 'thumbnail'`, the same primitive `cctvCards.js` already
+uses for camera preview images: an `HTMLImageElement` handed to the shared
+canvas painter via `image: {frame, stamp}`) rather than building a second
+image-panel system. One real bug found and fixed during live verification:
+the entry's overlay-source options were copied from `aemet-stations`'
+*selected* card (`collisionCapacity: 0`, meaningful only because a
+`protected: true` entry bypasses the collision budget entirely) — an
+ordinary ambient entry like this one needs a real, non-zero collision slot
+(`collisionCapacity: 1`, matching `satellites.js`'s own single-ambient-entry
+source) or the collision-avoidance solver silently drops it before painting
+(confirmed via `worldOverlay.js`'s `getWorldOverlayDiagnostics()`:
+`projectedCount: 1` but `selectedCount: 0`/`paintedCount: 0` before the
+fix).
+
+The proxy (`aemetLightningProxy()`) is a straight binary pass-through — no
+parsing, since there is nothing to parse — with a 6-hour TTL matching
+AEMET's own stated refresh cadence ("cada seis horas o 00Z, 06Z, 12Z, 18Z")
+and a **memory-only** cache (deliberately no disk persistence, unlike
+stations/warnings: an image this infrequently updated has no meaningful
+"serve yesterday's snapshot across a restart" story beyond what a fresh
+fetch already costs). The frontend only re-fetches the actual image bytes
+when `/api/aemet/lightning/status`'s `lastFetch` timestamp moves — cheap
+polling on the normal 5-minute layer interval, real image loads roughly
+every 6 hours. The card's title carries a live "updated Xm/Xh ago" label.
+
+**Click-to-expand — added 2026-09-12.** The small ambient card (168×126) was
+reported too small to actually read the image's baked-in text from.
+Clicking it toggles to a much larger card (560×420 — close to, but still
+below, the source's native 640×480, so this is a straight canvas
+`drawImage` scale-up of already-captured pixels, never an upscale past
+source resolution) anchored at the same spot; clicking again, or clicking
+anywhere else on the globe, collapses it back. Wired via the same
+`ScreenSpaceEventHandler` + `overlayHost.hitTest` pattern
+`firmsHeatmap.js`'s ambient fire cards already use for a world-overlay-only
+click target (no real Cesium entity exists here to `scene.pick`, so only
+the overlay hit-test path is needed). **One real bug found and fixed via
+live verification**: the expanded entry initially set `selected: true`
+(mirroring stations'/warnings' own protected click-to-inspect cards) —
+but `variant: 'thumbnail'` and `selected: true` disagreeing sends
+`measureOverlayEntry` (`worldOverlayDraw.js`) down the *selected*-card
+sizing branch instead of the thumbnail one, which never reads
+`thumbnailWidth`/`thumbnailHeight` at all. The measured rect collapsed to
+title-text size and the image drew far outside it — confirmed live (the
+expanded card rendered as an empty title bar with no image visible at all).
+Fixed by matching `cctvCards.js`'s own thumbnail entries, which hard-code
+`selected: false` regardless of active/protected state for exactly this
+reason; `protected: true` alone is sufficient to keep the expanded card
+pinned past the collision budget.
+
+No further click-to-inspect beyond expand/collapse: AEMET's API gives no
+additional structured data beyond the image itself.
+
+Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
+Phase A14).
+
+### Phase A3 (radar) — corroborating research (2026-09-12)
+
+Investigated a live third-party site (radarspain.es, a commercial Spanish
+radar/lightning viewer) and AEMET's own official API client repo
+(`gitlab.aemet.es/opendata/API`) to sanity-check Phase A3's block. Findings:
+
+- radarspain.es's own attribution reads "Radares españoles AEMET **vía
+  EUMETNET**" — its rich per-site radar mosaic (raw ODIM-HDF5 polar volumes,
+  decoded client-side in a Web Worker) comes from **EUMETNET's OPERA radar
+  exchange network**, not AEMET's public OpenData REST API. Its own frame
+  metadata explicitly labels a fallback path — `"Fuente de contingencia
+  AEMET Legacy GIF (5 de 16 radares)"` — for radars it can't reach via the
+  primary EUMETNET feed, i.e. the exact GIF-based endpoint family
+  (`red/radar/raster/*`) this plan already targets. Several of those
+  fallback entries carried an identical, suspiciously-small byte count at
+  the time of this check — independent, external corroboration that AEMET's
+  own legacy GIF radar delivery is degraded right now, not something wrong
+  with our key or request pattern.
+- A follow-up direct retry against `red/radar/raster/nacional` and
+  `.../regional` (hours after the original block) returned the **exact same
+  broken cached short-link hashes** as before — conclusively not a
+  transient rate limit.
+- AEMET's official API client repo confirms 429s are a known, common issue
+  across the whole OpenData API generally, officially mitigated via
+  RSS/Atom "check before you fetch" feeds for datasets that publish one.
+  Radar does not have one (confirmed by searching AEMET's own RSS/Atom
+  directory for "radar" — zero results), so that mitigation doesn't apply
+  here regardless.
+- **Real alternative path worth its own future investigation**: EUMETNET's
+  OPERA composite is apparently available under a CC BY 4.0 license per
+  radarspain.es's own credit line — a potentially much richer radar source
+  (real per-site reflectivity volumes, not a single flattened GIF) than
+  anything AEMET's own public OpenData API exposes, but via a completely
+  different host/access mechanism not yet researched. Not started; noted
+  here so it isn't lost.
+
 ## Installations and map-source guidance
 
 - On an uncached Overpass failure, mapped installations keep their existing

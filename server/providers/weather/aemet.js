@@ -2,6 +2,7 @@ import path from 'node:path';
 import { promises as fsp } from 'node:fs';
 
 import {
+  aemetLightningEnvelopeUrl,
   aemetMunicipioForecastEnvelopeUrl,
   aemetMunicipiosEnvelopeUrl,
   aemetStationsEnvelopeUrl,
@@ -573,6 +574,141 @@ export function aemetForecastProxy() {
         } catch (err) {
           console.warn('[aemet-forecast-proxy] error:', err?.message || err);
           sendJson(502, { error: 'aemet forecast fetch failed and no cache available' });
+        }
+      });
+    },
+  };
+}
+
+/**
+ * AEMET OpenData lightning-activity composite proxy (Phase A4). Upstream:
+ * https://opendata.aemet.es/opendata/api/red/rayos/mapa
+ *
+ * Same two-step envelope as the other AEMET feeds, but the `datos` payload
+ * is opaque binary — a pre-rendered GIF composite (confirmed live:
+ * `image/gif`, 640×480, AEMET's own province-outline map with lightning
+ * strikes plotted on it, plus a baked-in legend strip; NOT a raw strike
+ * coordinate list, and NOT georeferenced in any machine-readable way this
+ * API exposes). There is nothing to parse: the bytes pass straight through.
+ *
+ * AEMET refreshes this "cada seis horas o 00Z, 06Z, 12Z, 18Z" (confirmed via
+ * its own metadatos description) — far slower than stations/warnings — so
+ * this proxy deliberately uses a 6-hour TTL and, unlike those two, a
+ * memory-ONLY cache: an image this infrequently updated has no meaningful
+ * "serve yesterday's snapshot across a server restart" story beyond what a
+ * fresh fetch already costs (one cheap envelope + one image fetch), unlike
+ * the higher-frequency feeds where disk persistence avoids re-fetching a
+ * near-identical response on every dev-server restart.
+ *
+ * Routes:
+ *   GET /api/aemet/lightning        → raw image bytes, `Content-Type` from
+ *     upstream (confirmed `image/gif`)
+ *   GET /api/aemet/lightning/status → {hasKey, lastFetch, stale, ttlMs,
+ *     contentType}
+ *
+ * Keyless (no AEMET_API_KEY): /api/aemet/lightning → 503 {error:'no_key'};
+ * status → {hasKey:false}. Upstream is never touched without a key.
+ *
+ * @returns {import('vite').Plugin}
+ */
+export function aemetLightningProxy() {
+  const TTL_MS = 6 * 3600_000;
+
+  /** @type {?{at: number, buffer: Buffer, contentType: string}} */
+  let mem = null;
+  /** @type {?Promise<?{at: number, buffer: Buffer, contentType: string}>} single-flight refresh */
+  let inflight = null;
+
+  const apiKey = () => String(process.env.AEMET_API_KEY || '').trim();
+
+  /**
+   * The two-step fetch. Throws on any failure so the caller can serve
+   * stale. Never logs the URL — it embeds the key.
+   */
+  async function fetchUpstream(key) {
+    const envelopeRes = await fetch(aemetLightningEnvelopeUrl(key), {
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!envelopeRes.ok) throw new Error(`HTTP ${envelopeRes.status}`);
+    const envelope = await envelopeRes.json();
+    if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
+      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+    }
+    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(20_000) });
+    if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
+    const buffer = Buffer.from(await dataRes.arrayBuffer());
+    const contentType = (dataRes.headers.get('content-type') || 'image/gif').split(';')[0].trim();
+    return { at: Date.now(), buffer, contentType };
+  }
+
+  return {
+    name: 'aemet-lightning-proxy',
+    configureServer(server) {
+      server.middlewares.use('/api/aemet/lightning', async (req, res) => {
+        const sendJson = (status, obj) => {
+          if (res.headersSent) return;
+          res.writeHead(status, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+          });
+          res.end(JSON.stringify(obj));
+        };
+        try {
+          const subPath = String(req.url || '').split('?')[0];
+          const key = apiKey();
+
+          if (subPath === '/status') {
+            sendJson(200, {
+              hasKey: Boolean(key),
+              lastFetch: mem ? mem.at : null,
+              stale: mem ? Date.now() - mem.at >= TTL_MS : false,
+              ttlMs: TTL_MS,
+              contentType: mem ? mem.contentType : null,
+            });
+            return;
+          }
+
+          if (!key) {
+            sendJson(503, { error: 'no_key' });
+            return;
+          }
+
+          const entry = mem;
+          if (entry && Date.now() - entry.at < TTL_MS) {
+            res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' });
+            res.end(entry.buffer);
+            return;
+          }
+          if (!inflight) {
+            inflight = fetchUpstream(key)
+              .then((fresh) => {
+                mem = fresh;
+                return fresh;
+              })
+              .catch((err) => {
+                console.warn(
+                  `[aemet-lightning-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
+                );
+                return null;
+              })
+              .finally(() => {
+                inflight = null;
+              });
+          }
+          const pending = inflight;
+          const fresh = await pending;
+          if (fresh) {
+            res.writeHead(200, { 'Content-Type': fresh.contentType, 'Cache-Control': 'no-store' });
+            res.end(fresh.buffer);
+          } else if (entry) {
+            res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' }); // upstream down — stale beats empty
+            res.end(entry.buffer);
+          } else {
+            sendJson(502, { error: 'aemet lightning fetch failed and no cache available' });
+          }
+        } catch (err) {
+          console.warn('[aemet-lightning-proxy] error:', err?.message || err);
+          sendJson(500, { error: 'aemet lightning proxy error' });
         }
       });
     },
