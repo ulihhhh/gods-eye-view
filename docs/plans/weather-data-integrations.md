@@ -97,12 +97,17 @@ and CAP-format province warning polygons (severity-coded).
   elsewhere rather than inventing a new one).
 - `layerState.js`: new entry, e.g.
   `{ id: 'aemet-stations', token: 'h', disposition: 'enabled-only' }`
-  (`h` is unused; used tokens today: a b c d e f g i m q r s t u w x).
+  (`h` is unused; used tokens today: a b c d e f g i l m n q r s t u w x —
+  `l` and `n` claimed by `local-adsb`/`liveuamap` since this plan was
+  written, not yet on `main`; confirm the current registry before picking a
+  letter, since other branches may have claimed more since).
   `REGISTERED_LAYER_IDS` count assertion in `layerState.test.mjs` bumps
   accordingly.
-- Registered in `src/main.js` with `DataLayerManager`, same pattern as
-  `local-adsb`. No manual panel UI needed — the toggle panel builds itself
-  from each registered layer's `icon`/`name`.
+- Registered in `src/standalone/data.js` (`createStandaloneData`) with
+  `DataLayerManager`, same pattern as `local-adsb` — post-refactor, layer
+  registration no longer lives in `src/main.js` (see `docs/APPLICATION.md`).
+  No manual panel UI needed — the toggle panel builds itself from each
+  registered layer's `icon`/`name`.
 
 ### Phase A1 — warnings overlay
 
@@ -180,8 +185,11 @@ Concretely:
   which GIBS product is active (true-color vs. IR vs. snow-cover — pick one
   at a time, matching how `satellites.js`'s options work today).
 - Still worth a `layerState.js` entry purely for persistence/share-links
-  (e.g. `{ id: 'satellite-weather', token: 'n', disposition:
-  'enabled+options', optionOwner: 'satellite-weather' }` for the
+  (e.g. `{ id: 'satellite-weather', token: 'k', disposition:
+  'enabled+options', optionOwner: 'satellite-weather' }` — `k` picked over
+  the originally-proposed `n`, since `n` was claimed by the `liveuamap`
+  layer (branch `mi-main`) after this plan was first written; confirm
+  against the current registry before implementing — for the
   opacity/product choice), even though its *rendering* path is imagery, not
   entities — the registry's job is state, not rendering mechanism.
 - No API key, no server-side proxy needed (GIBS answers CORS-enabled tile
