@@ -294,6 +294,57 @@ Voice-tool wiring (`GEV_REALTIME_TOOLS` / `src/voice/gevActions.js`) is not
 yet done for this layer, matching every other still-pending item tracked in
 `docs/plans/weather-data-integrations.md`.
 
+## AEMET Weather Warnings (2026-09-12)
+
+`aemet-warnings` (token `j`, `enabled-only`) polls `/api/aemet/warnings`
+(`server/providers/weather/aemet.js`) and renders one polygon per active
+avisos zone ring (a zone can have several disjoint rings — e.g. Lanzarote +
+La Graciosa — each its own `Cesium.Entity`, id `aemet-warning:<geocode>:
+<ringIndex>`). Colored by a discrete 3-step palette (amarillo/naranja/rojo);
+AEMET's `verde` level ("nothing to see here" — bundled for most of the
+country per phenomenon as a matter of course) is parsed but never rendered.
+Polygons use no `height`/`perPositionHeight`/`extrudedHeight`, so Cesium
+drapes them on whatever terrain is loaded (the polygon equivalent of a
+point's ground clamp) — verified live over real hill terrain near Cádiz with
+no z-fighting or clipping.
+
+The proxy's upstream (`avisos_cap/ultimoelaborado/area/esp`) is the same
+two-step envelope as stations, but the `datos` payload is a plain
+(**not gzipped**, despite the `.tar.gz` filename — confirmed via magic
+bytes) POSIX tar archive of ~190 CAP 1.2 XML bulletins, hand-parsed
+(`parseAemetCapTar`/`parseAemetCapAlert` in
+`src/data/weatherProviderRequests.js`) rather than pulling in a tar/XML
+library — the format is simple, fixed, and AEMET-controlled. Each XML file's
+`<info language="es-ES">` block is used (AEMET always pairs it with an
+`en-GB` block); **the individual files are genuinely UTF-8**, the opposite
+of the stations feed's ISO-8859-15 quirk (confirmed live: UTF-8 decodes
+"Almería" correctly, latin1 would mangle it) — reusing the stations proxy's
+latin1 decode here would introduce the reverse bug. Every CAP alert carries
+its own zone polygon(s) inline, so there is no separate zone shapefile to
+fetch or keep in sync. TTL 12 min (shorter than stations' 20, since warnings
+can escalate), memory + disk (`.gev-cache/aemet-warnings.json`),
+serve-stale-on-failure, matching the stations proxy. Keyless: 503
+`{error:'no_key'}`.
+
+A zone's `phenomena` list keeps every currently non-expired, non-verde entry
+(not just its highest), so a zone under both a live wind warning and an
+upcoming coastal one shows both. `inEffect` (derived from `onset` vs. now)
+distinguishes "in effect now" from "starts later" per phenomenon; v1 renders
+both as the same solid polygon (no visual distinction yet — a deferred
+refinement, not an oversight, tracked in the plan doc).
+
+Click-to-inspect mirrors `aemetStations.js`'s pattern (`ScreenSpaceEventHandler`
++ `pickRegistry` + `worldOverlay` `variant: 'selected'`), adapted for
+polygons: selecting a zone brightens the outline/fill of every ring entity
+belonging to it (not a hide-and-replace like the stations layer's single
+point), and the card anchors at the centroid of the zone's first ring — a
+pragmatic choice since a multi-ring zone has no single natural "ground
+point." A refresh re-resolves an open selection against fresh data or clears
+it if the zone drops out, same as stations. `getAnalystRecords()` returns
+one row per zone (deduped across its ring entities), not one per ring.
+
+Voice-tool wiring is not yet done, same as stations.
+
 ## Installations and map-source guidance
 
 - On an uncached Overpass failure, mapped installations keep their existing

@@ -5,7 +5,7 @@ import { terrainHeightsProxy } from 'gods-eye-view/server/providers/terrain';
 import { tomtomProxy } from 'gods-eye-view/server/providers/traffic';
 import { firmsProxy } from 'gods-eye-view/server/providers/firms';
 import { gbfsProxy } from 'gods-eye-view/server/providers/gbfs';
-import { aemetStationsProxy } from '../../server/providers/weather.js';
+import { aemetStationsProxy, aemetWarningsProxy } from '../../server/providers/weather.js';
 import { localProviderPlugins } from '../../server/providers/local.js';
 
 function install(plugin) {
@@ -65,6 +65,7 @@ test('standalone composition mounts every extracted provider exactly once withou
     firmsProxy,
     gbfsProxy,
     aemetStationsProxy,
+    aemetWarningsProxy,
   ])
     assert.equal(plugins.filter((p) => p.name === factory().name).length, 1);
 });
@@ -256,6 +257,121 @@ test('AEMET decodes ISO-8859-15 station names, dedups trailing hourly rows, and 
   assert.equal(calls, 2, 'within TTL: served from cache, no new upstream calls');
 
   now += 21 * 60_000; // past the 20-minute TTL
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('upstream down');
+  });
+  const stale = json(await request());
+  assert.equal(stale.stale, true);
+  assert.equal(stale.count, 1, 'stale cache beats an empty layer');
+});
+
+/** Build a minimal (uncompressed) POSIX tar buffer from {name, content} entries. */
+function buildTestTar(files) {
+  const BLOCK = 512;
+  const chunks = [];
+  for (const { name, content } of files) {
+    const header = Buffer.alloc(BLOCK);
+    header.write(name, 0, 100, 'utf8');
+    header.write('0000644\0', 100, 8, 'utf8');
+    header.write('0000000\0', 108, 8, 'utf8');
+    header.write('0000000\0', 116, 8, 'utf8');
+    header.write(`${content.length.toString(8).padStart(11, '0')}\0`, 124, 12, 'utf8');
+    header.write('00000000000\0', 136, 12, 'utf8');
+    header.write('        ', 148, 8, 'utf8');
+    header[156] = '0'.charCodeAt(0);
+    header.write('ustar\0', 257, 6, 'utf8');
+    header.write('00', 263, 2, 'utf8');
+    chunks.push(header);
+    const body = Buffer.from(content, 'utf8');
+    chunks.push(body);
+    const pad = (BLOCK - (body.length % BLOCK)) % BLOCK;
+    if (pad) chunks.push(Buffer.alloc(pad));
+  }
+  chunks.push(Buffer.alloc(BLOCK * 2));
+  return Buffer.concat(chunks);
+}
+
+function capAlertFixture({ geocode, name, level, event, phenomenon, onset, expires }) {
+  return `<alert><info>
+    <language>es-ES</language>
+    <event>${event}</event>
+    <eventCode><valueName>AEMET-Meteoalerta fenomeno</valueName><value>${phenomenon}</value></eventCode>
+    <onset>${onset}</onset>
+    <expires>${expires}</expires>
+    <description>Descripción de prueba con eñe y acentos: Almería.</description>
+    <parameter><valueName>AEMET-Meteoalerta nivel</valueName><value>${level}</value></parameter>
+    <area>
+      <areaDesc>${name}</areaDesc>
+      <polygon>1,1 2,2 3,3 1,1</polygon>
+      <geocode><valueName>AEMET-Meteoalerta zona</valueName><value>${geocode}</value></geocode>
+    </area>
+  </info></alert>`;
+}
+
+test('AEMET warnings decodes UTF-8 CAP XML from a tar archive, suppresses verde, and caches across the TTL', async (t) => {
+  isolate(t, { AEMET_API_KEY: '' });
+  let now = Date.UTC(2026, 8, 12, 12);
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+  // Real AEMET CAP text is UTF-8 (the reverse of the stations feed) —
+  // encoding this fixture as UTF-8 and asserting the accented text round-
+  // trips catches a latin1 regression the same way the stations test above
+  // catches the opposite one.
+  const tar = buildTestTar([
+    {
+      name: 'verde.xml',
+      content: capAlertFixture({
+        geocode: '000000', name: 'Everywhere', level: 'verde', event: 'Aviso verde',
+        phenomenon: 'AT;Temperaturas máximas', onset: '2026-09-12T00:00:00+00:00', expires: '2099-01-01T00:00:00+00:00',
+      }),
+    },
+    {
+      name: 'amarillo.xml',
+      content: capAlertFixture({
+        geocode: '659101', name: 'Almería', level: 'amarillo', event: 'Aviso de vientos de nivel amarillo',
+        phenomenon: 'VI;Vientos', onset: '2026-09-12T00:00:00+00:00', expires: '2099-01-01T00:00:00+00:00',
+      }),
+    },
+    {
+      name: 'expired.xml',
+      content: capAlertFixture({
+        geocode: '999999', name: 'Ya pasado', level: 'rojo', event: 'Aviso ya expirado',
+        phenomenon: 'PR;Lluvias', onset: '2020-01-01T00:00:00+00:00', expires: '2020-01-02T00:00:00+00:00',
+      }),
+    },
+  ]);
+  t.mock.method(globalThis, 'fetch', async (raw) => {
+    calls++;
+    const url = new URL(raw);
+    assert.equal(url.hostname, 'opendata.aemet.es');
+    if (url.pathname.endsWith('/warnings-datos-fixture')) {
+      return new Response(tar, { headers: { 'content-type': 'application/x-gtar;charset=ISO-8859-15' } });
+    }
+    assert.equal(url.searchParams.get('api_key'), 'fixture-key');
+    return Response.json({
+      descripcion: 'exito',
+      estado: 200,
+      datos: 'https://opendata.aemet.es/warnings-datos-fixture',
+    });
+  });
+  const request = install(aemetWarningsProxy());
+  assert.equal((await request()).status, 503);
+  assert.equal(json(await request('/status')).hasKey, false);
+  assert.equal(calls, 0);
+  process.env.AEMET_API_KEY = 'fixture-key';
+
+  const first = json(await request());
+  assert.equal(first.count, 1, 'verde and the expired rojo are both suppressed — only the live amarillo zone remains');
+  assert.equal(first.zones[0].geocode, '659101');
+  assert.equal(first.zones[0].name, 'Almería', 'UTF-8 decodes correctly, not as mangled latin1');
+  assert.equal(first.zones[0].level, 'amarillo');
+  assert.match(first.zones[0].phenomena[0].description, /Almería/, 'accented description text round-trips');
+  assert.equal(calls, 2, 'one envelope fetch + one datos (tar) fetch');
+
+  assert.equal(json(await request()).count, 1);
+  assert.equal(calls, 2, 'within TTL: served from cache, no new upstream calls');
+
+  now += 13 * 60_000; // past the 12-minute TTL
   t.mock.method(globalThis, 'fetch', async () => {
     throw new Error('upstream down');
   });

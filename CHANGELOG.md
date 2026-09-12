@@ -31,6 +31,17 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   known validity window (currently AEMET's 3-month issue cycle) — shown only
   once a key has actually been saved through the panel, never guessed.
 
+- Add a live AEMET Weather Warnings layer (avisos) behind a new
+  `/api/aemet/warnings` proxy: active zone polygons (amarillo/naranja/rojo —
+  the baseline "verde" status is never rendered) parsed from AEMET's CAP
+  1.2 XML bulletins, which arrive packed in a plain tar archive with no
+  separate zone shapefile needed — every alert carries its own polygon
+  geometry inline. Clicking a zone lists every currently active phenomenon
+  (event, probability, and whether it's already in effect or starts later)
+  in a floating card; a zone can show more than one at once (e.g. wind and
+  coastal warnings together). Shares the AEMET key already configured for
+  the stations layer.
+
 - Separate terrain, traffic, FIRMS and GBFS middleware into focused provider
   modules, preserving local configuration, routes and cache/error behavior.
 

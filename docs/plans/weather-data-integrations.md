@@ -1,14 +1,20 @@
 # Weather data integrations — design plan
 
-Status: **planning, no code yet.** Nothing in this document describes shipped
-behavior — for that, see `docs/CURRENT-STATE.md`, which stays the authoritative
-runtime reference and only records verified behavior. This file is a design
-record for work on branch `feat/weather-layers` (branched from `main`,
-following this repo's `<type>/<kebab-description>` convention), kept under
-version control so the plan stays reviewable alongside the code that
-implements it, and gets folded into the real docs (`docs/CURRENT-STATE.md`,
-`DATA_SOURCES.md`, `CHANGELOG.md`, `README.md`) once shipped, per
-`CONTRIBUTING.md`.
+Status (2026-09-12): **Phase A0 (AEMET Weather Stations) and Phase A1 (AEMET
+Weather Warnings) are both shipped** on `feat/weather-layers` — see
+[Phase A0](#phase-a0--station-layer--shipped-2026-09-12) and
+[Phase A1](#phase-a1--warnings-overlay-avisos--shipped-2026-09-12) for the
+full record, including bugs found and fixed from live use in each. AEMET
+OpenData is now fully integrated for both live station observations and
+live weather warnings. Open-Meteo's map layer and NASA GIBS remain
+**design-only, not started**. This file stays the design record for work on
+branch `feat/weather-layers` (branched from `main`, following this repo's
+`<type>/<kebab-description>` convention), kept under version control so the
+plan stays reviewable alongside the code that implements it. For verified
+*runtime* behavior (not plans), see `docs/CURRENT-STATE.md`, which is
+authoritative where the two disagree. Docs get folded into
+`docs/CURRENT-STATE.md`, `DATA_SOURCES.md`, `CHANGELOG.md`, `README.md` as
+each phase ships, per `CONTRIBUTING.md` — already done for Phase A0 and A1.
 
 ## Goal
 
@@ -70,8 +76,8 @@ registration site now, not `main.js`).
 
 | Layer | Shows | Coverage | Disposition | Toggle |
 |---|---|---|---|---|
-| `aemet-stations` | Live station pins, colored by current temperature; click for wind/humidity/pressure | Spain only (~250 AEMET stations) | `enabled-only` | Single click, on/off |
-| `aemet-warnings` | Province/zone polygons tinted by avisos severity (green/yellow/orange/red) | Spain only | `enabled-only` | Single click, on/off |
+| `aemet-stations` **(shipped)** | Live station pins, continuous temperature-gradient color; click for the full reading (temp+range, dew point, humidity, wind+gust+direction, station+sea-level pressure, precipitation, altitude) | Spain only (~850 AEMET stations, verified) | `enabled-only` | Single click, on/off — **live now**, token `h` |
+| `aemet-warnings` **(shipped)** | Zone polygons tinted by avisos level (amarillo/naranja/rojo — verde is "no warning," never rendered); click for every active phenomenon (event, probability, in-effect-or-upcoming) | Spain only (~233 avisos zones, ~9 typically active) | `enabled-only` | Single click, on/off — **live now**, token `j` |
 | `global-weather` | Same marker style as `aemet-stations`, backed by Open-Meteo instead of a real station network | Everywhere *except* Spain (resolves the Option-1/2 question below) | `enabled-only` | Single click, on/off |
 | `satellite-weather` | Translucent NASA GIBS true-color cloud-cover tiles over the current basemap | Global | `enabled+options` | Single click on/off; product choice (v1: true-color only) via the same chip mechanism CCTV/flights/satellites already use |
 
@@ -310,18 +316,244 @@ and CAP-format province warning polygons (severity-coded).
   No manual panel UI needed — the toggle panel builds itself from each
   registered layer's `icon`/`name`.
 
-### Phase A1 — warnings overlay
+### Phase A1 — warnings overlay (avisos) — **shipped 2026-09-12**
 
-- `GET /api/aemet/warnings` — active `avisos` CAP alerts by province, proxied
-  the same way, cached on a shorter TTL (warnings can escalate quickly,
-  unlike station readings).
-- Requires converting AEMET's CAP zone codes to renderable polygons — AEMET
-  publishes the avisos zone shapefile/GeoJSON separately from the live feed;
-  confirm the exact current download location and license during
-  implementation (an open question below, not assumed).
-- `src/data/aemetWarnings.js`, its own layer entry (e.g.
-  `{ id: 'aemet-warnings', token: 'j', disposition: 'enabled-only' }`),
-  polygons tinted by severity (green/yellow/orange/red).
+Fetched the real endpoint end-to-end with the live key (`node` one-off
+scripts, not guessed from docs) specifically to close the one open question
+Phase A0 left behind — "where does the zone geometry come from" — and it
+turned up a bigger, better answer than assumed: **there is no separate zone
+shapefile to source at all.** Every open question this phase used to carry
+was resolved before implementation started (below), then implemented and
+verified live:
+
+- Shipped: `parseAemetCapTar`/`parseAemetCapAlert`/
+  `normalizeAemetWarningsSnapshot`/`filterActiveAemetWarnings`/
+  `AEMET_WARNING_LEVEL_RANK` in `src/data/weatherProviderRequests.js` (23
+  new tests — a hand-rolled tar reader tested against a built fixture
+  archive, CAP XML parsing tested against a real captured Lanzarote alert
+  plus synthetic verde/multi-phenomenon fixtures), `aemetWarningsProxy()` in
+  `server/providers/weather/aemet.js` (behavioral test in
+  `environmentProviders.test.mjs` asserts the UTF-8 decode, verde
+  suppression, and stale-on-failure), and `src/data/aemetWarnings.js` (the
+  frontend layer, 13 tests) registered as `aemet-warnings` (token `j`,
+  `REGISTERED_LAYER_IDS` 17→18) in `layerState.js` and
+  `src/standalone/data.js`.
+- **Verified live against the real API**: 9 active zones on a normal day
+  (all amarillo — naranja/rojo still unobserved live, as flagged below),
+  correct UTF-8 decoding ("Almería" rendered correctly), a real multi-ring
+  zone (Grazalema-style) highlighting both rings on select, and — the
+  specific open question flagged for this phase — **polygon ground-draping
+  works correctly with no explicit height/heightReference at all**: verified
+  visually over real hill terrain near Cádiz with no z-fighting or clipping,
+  unlike points' `CLAMP_TO_GROUND` history in Phase A0. Click-to-inspect,
+  multi-phenomenon cards, and clean enable/disable all verified with no
+  console errors.
+- Still deferred, not blocking: voice-tool wiring (same as Phase A0), the
+  in-effect-vs-upcoming visual distinction (data already carries `inEffect`
+  per phenomenon, just not yet styled differently), and confirming
+  naranja/rojo rendering against a real one when a real one occurs.
+
+#### The real API shape
+
+- `GET https://opendata.aemet.es/opendata/api/avisos_cap/ultimoelaborado/area/esp?api_key=...`
+  — same two-step envelope as stations (`{descripcion, estado, datos,
+  metadatos}`). `area/esp` is nationwide; AEMET also accepts a CCAA code
+  there, not needed for a Spain-wide layer.
+- The `datos` URL, THIS time, is not JSON — it's a **plain (not gzipped,
+  despite the `.tar.gz` filename — confirmed via magic bytes) POSIX tar
+  archive**, `Content-Type: application/x-gtar`, ~3.2 MB, containing ~190
+  individual CAP 1.2 XML files, one per (phenomenon × level × zone-group)
+  bulletin AEMET currently has elaborated.
+- **Encoding gotcha, opposite direction from stations**: the tar's outer
+  `Content-Type` header claims `charset=ISO-8859-15` (copy-pasted from the
+  same server code as the stations endpoint, evidently) but the individual
+  XML files inside are **genuinely UTF-8** (confirmed by decoding real bytes
+  both ways — UTF-8 gives correct "Meteorología", latin1 mangles it into
+  "MeteorologÃ­a", the reverse of the stations bug). **Do not reuse the
+  stations proxy's latin1 decode here** — decode each extracted XML file as
+  UTF-8, trust the files' own `<?xml ... encoding="UTF-8"?>` declaration, not
+  the tar's HTTP header.
+- **Each CAP XML carries its warning geometry inline** — a real example,
+  trimmed:
+  ```xml
+  <info>
+    <language>es-ES</language>
+    <event>Aviso de temperaturas máximas de nivel amarillo</event>
+    <severity>Moderate</severity>
+    <urgency>Future</urgency> <certainty>Likely</certainty>
+    <eventCode><valueName>AEMET-Meteoalerta fenomeno</valueName><value>AT;Temperaturas máximas</value></eventCode>
+    <onset>2026-09-14T11:00:00+01:00</onset>
+    <expires>2026-09-14T18:59:59+01:00</expires>
+    <headline>Aviso de temperaturas máximas de nivel amarillo. Lanzarote</headline>
+    <description>Temperatura máxima: 34 ºC. Afectando principalmente en zonas de interior.</description>
+    <instruction>Esté atento. Manténgase informado...</instruction>
+    <parameter><valueName>AEMET-Meteoalerta nivel</valueName><value>amarillo</value></parameter>
+    <parameter><valueName>AEMET-Meteoalerta probabilidad</valueName><value>40%-70%</value></parameter>
+    <area>
+      <areaDesc>Lanzarote</areaDesc>
+      <polygon>28.85,-13.87 28.89,-13.88 ... 28.85,-13.87</polygon>
+      <polygon>29.22,-13.53 29.27,-13.52 ... 29.22,-13.53</polygon>
+      <geocode><valueName>AEMET-Meteoalerta zona</valueName><value>659101</value></geocode>
+    </area>
+  </info>
+  <info><language>en-GB</language>...</info>  <!-- same alert, English, always paired -->
+  ```
+  This IS the render-ready shape: `<polygon>` is `lat,lon lat,lon ...`
+  space/comma-delimited, ready for `Cesium.Cartesian3.fromDegrees` after a
+  lat/lon swap. **AEMET always ships both `es-ES` and `en-GB` `<info>`
+  blocks per alert** — use `es-ES` for consistency with station names
+  (`ubi`) already being Spanish, matching Phase A0.
+- One XML file's `<info>` can list **many `<area>` blocks** (a "verde"
+  bulletin often bundles most/all ~233 zones nationwide into one file, since
+  most of the country has no active phenomenon most of the time), and one
+  `<area>` can have **multiple `<polygon>` rings** for a non-contiguous zone
+  (e.g. Lanzarote + La Graciosa as two separate rings under one geocode).
+  Confirmed one level per file (no file mixes "verde" and "amarillo"
+  `<info>` blocks) — the level lives in each `<info>`'s `AEMET-Meteoalerta
+  nivel` parameter, not something to infer per-area.
+- Confirmed vocabulary from a live pull: 4-level scale
+  `verde/amarillo/naranja/rojo` (only verde/amarillo were active at pull
+  time — naranja/rojo unverified live but are AEMET's documented top two
+  tiers, mapping to CAP `severity` Severe/Extreme the same way
+  verde→Minor and amarillo→Moderate were confirmed live). 13 phenomenon
+  codes seen: `AT` temperaturas máximas, `BT` temperaturas mínimas, `PR`
+  lluvias, `TO` tormentas, `VI` vientos, `NE` nevadas, `NI` nieblas, `CO`
+  costeros, `GA` galernas, `RI` rissagas, `DH` deshielos, `AL` aludes, `VS`
+  polvo en suspensión.
+- Confirmed 233 unique zone geocodes nationwide (6-digit AEMET-internal
+  codes, e.g. `610401`, `659101` — opaque identifiers, no lookup table
+  needed since each alert already carries the zone's `areaDesc` name and
+  polygon directly).
+- **Verde is the "nothing to see here" baseline, not an alert** — AEMET
+  bundles a verde bulletin for essentially the whole country per phenomenon
+  as a matter of course. Rendering verde zones as polygons would paint most
+  of Spain green at all times for no signal, unlike AEMET's own public
+  meteoalerta map (which shows only elevated zones). **Only render
+  amarillo/naranja/rojo** — verde entries are parsed (so a zone's status is
+  known) but never produce a map polygon.
+- `onset`/`expires` mean real things: some warnings are already in effect
+  (`onset` in the past relative to `sent`), others are advance notice for
+  later the same day or the next (`onset` hours or a day out). v1 renders
+  anything with `expires > now` as a solid polygon regardless of `onset`
+  (simplest correct behavior — AEMET wouldn't be publishing it if it weren't
+  worth knowing about); a later refinement can visually distinguish
+  "in effect now" (`onset <= now`) from "starts later" (`onset > now`) via
+  outline style once the base layer is proven, without any data-model change
+  since both timestamps are already carried per phenomenon.
+
+#### Data model and parsing
+
+- `server/providers/weather/aemet.js` gains a sibling parser (or a new
+  `server/providers/weather/aemetWarningsTar.js`, mirroring how
+  `weatherProviderRequests.js` splits pure mechanics from the stations
+  proxy): a **minimal hand-rolled POSIX tar reader** — no new dependency.
+  The format is simple and fixed (512-byte header blocks; filename at offset
+  0/length 100; octal file-size at offset 124/length 12; data follows,
+  padded to the next 512-byte boundary; archive ends at two zero blocks) and
+  entirely AEMET-controlled, the same reasoning this codebase already uses
+  for hand-rolling `parseFirmsCsv`/`parseDotenvText` instead of pulling in a
+  library for a small, fixed, trusted format.
+- CAP XML parsing: also hand-rolled via targeted regex/string extraction
+  (`<tag>...</tag>` per known field), not a general XML/DOM parser — the
+  schema is fixed and AEMET-controlled (not arbitrary untrusted XML), the
+  same "don't reach for a library to parse a shape you fully control"
+  reasoning as the tar reader. Pull per `<info language="es-ES">` block:
+  `event`, `severity`, `onset`, `expires`, `headline`, `description`,
+  `instruction`, the `nivel`/`probabilidad`/`fenomeno` `<parameter>`/
+  `<eventCode>` values, and every `<area>`'s `areaDesc`, one-or-more
+  `<polygon>`, and `<geocode>` zone id.
+- New pure functions in `src/data/weatherProviderRequests.js` (extending
+  the existing module, same portable/no-Node-imports contract — tar/XML
+  extraction happens server-side in the proxy and hands these functions
+  already-decoded UTF-8 strings, not Buffers):
+  - `parseAemetCapAlert(xmlString)` → one alert's structured fields (mirrors
+    `normalizeAemetStationRecord`'s "one raw thing in, one clean record out"
+    shape).
+  - `normalizeAemetWarningsSnapshot(alerts)` → aggregate by zone geocode,
+    keeping every non-verde phenomenon active at that zone and the zone's
+    highest active level (`AEMET_WARNING_LEVEL_RANK = {verde: 0, amarillo:
+    1, naranja: 2, rojo: 3}`, same stepped-rank pattern this codebase
+    already uses for severity elsewhere), analogous to how
+    `normalizeAemetStationsSnapshot` dedups trailing hourly rows down to one
+    row per station.
+  - `filterActiveAemetWarnings(zones, now)` → drop phenomena with
+    `expires <= now` and zones left with no non-verde phenomenon — the
+    Phase-A0-equivalent of `filterFreshAemetStations`, re-applied at serve
+    time so a cached response still reflects "current" against the caller's
+    clock.
+- Proxy (`aemetWarningsProxy()` in `server/providers/weather/aemet.js` or
+  its own file, registered the same way in `server/providers/weather.js` +
+  `local.js`): memory + disk cache
+  (`.gev-cache/aemet-warnings.json`), single-flight, serve-stale-on-failure
+  — same shape as `aemetStationsProxy`. TTL: **10–15 min**, shorter than
+  stations' 20 min since warnings can escalate, still trivial against
+  AEMET's ~50 req/min cap (2 requests per refresh — envelope + tar — a few
+  times an hour). No new rate-limit risk; the "AEMET rate-limit headroom"
+  open question from the first pass is resolved by these concrete numbers.
+  Routes: `GET /api/aemet/warnings` (zones with an active non-verde
+  phenomenon) and `GET /api/aemet/warnings/status` (mirrors the stations
+  proxy's `{hasKey, lastFetch, count, stale, ttlMs}` shape). Keyless → 503
+  `{error: 'no_key'}`, same convention.
+- Response shape to the browser: `{fetchedAt, stale, ttlMs, count, zones:
+  [{geocode, name, level, levelRank, polygons: [[[lat, lon], ...], ...],
+  phenomena: [{code, name, event, description, instruction, probability,
+  onsetMs, expiresMs, inEffect}]}]}` — one entry per zone with at least one
+  active non-verde phenomenon, `polygons` as an array of rings (plural,
+  for multi-part zones like Lanzarote/Grazalema), `phenomena` as the full
+  list so a zone with, say, both an active wind AND coastal warning shows
+  both in its detail card, not just whichever is currently ranked highest.
+
+#### Frontend layer
+
+- `src/data/aemetWarnings.js`, following `aemetStations.js`'s now-proven
+  shape closely (same `init/enable/disable/update/destroy/getStats`
+  contract, same click-to-inspect pattern): one `Cesium.Entity` per polygon
+  RING (not per zone, so a multi-ring zone like Lanzarote renders as two
+  independent polygon entities sharing the same zone geocode as their pick-
+  id prefix — `aemet-warning:<geocode>`), `polygon` graphics
+  (`heightReference` doesn't apply to polygons the way it does points;
+  `perPositionHeight: false` + `classificationType: TERRAIN` or a small
+  ground-clamped material is the polygon-equivalent of "don't z-fight with
+  terrain," worth confirming against Cesium's current polygon-draping
+  behavior during implementation rather than assumed here), color/opacity by
+  `levelRank` (amarillo/naranja/rojo — a 3-step palette, not a gradient;
+  unlike temperature there's no "in-between" a discrete alert level).
+- Click-to-inspect reuses the exact `ScreenSpaceEventHandler` +
+  `pickRegistry.registerPickOwner('aemet-warnings', ...)` +
+  `worldOverlay` `variant: 'selected'` card pattern `aemetStations.js`
+  already implements — card title = zone name, details = one line per
+  active phenomenon (event name, level, validity window), matching how the
+  station card packs multiple readings into compact lines.
+- `layerState.js`: `{ id: 'aemet-warnings', token: 'j', disposition:
+  'enabled-only' }` — `j` confirmed still free against the current registry
+  (`a b c d e f g h i m q r s t u w x` in use as of this pass).
+  `REGISTERED_LAYER_IDS` count assertion in `layerState.test.mjs` bumps
+  17→18. Registered in `src/standalone/data.js` alongside
+  `aemetStationsLayer`, same import-and-register pattern.
+- Voice tools: deferred, same as Phase A0 — not blocking, expected before
+  the layer is considered fully done.
+
+#### Testing strategy
+
+- Pure functions (`parseAemetCapAlert`, `normalizeAemetWarningsSnapshot`,
+  `filterActiveAemetWarnings`) unit-tested against real trimmed CAP XML
+  fixtures captured from this research pass (the Lanzarote example above,
+  plus a multi-area verde bulletin and a multi-polygon zone), the same
+  "real fixture, not synthetic" discipline that caught the stations
+  encoding bug before it shipped.
+- Tar reader tested against a small hand-built fixture archive (a couple of
+  entries, verifying filename/size/padding handling) rather than shipping
+  the real 3.2 MB pull as a test fixture.
+- Proxy behavioral test in `src/tooling/environmentProviders.test.mjs`,
+  mirroring the AEMET-stations test already there: mocks the envelope +
+  tar fetch, asserts UTF-8 decoding (a fixture with an accented name would
+  catch a latin1 regression the same way the stations test does for the
+  opposite encoding), verde suppression, multi-polygon zones, and
+  stale-on-failure.
+- Frontend layer test mirroring `aemetStations.test.mjs`: select/clear,
+  pick-ownership, multi-ring-zone click resolving to one card, and a
+  regression pin if depth-testing/height quirks analogous to Phase A0's
+  turn up during implementation (don't assume none will).
 
 ### Phase A2 — forecast tooltip (optional, low priority)
 
@@ -414,28 +646,53 @@ Concretely:
 
 ## Open questions
 
-Resolved as part of this pass, see [Layer summary](#layer-summary--whats-actually-shipping):
+Resolved in earlier passes, see [Layer summary](#layer-summary--whats-actually-shipping):
 Open-Meteo's point source (world-cities grid via Natural Earth, Spain
-excluded) and GIBS's v1 product (true-color only). Still genuinely open:
+excluded) and GIBS's v1 product (true-color only).
 
-- **AEMET avisos zone geometry source**: confirm the current official
-  download location/format/license for the warning-zone polygons (separate
-  from the live CAP feed) before Phase A1.
-- **AEMET rate-limit headroom**: 50 req/min shared across stations +
-  warnings + (later) forecasts — confirm the cache TTLs proposed above
-  actually keep real-world usage well under that cap before shipping A1/A2.
-- **AEMET key acquisition**: confirm the current sign-up flow still works
-  as described (email-only, no approval wait) — AEMET's process has changed
-  before and should be re-verified at implementation time, not assumed from
-  this planning pass.
+Resolved this pass (2026-09-12), against the real `avisos_cap` API, see
+[Phase A1](#phase-a1--warnings-overlay-avisos--ready-to-build-verified-2026-09-12):
+- ~~AEMET avisos zone geometry source~~ — **there isn't a separate one.**
+  Every CAP alert carries its own zone polygon(s) inline; no shapefile,
+  GeoJSON, or extra download to source, license, or keep in sync.
+- ~~AEMET rate-limit headroom~~ — concrete TTLs now sized (stations 20 min,
+  warnings 10–15 min), a few requests/hour total against a 50/min cap. Not a
+  real constraint at this usage level.
+- **AEMET key acquisition** — still genuinely open, unverified: confirm the
+  current sign-up flow still works as described (email-only, no approval
+  wait) at implementation time for any NEW key someone requests — AEMET's
+  process has changed before. (Moot for continuing on the current key,
+  already working and registered in POWER UP.)
+
+New from this pass, not blocking but worth deciding before/while building
+Phase A1:
+- **In-effect vs. upcoming warning styling**: v1 renders any non-expired
+  warning as a solid polygon regardless of whether `onset` is already past.
+  Worth a visual distinction (e.g. outline-only until `onset`) once the base
+  layer is proven — deferred by design, not an oversight, since both
+  timestamps are already in the data model.
+- **Polygon ground-draping specifics**: confirmed points need
+  `heightReference`; the equivalent correctness question for `polygon`
+  graphics (per-position height vs. classification type, terrain z-fighting
+  at close zoom) hasn't been hit yet because no polygon layer has shipped —
+  worth deliberately checking during A1 implementation rather than assuming
+  polygons are exempt from the exact class of bug points just went through.
+- **naranja/rojo verified only from documentation, not live traffic**: the
+  live pull that grounded this plan only had verde/amarillo active. The
+  4-level vocabulary and CAP severity mapping are AEMET's documented scheme,
+  not something this pass observed in the wild — worth a sanity check
+  against a real orange/red day if one comes up during/after implementation.
 
 ## Docs to update once each phase actually ships
 
 Per `CONTRIBUTING.md`, in the same PR as the implementation (not before):
-`docs/CURRENT-STATE.md` (verified runtime behavior), `DATA_SOURCES.md` (new
-AEMET entry with its license/attribution terms; extend the existing
-Open-Meteo entry's "used for" column rather than duplicating it; new NASA
-GIBS entry — check GIBS's current citation requirements), `CHANGELOG.md`,
-and the layers table in `README.md`. `dataCredits.js` needs a new `aemet`
-and `nasa-gibs` entry (Open-Meteo's existing `open-meteo` credit just needs
-its `html` description broadened).
+`docs/CURRENT-STATE.md` (verified runtime behavior), `DATA_SOURCES.md`,
+`CHANGELOG.md`, and the layers table in `README.md`. **Already done for
+Phase A0** — the AEMET entry in `DATA_SOURCES.md` and `dataCredits.js`
+already exists and covers the whole AEMET connection (stations today,
+warnings once A1 ships), so A1 needs no new attribution entry, just a
+`CURRENT-STATE.md`/`CHANGELOG.md`/README row update the same shape as A0's.
+NASA GIBS still needs its own new `DATA_SOURCES.md`/`dataCredits.js` entry
+when that phase starts (check GIBS's current citation requirements then);
+Open-Meteo's existing entry still just needs its "used for" column
+broadened once its map-layer use ships.
