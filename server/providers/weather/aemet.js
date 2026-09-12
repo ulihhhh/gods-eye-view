@@ -2,10 +2,17 @@ import path from 'node:path';
 import { promises as fsp } from 'node:fs';
 
 import {
+  aemetMunicipioForecastEnvelopeUrl,
+  aemetMunicipiosEnvelopeUrl,
   aemetStationsEnvelopeUrl,
   aemetWarningsEnvelopeUrl,
   filterActiveAemetWarnings,
   filterFreshAemetStations,
+  filterUpcomingAemetForecastHours,
+  findNearestAemetMunicipio,
+  madridCivilNow,
+  normalizeAemetHourlyForecast,
+  normalizeAemetMunicipiosSnapshot,
   normalizeAemetStationsSnapshot,
   normalizeAemetWarningsSnapshot,
   parseAemetCapAlert,
@@ -370,6 +377,202 @@ export function aemetWarningsProxy() {
         } catch (err) {
           console.warn('[aemet-warnings-proxy] error:', err?.message || err);
           sendJson(500, { error: 'aemet warnings proxy error' });
+        }
+      });
+    },
+  };
+}
+
+/**
+ * AEMET OpenData on-demand "next hours" municipio-forecast proxy (Phase A2).
+ * Upstream: `maestro/municipios` (a fixed, nationwide id/name/lat/lon lookup
+ * table, ~8.1k rows, confirmed live) + `prediccion/especifica/municipio/
+ * horaria/{municipio}` (that municipio's hourly forecast).
+ *
+ * Unlike the two proxies above, this is deliberately query-driven rather
+ * than a polled whole-country snapshot — a click supplies a lat/lon (e.g. an
+ * `aemet-stations` pin), the server resolves it to the nearest municipio
+ * (`findNearestAemetMunicipio`, a plain great-circle nearest-neighbor scan —
+ * accurate enough for "which municipio is this station in", and no spatial
+ * index is worth building for an ~8k-row one-off lookup), and returns that
+ * municipio's upcoming hours. The municipio table itself barely ever
+ * changes, so it gets a long TTL and lives in memory only (no disk cache —
+ * unlike stations/warnings, there is no "serve yesterday's snapshot while
+ * upstream is down" story that matters here: without the table, `datos`
+ * from the second call would have to be re-derived anyway, and re-fetching
+ * once every #TTL is cheap). Per-municipio forecasts get their own short-TTL
+ * memory cache, keyed by municipio id, capped at `MAX_CACHED_MUNICIPIOS`
+ * entries (evicting the oldest) — most usage clicks a handful of the same
+ * regions repeatedly, so an unbounded map isn't worth guarding against, but
+ * an explicit cap costs nothing and rules it out.
+ *
+ * Every AEMET hourly timestamp is naive Europe/Madrid civil time with no UTC
+ * offset (see `normalizeAemetHourlyForecast`'s own comment) — "upcoming" is
+ * judged via `madridCivilNow()`, not the server process's own timezone.
+ *
+ * Routes:
+ *   GET /api/aemet/forecast?lat=<>&lon=<> → {fetchedAt, stale, ttlMs,
+ *     municipio: {id, name, lat, lon, distanceKm}, hours: [...]}
+ *   GET /api/aemet/forecast/status → {hasKey, municipiosLoaded,
+ *     municipiosLastFetch, cachedForecastCount}
+ *
+ * Keyless (no AEMET_API_KEY): /api/aemet/forecast → 503 {error:'no_key'};
+ * status → {hasKey:false}. A missing/invalid lat/lon → 400 {error:'bad_request'}.
+ * Upstream is never touched without a key.
+ *
+ * @returns {import('vite').Plugin}
+ */
+export function aemetForecastProxy() {
+  const MUNICIPIOS_TTL_MS = 24 * 3600_000;
+  const FORECAST_TTL_MS = 45 * 60_000;
+  const MAX_CACHED_MUNICIPIOS = 300;
+
+  /** @type {?{at: number, municipios: Array<object>}} */
+  let municipiosMem = null;
+  /** @type {?Promise<Array<object>>} single-flight municipios refresh */
+  let municipiosInflight = null;
+  /** @type {Map<string, {at: number, forecast: object}>} municipio id -> cached forecast, insertion-ordered for LRU-ish eviction */
+  const forecastByMunicipio = new Map();
+  /** @type {Map<string, Promise<object>>} municipio id -> in-flight forecast fetch */
+  const forecastInflight = new Map();
+
+  const apiKey = () => String(process.env.AEMET_API_KEY || '').trim();
+
+  async function fetchEnvelope(url, timeoutMs = 20_000) {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const envelope = await res.json();
+    if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
+      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+    }
+    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
+    // Both feeds below are served as ISO-8859-15 despite being JSON, same
+    // gotcha as the stations feed (confirmed live) — decode as latin1, never
+    // trust res.json() to guess right.
+    const buffer = Buffer.from(await dataRes.arrayBuffer());
+    return JSON.parse(buffer.toString('latin1'));
+  }
+
+  async function ensureMunicipios(key) {
+    if (municipiosMem && Date.now() - municipiosMem.at < MUNICIPIOS_TTL_MS) return municipiosMem.municipios;
+    if (!municipiosInflight) {
+      municipiosInflight = fetchEnvelope(aemetMunicipiosEnvelopeUrl(key), 30_000)
+        .then((raw) => {
+          const municipios = normalizeAemetMunicipiosSnapshot(raw);
+          municipiosMem = { at: Date.now(), municipios };
+          return municipios;
+        })
+        .finally(() => {
+          municipiosInflight = null;
+        });
+    }
+    const fresh = await municipiosInflight.catch(() => null);
+    if (fresh) return fresh;
+    if (municipiosMem) return municipiosMem.municipios; // upstream down — stale beats empty
+    throw new Error('municipio lookup table unavailable');
+  }
+
+  async function fetchForecastFor(key, municipioId) {
+    const raw = await fetchEnvelope(aemetMunicipioForecastEnvelopeUrl(key, municipioId), 20_000);
+    const forecast = normalizeAemetHourlyForecast(raw);
+    if (!forecast) throw new Error('malformed municipio forecast response');
+    return forecast;
+  }
+
+  /**
+   * @returns {Promise<{forecast: object, fetchedAt: number, stale: boolean}>}
+   */
+  async function ensureForecast(key, municipioId) {
+    const cached = forecastByMunicipio.get(municipioId);
+    if (cached && Date.now() - cached.at < FORECAST_TTL_MS) {
+      return { forecast: cached.forecast, fetchedAt: cached.at, stale: false };
+    }
+    let pending = forecastInflight.get(municipioId);
+    if (!pending) {
+      pending = fetchForecastFor(key, municipioId).finally(() => {
+        forecastInflight.delete(municipioId);
+      });
+      forecastInflight.set(municipioId, pending);
+    }
+    try {
+      const forecast = await pending;
+      const at = Date.now();
+      forecastByMunicipio.delete(municipioId); // re-insert at the end → most-recently-used
+      forecastByMunicipio.set(municipioId, { at, forecast });
+      while (forecastByMunicipio.size > MAX_CACHED_MUNICIPIOS) {
+        forecastByMunicipio.delete(forecastByMunicipio.keys().next().value);
+      }
+      return { forecast, fetchedAt: at, stale: false };
+    } catch (err) {
+      if (cached) return { forecast: cached.forecast, fetchedAt: cached.at, stale: true }; // upstream down — stale beats empty
+      throw err;
+    }
+  }
+
+  return {
+    name: 'aemet-forecast-proxy',
+    configureServer(server) {
+      server.middlewares.use('/api/aemet/forecast', async (req, res) => {
+        const sendJson = (status, obj) => {
+          if (res.headersSent) return;
+          res.writeHead(status, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+          });
+          res.end(JSON.stringify(obj));
+        };
+        try {
+          const url = new URL(req.url || '', 'http://internal');
+          const key = apiKey();
+
+          if (url.pathname === '/status') {
+            sendJson(200, {
+              hasKey: Boolean(key),
+              municipiosLoaded: municipiosMem ? municipiosMem.municipios.length : 0,
+              municipiosLastFetch: municipiosMem ? municipiosMem.at : null,
+              cachedForecastCount: forecastByMunicipio.size,
+            });
+            return;
+          }
+
+          if (!key) {
+            sendJson(503, { error: 'no_key' });
+            return;
+          }
+
+          const lat = Number(url.searchParams.get('lat'));
+          const lon = Number(url.searchParams.get('lon'));
+          if (!Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lon) || Math.abs(lon) > 180) {
+            sendJson(400, { error: 'bad_request' });
+            return;
+          }
+
+          const municipios = await ensureMunicipios(key);
+          const nearest = findNearestAemetMunicipio(municipios, lat, lon);
+          if (!nearest) {
+            sendJson(502, { error: 'aemet municipio lookup failed and no cache available' });
+            return;
+          }
+
+          const { forecast, fetchedAt, stale } = await ensureForecast(key, nearest.municipio.id);
+
+          sendJson(200, {
+            fetchedAt,
+            stale,
+            ttlMs: FORECAST_TTL_MS,
+            municipio: {
+              id: nearest.municipio.id,
+              name: nearest.municipio.name,
+              lat: nearest.municipio.lat,
+              lon: nearest.municipio.lon,
+              distanceKm: nearest.distanceKm,
+            },
+            hours: filterUpcomingAemetForecastHours(forecast.hours, madridCivilNow()),
+          });
+        } catch (err) {
+          console.warn('[aemet-forecast-proxy] error:', err?.message || err);
+          sendJson(502, { error: 'aemet forecast fetch failed and no cache available' });
         }
       });
     },

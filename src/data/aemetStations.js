@@ -200,14 +200,37 @@ export function buildAemetStationSelectionCopy(station) {
 }
 
 /**
+ * Phase A2 — one compact line summarizing the next few upcoming hours from
+ * `/api/aemet/forecast`'s `hours` array (already filtered to "upcoming" and
+ * capped server-side, see `filterUpcomingAemetForecastHours`). Returns
+ * `null` for no/empty input so the caller can simply omit the line rather
+ * than showing an empty "Next hours:" — this fires async, well after the
+ * base card already rendered, so absence must be silent, not a placeholder.
+ * @param {Array<{hour: number, temperatureC: number|null}>} hours
+ * @param {number} [take=4]
+ * @returns {string|null}
+ */
+export function buildAemetForecastSummaryLine(hours, take = 4) {
+  if (!Array.isArray(hours) || !hours.length) return null;
+  const parts = hours.slice(0, take).map(
+    (h) => `${String(h.hour).padStart(2, '0')}:00 ${fmt(h.temperatureC, '°C', 0)}`,
+  );
+  if (!parts.length) return null;
+  return `Next hours: ${parts.join(' · ')}`;
+}
+
+/**
  * Build the protected selected-station overlay entry. Mirrors
  * createBikeshareSelectedOverlayEntry's field set exactly.
+ * `forecastLine` is optional (Phase A2's async "next hours" summary,
+ * appended once it arrives — the base card renders immediately without it).
  * @param {string} id
  * @param {Cesium.Cartesian3} position
  * @param {object} station
+ * @param {string|null} [forecastLine]
  * @returns {object|null}
  */
-export function createAemetStationSelectedOverlayEntry(id, position, station) {
+export function createAemetStationSelectedOverlayEntry(id, position, station, forecastLine = null) {
   if (!id || !position) return null;
   const { title, details } = buildAemetStationSelectionCopy(station);
   return {
@@ -220,7 +243,7 @@ export function createAemetStationSelectedOverlayEntry(id, position, station) {
     collisionGroup: 'ambient-card',
     priority: Number.MAX_SAFE_INTEGER,
     title,
-    details,
+    details: forecastLine ? [...details, forecastLine] : details,
     accent: '#ffe23b',
     interactive: false,
     anchorRadiusPx: 9,
@@ -231,6 +254,12 @@ export function createAemetStationSelectedOverlayEntry(id, position, station) {
     horizonCull: true,
     terrainOcclusion: false,
   };
+}
+
+/** Validate `/api/aemet/forecast`'s payload shape before using it to extend a card. */
+export function normalizeAemetForecastPayload(payload) {
+  if (!Array.isArray(payload?.hours)) return null;
+  return payload.hours;
 }
 
 /** Validate the proxy's payload shape before replacing the last good snapshot. */
@@ -262,6 +291,13 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
   let _selectedEntity = null;
   /** @type {Cesium.ScreenSpaceEventHandler|null} */
   let _clickHandler = null;
+  /**
+   * Bumped on every select/clear so a Phase-A2 forecast fetch that resolves
+   * after the user has already moved on (reselected a different station,
+   * cleared the selection, or the layer was disabled) can recognize it's
+   * stale and silently drop its result instead of overwriting a newer card.
+   */
+  let _selectionToken = 0;
 
   /**
    * A station's world position. The height component is `POINT_HEIGHT_OFFSET_M`
@@ -284,7 +320,48 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
     if (_selectedEntity && _viewer) _viewer.entities.remove(_selectedEntity);
     _selectedId = null;
     _selectedEntity = null;
+    _selectionToken += 1;
     overlayHost.clearSource(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID);
+  }
+
+  /**
+   * Phase A2: fetch the "next hours" forecast for the selected station's
+   * location and, if that selection is still current when the response
+   * arrives, re-render the same overlay entry with the forecast line
+   * appended. Best-effort by design — a failed/slow/malformed forecast
+   * response simply leaves the card exactly as the synchronous render in
+   * `_selectStation` already left it, never blocking or replacing it with
+   * an error state (the current-conditions reading is the important part;
+   * the forecast is a bonus line).
+   * @param {string} id
+   * @param {object} station
+   * @param {number} token Captured at call time; a mismatch at resolution
+   *   means the user has since selected something else or cleared — drop
+   *   the result rather than racing a newer card.
+   */
+  async function _fetchAndApplyForecast(id, station, token) {
+    try {
+      const response = await fetch(
+        `/api/aemet/forecast?lat=${encodeURIComponent(station.lat)}&lon=${encodeURIComponent(station.lon)}`,
+      );
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (token !== _selectionToken || _selectedId !== id) return; // stale — user has moved on
+      const hours = normalizeAemetForecastPayload(payload);
+      const line = hours ? buildAemetForecastSummaryLine(hours) : null;
+      if (!line || !_selectedEntity) return;
+      const position = _selectedEntity.position?.getValue(Cesium.JulianDate.now());
+      const entry = createAemetStationSelectedOverlayEntry(id, position, station, line);
+      if (entry) {
+        overlayHost.setEntries(
+          AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID,
+          [entry],
+          AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_OPTIONS,
+        );
+      }
+    } catch {
+      /* forecast is a nice-to-have addition to an already-shown card, never fatal */
+    }
   }
 
   function _selectStation(id) {
@@ -293,6 +370,7 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
     if (!station || !original?.position || !_viewer) return;
     _clearSelection();
     _selectedId = id;
+    const token = (_selectionToken += 1);
     original.point.show = false;
     const position = original.position.getValue(Cesium.JulianDate.now());
     _selectedEntity = _viewer.entities.add({
@@ -323,6 +401,11 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
         AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_OPTIONS,
       );
     }
+    // Fire-and-forget from every real caller (the base card above is already
+    // complete and correct without this — see `_fetchAndApplyForecast`'s own
+    // contract); returned only so `_selectStationForTest` can let a test
+    // await it deterministically instead of racing a microtask.
+    return _fetchAndApplyForecast(id, station, token);
   }
 
   function _onKeyDown(e) {
@@ -547,8 +630,10 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
     // plain Node — see hasDom() above), the same way bikeshare.js's own
     // tests bypass its click handler. Not part of the layer contract other
     // callers should use.
+    // Returns the Phase-A2 forecast fetch's promise so a test can `await` it
+    // deterministically instead of racing a microtask.
     _selectStationForTest(id) {
-      _selectStation(id);
+      return _selectStation(id);
     },
     _clearSelectionForTest() {
       _clearSelection();

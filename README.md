@@ -274,7 +274,7 @@ Fifteen layers and map sources. **Eleven have a keyless path.** Some offer addit
 | 🚢 **Live Vessels** | Thousands of ships worldwide | AISStream | 🟡 |
 | 🛰️ **Satellites** | 838-object catalog, color-coded by class with a live legend — the **DENSE** chip drops in the whole Starlink shell | CelesTrak | 🟢 |
 | 🌍 **Earthquakes** | Global seismic activity, last 24h | USGS | 🟢 |
-| 🌡️ **AEMET Weather Stations** | ~850 live Spanish weather stations, colored by current temperature | AEMET OpenData | 🟡 |
+| 🌡️ **AEMET Weather Stations** | ~850 live Spanish weather stations, colored by current temperature; click for a reading plus a "next hours" forecast | AEMET OpenData | 🟡 |
 | ⚠️ **AEMET Weather Warnings** | Live avisos zone polygons (amarillo/naranja/rojo) with phenomenon, description, and validity window on click | AEMET OpenData | 🟡 |
 | 🚗 **Traffic** | Simulated vehicles on OSM roads. With TomTom, live flow speeds drive the simulation and congestion colors below ~8 km; individual vehicle positions are not live observations | TomTom + OSM | 🟢 simulation · 🟡 live flow speeds |
 | 📹 **CCTV Mesh** | ~800 public cameras projected *into* the 3D space — Austin · California (Caltrans) · London (TfL). Positions are published; poses are estimated priors **you calibrate by dragging a gizmo on the camera itself** | City APIs | 🟢 |

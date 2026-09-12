@@ -5,7 +5,7 @@ import { terrainHeightsProxy } from 'gods-eye-view/server/providers/terrain';
 import { tomtomProxy } from 'gods-eye-view/server/providers/traffic';
 import { firmsProxy } from 'gods-eye-view/server/providers/firms';
 import { gbfsProxy } from 'gods-eye-view/server/providers/gbfs';
-import { aemetStationsProxy, aemetWarningsProxy } from '../../server/providers/weather.js';
+import { aemetForecastProxy, aemetStationsProxy, aemetWarningsProxy } from '../../server/providers/weather.js';
 import { localProviderPlugins } from '../../server/providers/local.js';
 
 function install(plugin) {
@@ -66,6 +66,7 @@ test('standalone composition mounts every extracted provider exactly once withou
     gbfsProxy,
     aemetStationsProxy,
     aemetWarningsProxy,
+    aemetForecastProxy,
   ])
     assert.equal(plugins.filter((p) => p.name === factory().name).length, 1);
 });
@@ -378,6 +379,94 @@ test('AEMET warnings decodes UTF-8 CAP XML from a tar archive, suppresses verde,
   const stale = json(await request());
   assert.equal(stale.stale, true);
   assert.equal(stale.count, 1, 'stale cache beats an empty layer');
+});
+
+test('AEMET forecast resolves lat/lon to the nearest municipio, filters to upcoming Madrid-time hours, and caches both layers independently', async (t) => {
+  isolate(t, { AEMET_API_KEY: '' });
+  // 2026-09-12T12:00:00Z is CEST (+2) → 14:00 in Madrid. Fixture hours are
+  // chosen straddling that boundary so the Madrid-civil-time filter (not the
+  // test process's own timezone) is what's actually being exercised.
+  let now = Date.UTC(2026, 8, 12, 12);
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+
+  const madridMunicipioRaw = {
+    id: 'id28079', id_old: '28001', nombre: 'Madrid', capital: 'Madrid',
+    latitud_dec: '40.4168', longitud_dec: '-3.7038', altitud: '667', num_hab: '3223334',
+  };
+  const municipiosBuffer = Buffer.from(JSON.stringify([madridMunicipioRaw]), 'latin1');
+  const hourlyForecastRaw = [{
+    id: '28079', nombre: 'Madrid', provincia: 'Madrid', elaborado: '2026-09-12T13:00:00',
+    prediccion: {
+      dia: [{
+        fecha: '2026-09-12T00:00:00',
+        // "13" is already past 14:00 Madrid time — must be filtered out.
+        temperatura: [{ value: '24', periodo: '13' }, { value: '25', periodo: '14' }, { value: '26', periodo: '15' }],
+        estadoCielo: [{ value: '11', periodo: '14', descripcion: 'Despejado' }, { value: '11', periodo: '15', descripcion: 'Despejado' }],
+        precipitacion: [{ value: '0', periodo: '14' }, { value: '0', periodo: '15' }],
+        vientoAndRachaMax: [
+          { direccion: ['NE'], velocidad: ['10'], periodo: '14' },
+          { direccion: ['NE'], velocidad: ['12'], periodo: '15' },
+        ],
+      }],
+    },
+  }];
+  const forecastBuffer = Buffer.from(JSON.stringify(hourlyForecastRaw), 'latin1');
+
+  t.mock.method(globalThis, 'fetch', async (raw) => {
+    calls++;
+    const url = new URL(raw);
+    assert.equal(url.hostname, 'opendata.aemet.es');
+    if (url.pathname.endsWith('/municipios-datos-fixture')) {
+      return new Response(municipiosBuffer, { headers: { 'content-type': 'text/plain;charset=ISO-8859-15' } });
+    }
+    if (url.pathname.endsWith('/forecast-datos-fixture')) {
+      return new Response(forecastBuffer, { headers: { 'content-type': 'text/plain;charset=ISO-8859-15' } });
+    }
+    assert.equal(url.searchParams.get('api_key'), 'fixture-key');
+    if (url.pathname.includes('/maestro/municipios')) {
+      return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/municipios-datos-fixture' });
+    }
+    assert.ok(url.pathname.endsWith('/municipio/horaria/28079'), `unexpected forecast municipio in ${url.pathname}`);
+    return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/forecast-datos-fixture' });
+  });
+
+  const request = install(aemetForecastProxy());
+  assert.equal((await request('/?lat=40.42&lon=-3.70')).status, 503, 'keyless');
+  assert.equal(json(await request('/status')).hasKey, false);
+  assert.equal(calls, 0);
+  process.env.AEMET_API_KEY = 'fixture-key';
+
+  assert.equal((await request('/?lat=999&lon=-3.70')).status, 400, 'out-of-range lat');
+  assert.equal((await request('/?lat=abc&lon=-3.70')).status, 400, 'non-numeric lat');
+  assert.equal(calls, 0, 'bad requests never reach upstream');
+
+  const first = json(await request('/?lat=40.42&lon=-3.70'));
+  assert.equal(first.municipio.id, '28079');
+  assert.equal(first.municipio.name, 'Madrid');
+  assert.equal(calls, 4, 'municipios envelope + datos, forecast envelope + datos');
+  assert.deepEqual(first.hours.map((h) => h.hour), [14, 15], 'hour 13 is already past 14:00 Madrid time');
+  assert.equal(first.hours[0].temperatureC, 25);
+  assert.equal(first.hours[0].windDirection, 'NE');
+  assert.equal(first.stale, false);
+
+  const second = json(await request('/?lat=40.42&lon=-3.70'));
+  assert.equal(second.municipio.id, '28079');
+  assert.equal(calls, 4, 'within both TTLs: municipio table and forecast both served from cache');
+
+  const status = json(await request('/status'));
+  assert.equal(status.hasKey, true);
+  assert.equal(status.municipiosLoaded, 1);
+  assert.equal(status.cachedForecastCount, 1);
+
+  now += 46 * 60_000; // past the forecast's 45-minute TTL, well within the municipio table's 24h TTL
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('upstream down');
+  });
+  const stale = json(await request('/?lat=40.42&lon=-3.70'));
+  assert.equal(stale.stale, true);
+  assert.equal(stale.municipio.id, '28079', 'the municipio lookup itself needed no re-fetch — stale forecast beats no forecast');
+  assert.deepEqual(stale.hours.map((h) => h.hour), [14, 15]);
 });
 
 test('GBFS keeps host/path/method guards, response caps and distinct information/status cache headers', async (t) => {

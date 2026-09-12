@@ -294,6 +294,56 @@ Voice-tool wiring (`GEV_REALTIME_TOOLS` / `src/voice/gevActions.js`) is not
 yet done for this layer, matching every other still-pending item tracked in
 `docs/plans/weather-data-integrations.md`.
 
+### Phase A2 — "next hours" forecast tooltip (2026-09-12)
+
+Selecting a station (the click-to-inspect flow above) fires an on-demand
+fetch to `/api/aemet/forecast?lat=&lon=` and, once it resolves, appends one
+extra line to the already-open card — e.g. `Next hours: 17:00 33°C · 18:00
+32°C` — without ever blocking or replacing the base reading. This is an
+extension of `aemet-stations`, not a new layer: no new `LAYER_STATE_REGISTRY`
+entry, per the plan's design.
+
+The proxy (`aemetForecastProxy()` in `server/providers/weather/aemet.js`) is
+deliberately shaped differently from the two snapshot proxies above, since
+it's query-driven rather than a polled whole-country pull: it loads AEMET's
+~8,100-row `maestro/municipios` lookup table once (memory-only, 24h TTL — no
+disk cache, since there is no "serve yesterday's snapshot" story worth
+having for a table that barely changes), resolves the clicked lat/lon to the
+nearest municipio by great-circle distance (`findNearestAemetMunicipio`, a
+plain O(n) scan — accurate enough and fast enough for one click), then
+fetches and caches that municipio's hourly forecast (45 min TTL, per-
+municipio memory cache capped at 300 entries, single-flight per municipio
+id). Confirmed live: AEMET's `id` field on a municipio record (e.g.
+`"id28079"`) is the value the forecast endpoint's path segment wants
+(`"28079"`) — its separate `id_old` field is a different, legacy code the
+endpoint rejects.
+
+AEMET's hourly forecast (`prediccion/especifica/municipio/horaria/*`) splits
+one hour's data across four separately `periodo`-keyed arrays
+(`temperatura`/`estadoCielo`/`precipitacion`/`vientoAndRachaMax`) that have
+to be joined by hour; `vientoAndRachaMax` additionally interleaves two
+different entry shapes at the same `periodo` (a wind entry with `direccion`,
+and a gust entry without it) — confirmed live, and only the wind-shaped
+entries are used for v1. Every timestamp in this feed is naive
+Europe/Madrid civil time with no UTC offset (unlike the CAP warnings feed's
+`onset`/`expires`, which do carry one) — `madridCivilNow()` reads Madrid's
+actual civil time via `Intl.DateTimeFormat`, so "upcoming" is judged
+correctly regardless of the server process's own timezone, verified against
+both CEST and CET (Node's `Intl` handles the DST transition correctly).
+
+A slow, failed, or malformed forecast response never blocks or corrupts the
+already-shown card — the base reading is complete and correct without it;
+the forecast line simply doesn't appear (verified live: a request that hit
+AEMET's rate limit while testing returned a clean `502` from the proxy, and
+the just-opened card for a different, already-cached station was
+unaffected). A selection-generation token guards against a slow forecast for
+station A resolving after the user has already selected station B — the
+stale response is dropped, never applied to the wrong card.
+
+Voice-tool wiring is not yet done, same as stations (and deferred as a
+single batched pass across the whole AEMET layer set, not per-phase — see
+the plan doc's Phase A14).
+
 ## AEMET Weather Warnings (2026-09-12)
 
 `aemet-warnings` (token `j`, `enabled-only`) polls `/api/aemet/warnings`

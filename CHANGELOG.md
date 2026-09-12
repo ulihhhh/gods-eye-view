@@ -42,6 +42,14 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   coastal warnings together). Shares the AEMET key already configured for
   the stations layer.
 
+- Add a "next hours" forecast tooltip to the AEMET Weather Stations layer:
+  clicking a station now also fetches AEMET's hourly municipio forecast via
+  a new on-demand `/api/aemet/forecast?lat=&lon=` proxy (resolves the
+  clicked point to its nearest municipio, no separate layer or toggle) and
+  appends a compact `Next hours: 17:00 33°C · 18:00 32°C` line to the
+  already-open card once it arrives. A slow or failed forecast never blocks
+  or replaces the base reading.
+
 - Separate terrain, traffic, FIRMS and GBFS middleware into focused provider
   modules, preserving local configuration, routes and cache/error behavior.
 

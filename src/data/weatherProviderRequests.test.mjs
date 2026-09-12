@@ -5,10 +5,19 @@ import {
   AEMET_STATION_STALE_MS,
   AEMET_WARNINGS_ENVELOPE_URL,
   AEMET_WARNING_LEVEL_RANK,
+  aemetMunicipioForecastEnvelopeUrl,
+  aemetMunicipiosEnvelopeUrl,
   aemetStationsEnvelopeUrl,
   aemetWarningsEnvelopeUrl,
   filterActiveAemetWarnings,
   filterFreshAemetStations,
+  filterUpcomingAemetForecastHours,
+  findNearestAemetMunicipio,
+  haversineDistanceKm,
+  madridCivilNow,
+  normalizeAemetHourlyForecast,
+  normalizeAemetMunicipioRecord,
+  normalizeAemetMunicipiosSnapshot,
   normalizeAemetStationRecord,
   normalizeAemetStationsSnapshot,
   normalizeAemetWarningsSnapshot,
@@ -460,4 +469,189 @@ test('active-warnings filter drops verde and expired phenomena, keeps a zone onl
 test('active-warnings filter tolerates non-array input', () => {
   assert.deepEqual(filterActiveAemetWarnings(null), []);
   assert.deepEqual(filterActiveAemetWarnings(undefined), []);
+});
+
+// ---------------------------------------------------------------------------
+// Phase A2 — municipio forecast. Fixtures below are trimmed real shapes
+// captured from a live pull against `maestro/municipios` and
+// `prediccion/especifica/municipio/horaria/28079` (Madrid), the same
+// "real fixture, not synthetic" discipline used for the stations/warnings
+// tests above.
+// ---------------------------------------------------------------------------
+
+const REAL_MADRID_MUNICIPIO = Object.freeze({
+  latitud: '40º24\'30.282876"',
+  id_old: '28001',
+  url: 'madrid-id28079',
+  latitud_dec: '40.40841191',
+  altitud: '657',
+  capital: 'Madrid',
+  num_hab: '3165235',
+  zona_comarcal: '722802',
+  destacada: '1',
+  nombre: 'Madrid',
+  longitud_dec: '-3.68760088',
+  id: 'id28079',
+  longitud: '-3º41\'15.363168"',
+});
+
+test('municipio/forecast envelope URLs embed the key as a query param', () => {
+  assert.ok(aemetMunicipiosEnvelopeUrl('K').endsWith('?api_key=K'));
+  assert.ok(aemetMunicipiosEnvelopeUrl('K').startsWith('https://opendata.aemet.es/opendata/api/maestro/municipios'));
+  const forecastUrl = aemetMunicipioForecastEnvelopeUrl('K', '28079');
+  assert.ok(forecastUrl.includes('/municipio/horaria/28079?'), 'municipio id is a path segment, key is a query param');
+  assert.ok(forecastUrl.endsWith('api_key=K'));
+});
+
+test('normalizeAemetMunicipioRecord extracts the INE code from AEMET\'s "id" field, not "id_old"', () => {
+  const record = normalizeAemetMunicipioRecord(REAL_MADRID_MUNICIPIO);
+  // "28079" (from id: "id28079") is the value the live forecast endpoint
+  // actually accepted; "28001" (id_old) is a different, legacy code that a
+  // live pull confirmed the forecast endpoint rejects.
+  assert.equal(record.id, '28079');
+  assert.equal(record.name, 'Madrid');
+  assert.ok(Math.abs(record.lat - 40.40841191) < 1e-6);
+  assert.ok(Math.abs(record.lon - -3.68760088) < 1e-6);
+  assert.equal(record.altitudeM, 657);
+  assert.equal(record.populationCount, 3165235);
+});
+
+test('normalizeAemetMunicipioRecord rejects a record with no usable id or coordinates', () => {
+  assert.equal(normalizeAemetMunicipioRecord({ ...REAL_MADRID_MUNICIPIO, id: '28079' }), null, 'missing "id..." prefix');
+  assert.equal(normalizeAemetMunicipioRecord({ ...REAL_MADRID_MUNICIPIO, latitud_dec: 'not-a-number' }), null);
+  assert.equal(normalizeAemetMunicipioRecord({ ...REAL_MADRID_MUNICIPIO, nombre: '', capital: '' }), null, 'no usable name');
+  assert.equal(normalizeAemetMunicipioRecord(null), null);
+});
+
+test('normalizeAemetMunicipiosSnapshot drops invalid rows without dropping the batch', () => {
+  const rows = normalizeAemetMunicipiosSnapshot([REAL_MADRID_MUNICIPIO, { id: 'garbage' }, null]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, '28079');
+  assert.deepEqual(normalizeAemetMunicipiosSnapshot(null), []);
+});
+
+test('haversineDistanceKm is zero for identical points and roughly right for a known pair', () => {
+  assert.equal(haversineDistanceKm(40.4, -3.7, 40.4, -3.7), 0);
+  // Madrid to Barcelona is ~500 km great-circle.
+  const distance = haversineDistanceKm(40.4168, -3.7038, 41.3874, 2.1686);
+  assert.ok(distance > 480 && distance < 520, `expected ~500km, got ${distance}`);
+});
+
+test('findNearestAemetMunicipio picks the closest candidate by great-circle distance', () => {
+  const madrid = { id: '28079', name: 'Madrid', lat: 40.4168, lon: -3.7038 };
+  const barcelona = { id: '08019', name: 'Barcelona', lat: 41.3874, lon: 2.1686 };
+  const result = findNearestAemetMunicipio([madrid, barcelona], 40.42, -3.70);
+  assert.equal(result.municipio.id, '28079');
+  assert.ok(result.distanceKm < 5);
+});
+
+test('findNearestAemetMunicipio tolerates an empty list or bad coordinates', () => {
+  assert.equal(findNearestAemetMunicipio([], 40, -3), null);
+  assert.equal(findNearestAemetMunicipio([{ id: '1', lat: 0, lon: 0 }], NaN, -3), null);
+});
+
+/** Trimmed from a real `prediccion/especifica/municipio/horaria/28079` pull (Madrid, one day). */
+const REAL_HOURLY_FORECAST_DAY = Object.freeze({
+  fecha: '2026-09-12T00:00:00',
+  estadoCielo: [
+    { value: '12', periodo: '08', descripcion: 'Poco nuboso' },
+    { value: '11', periodo: '09', descripcion: 'Despejado' },
+  ],
+  precipitacion: [
+    { value: '0', periodo: '08' },
+    { value: '0', periodo: '09' },
+  ],
+  temperatura: [
+    { value: '18', periodo: '08' },
+    { value: '20', periodo: '09' },
+  ],
+  vientoAndRachaMax: [
+    { direccion: ['NE'], velocidad: ['12'], periodo: '08' },
+    { value: '22', periodo: '08' }, // gust entry — no `direccion`, must be ignored
+    { direccion: ['NE'], velocidad: ['13'], periodo: '09' },
+    { value: '22', periodo: '09' },
+  ],
+});
+
+const REAL_HOURLY_FORECAST_RESPONSE = Object.freeze([{
+  origen: {},
+  elaborado: '2026-09-12T14:25:12',
+  nombre: 'Madrid',
+  provincia: 'Madrid',
+  prediccion: { dia: [REAL_HOURLY_FORECAST_DAY] },
+  id: '28079',
+  version: '1.0',
+}]);
+
+test('normalizeAemetHourlyForecast assembles one record per hour from four periodo-keyed arrays', () => {
+  const forecast = normalizeAemetHourlyForecast(REAL_HOURLY_FORECAST_RESPONSE);
+  assert.equal(forecast.municipioId, '28079');
+  assert.equal(forecast.name, 'Madrid');
+  assert.equal(forecast.province, 'Madrid');
+  assert.equal(forecast.elaborated, '2026-09-12T14:25:12');
+  assert.equal(forecast.hours.length, 2);
+  const [h08, h09] = forecast.hours;
+  assert.deepEqual(h08, {
+    dateIso: '2026-09-12',
+    hour: 8,
+    temperatureC: 18,
+    skyDescription: 'Poco nuboso',
+    precipitationMm: 0,
+    windSpeedKmh: 12,
+    windDirection: 'NE',
+  });
+  assert.equal(h09.temperatureC, 20);
+  assert.equal(h09.windSpeedKmh, 13, 'the gust-only entry at the same periodo must not override the wind entry');
+});
+
+test('normalizeAemetHourlyForecast keeps hours in chronological order across day boundaries', () => {
+  const dayTwo = {
+    ...REAL_HOURLY_FORECAST_DAY,
+    fecha: '2026-09-13T00:00:00',
+    temperatura: [{ value: '15', periodo: '00' }],
+    estadoCielo: [], precipitacion: [], vientoAndRachaMax: [],
+  };
+  const forecast = normalizeAemetHourlyForecast([{
+    ...REAL_HOURLY_FORECAST_RESPONSE[0],
+    prediccion: { dia: [dayTwo, REAL_HOURLY_FORECAST_DAY] }, // deliberately out of order
+  }]);
+  assert.deepEqual(forecast.hours.map((h) => `${h.dateIso}T${h.hour}`), [
+    '2026-09-12T8', '2026-09-12T9', '2026-09-13T0',
+  ]);
+});
+
+test('normalizeAemetHourlyForecast drops the "24" (next-midnight) periodo rather than misreading it as hour 24', () => {
+  const day = { ...REAL_HOURLY_FORECAST_DAY, temperatura: [{ value: '10', periodo: '24' }], estadoCielo: [], precipitacion: [], vientoAndRachaMax: [] };
+  const forecast = normalizeAemetHourlyForecast([{ ...REAL_HOURLY_FORECAST_RESPONSE[0], prediccion: { dia: [day] } }]);
+  assert.deepEqual(forecast.hours, []);
+});
+
+test('normalizeAemetHourlyForecast returns null for a malformed/empty response', () => {
+  assert.equal(normalizeAemetHourlyForecast([]), null);
+  assert.equal(normalizeAemetHourlyForecast([{ prediccion: {} }]), null);
+  assert.equal(normalizeAemetHourlyForecast(null), null);
+});
+
+test('madridCivilNow reads Europe/Madrid civil time, not the process timezone, across both DST states', () => {
+  // 2026-07-01T10:00:00Z is CEST (+2) → 12:00 local.
+  assert.deepEqual(madridCivilNow(Date.parse('2026-07-01T10:00:00Z')), { dateIso: '2026-07-01', hour: 12 });
+  // 2026-01-01T10:00:00Z is CET (+1) → 11:00 local.
+  assert.deepEqual(madridCivilNow(Date.parse('2026-01-01T10:00:00Z')), { dateIso: '2026-01-01', hour: 11 });
+  // Just before midnight UTC in winter (+1) rolls into the next Madrid day.
+  assert.deepEqual(madridCivilNow(Date.parse('2026-01-01T23:30:00Z')), { dateIso: '2026-01-02', hour: 0 });
+});
+
+test('filterUpcomingAemetForecastHours drops the past and caps the result', () => {
+  const hours = [
+    { dateIso: '2026-09-12', hour: 8, temperatureC: 18 },
+    { dateIso: '2026-09-12', hour: 9, temperatureC: 20 },
+    { dateIso: '2026-09-12', hour: 10, temperatureC: 21 },
+    { dateIso: '2026-09-13', hour: 0, temperatureC: 15 },
+  ];
+  const upcoming = filterUpcomingAemetForecastHours(hours, { dateIso: '2026-09-12', hour: 9 }, 2);
+  assert.deepEqual(upcoming.map((h) => h.hour), [9, 10], 'hour 8 is in the past; capped to 2 results');
+});
+
+test('filterUpcomingAemetForecastHours tolerates non-array input', () => {
+  assert.deepEqual(filterUpcomingAemetForecastHours(null, { dateIso: '2026-09-12', hour: 0 }), []);
 });

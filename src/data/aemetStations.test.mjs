@@ -5,10 +5,12 @@ import * as Cesium from 'cesium';
 import {
   AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_OPTIONS,
   TEMPERATURE_COLOR_STOPS,
+  buildAemetForecastSummaryLine,
   buildAemetStationDescription,
   buildAemetStationSelectionCopy,
   createAemetStationSelectedOverlayEntry,
   createAemetStationsLayer,
+  normalizeAemetForecastPayload,
   normalizeAemetStationsPayload,
   temperatureColorRgb,
 } from './aemetStations.js';
@@ -409,6 +411,159 @@ test('station points use a live ground clamp (RELATIVE_TO_GROUND), not a one-tim
       Cesium.HeightReference.RELATIVE_TO_GROUND,
       'the highlight marker must clamp the same way, or it floats/sinks relative to the base point it replaces',
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+    layer.destroy(viewer);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Phase A2 — "next hours" forecast, fetched on selection and appended to the
+// already-rendered card once it arrives.
+// ---------------------------------------------------------------------------
+
+test('buildAemetForecastSummaryLine formats a compact "Next hours" line and caps at `take`', () => {
+  const hours = [
+    { hour: 14, temperatureC: 23 },
+    { hour: 15, temperatureC: 25.4 },
+    { hour: 16, temperatureC: 27 },
+    { hour: 17, temperatureC: 28 },
+    { hour: 18, temperatureC: 26 },
+  ];
+  assert.equal(buildAemetForecastSummaryLine(hours), 'Next hours: 14:00 23°C · 15:00 25°C · 16:00 27°C · 17:00 28°C');
+  assert.equal(buildAemetForecastSummaryLine(hours, 2), 'Next hours: 14:00 23°C · 15:00 25°C');
+});
+
+test('buildAemetForecastSummaryLine returns null for empty/missing input', () => {
+  assert.equal(buildAemetForecastSummaryLine([]), null);
+  assert.equal(buildAemetForecastSummaryLine(null), null);
+  assert.equal(buildAemetForecastSummaryLine(undefined), null);
+});
+
+test('normalizeAemetForecastPayload requires an `hours` array', () => {
+  assert.deepEqual(normalizeAemetForecastPayload({ hours: [{ hour: 1 }] }), [{ hour: 1 }]);
+  assert.equal(normalizeAemetForecastPayload({ hours: 'nope' }), null);
+  assert.equal(normalizeAemetForecastPayload(null), null);
+});
+
+test('selecting a station fetches its "next hours" forecast by lat/lon and appends it to the card', async () => {
+  const originalFetch = globalThis.fetch;
+  const viewer = fakeViewer();
+  const calls = [];
+  const overlayHost = {
+    setEntries: (...args) => calls.push(args),
+    setVisible() {},
+    clearSource() {},
+  };
+  const layer = createAemetStationsLayer({ overlayHost });
+  const forecastCalls = [];
+  try {
+    layer.init(viewer);
+    layer.enable(viewer);
+    globalThis.fetch = async (url) => {
+      if (String(url).startsWith('/api/aemet/stations')) {
+        return { ok: true, status: 200, json: async () => ({ stations: [GOOD_STATION] }) };
+      }
+      forecastCalls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ hours: [{ hour: 15, temperatureC: 26 }, { hour: 16, temperatureC: 27 }] }),
+      };
+    };
+    await layer.update(viewer);
+
+    await layer._selectStationForTest('0002I');
+
+    assert.equal(forecastCalls.length, 1);
+    assert.ok(forecastCalls[0].includes(`lat=${GOOD_STATION.lat}`), "forecast request carries the station's lat");
+    assert.ok(forecastCalls[0].includes(`lon=${GOOD_STATION.lon}`), "forecast request carries the station's lon");
+
+    const lastPublication = calls.at(-1);
+    assert.equal(lastPublication[0], 'aemet-stations-selected');
+    assert.equal(lastPublication[1].length, 1);
+    assert.equal(
+      lastPublication[1][0].details.at(-1),
+      'Next hours: 15:00 26°C · 16:00 27°C',
+      'the forecast line is appended after the base reading details',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    layer.destroy(viewer);
+  }
+});
+
+test('a forecast that resolves after the user has selected a different station is dropped, not applied', async () => {
+  const originalFetch = globalThis.fetch;
+  const viewer = fakeViewer();
+  const calls = [];
+  const overlayHost = {
+    setEntries: (...args) => calls.push(args),
+    setVisible() {},
+    clearSource() {},
+  };
+  const layer = createAemetStationsLayer({ overlayHost });
+  const OTHER_STATION = { ...GOOD_STATION, id: 'OTHER', name: 'ELSEWHERE', lat: 41, lon: 1 };
+  let resolveFirstForecast;
+  try {
+    layer.init(viewer);
+    layer.enable(viewer);
+    globalThis.fetch = async (url) => {
+      if (String(url).startsWith('/api/aemet/stations')) {
+        return { ok: true, status: 200, json: async () => ({ stations: [GOOD_STATION, OTHER_STATION] }) };
+      }
+      if (String(url).includes(`lat=${GOOD_STATION.lat}`)) {
+        // First station's forecast deliberately hangs until released below.
+        return new Promise((resolve) => {
+          resolveFirstForecast = () => resolve({
+            ok: true, status: 200, json: async () => ({ hours: [{ hour: 9, temperatureC: 99 }] }),
+          });
+        });
+      }
+      return { ok: true, status: 200, json: async () => ({ hours: [{ hour: 10, temperatureC: 20 }] }) };
+    };
+    await layer.update(viewer);
+
+    const firstSelection = layer._selectStationForTest('0002I'); // forecast fetch in flight, not yet resolved
+    await layer._selectStationForTest('OTHER'); // second selection completes fully, including its own forecast
+
+    const beforeStaleResolution = calls.length;
+    resolveFirstForecast();
+    await firstSelection;
+    await Promise.resolve(); // let the stale .then chain finish settling
+
+    assert.equal(calls.length, beforeStaleResolution, 'the stale forecast must not publish anything at all');
+    assert.equal(layer._selectedIdForTest(), 'OTHER', 'the second selection remains current');
+  } finally {
+    globalThis.fetch = originalFetch;
+    layer.destroy(viewer);
+  }
+});
+
+test('a failed or malformed forecast response leaves the already-rendered card untouched', async () => {
+  const originalFetch = globalThis.fetch;
+  const viewer = fakeViewer();
+  const calls = [];
+  const overlayHost = {
+    setEntries: (...args) => calls.push(args),
+    setVisible() {},
+    clearSource() {},
+  };
+  const layer = createAemetStationsLayer({ overlayHost });
+  try {
+    layer.init(viewer);
+    layer.enable(viewer);
+    globalThis.fetch = async (url) => {
+      if (String(url).startsWith('/api/aemet/stations')) {
+        return { ok: true, status: 200, json: async () => ({ stations: [GOOD_STATION] }) };
+      }
+      return { ok: false, status: 500 };
+    };
+    await layer.update(viewer);
+    await layer._selectStationForTest('0002I');
+
+    assert.equal(calls.length, 1, 'only the synchronous base-card publication happened — no second, no crash');
+    assert.equal(calls[0][1][0].details.length, 4, 'no forecast line was appended');
   } finally {
     globalThis.fetch = originalFetch;
     layer.destroy(viewer);

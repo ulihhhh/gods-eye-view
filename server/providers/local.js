@@ -3,7 +3,7 @@ import { tomtomProxy } from './traffic.js';
 import { firmsProxy } from './firms.js';
 import { gbfsProxy } from './gbfs.js';
 import { celestrakProxy, rocketLaunchesProxy } from './space.js';
-import { aemetStationsProxy, aemetWarningsProxy } from './weather.js';
+import { aemetForecastProxy, aemetStationsProxy, aemetWarningsProxy } from './weather.js';
 export { LL2_CACHE_TTL_MS, launchLibraryRequestHeaders } from './space.js';
 /**
  * Local Node provider middleware for God's Eye View.
@@ -4691,6 +4691,7 @@ export function localProviderPlugins() {
       firmsProxy(),
       aemetStationsProxy(),
       aemetWarningsProxy(),
+      aemetForecastProxy(),
       rocketLaunchesProxy(),
       terrainHeightsProxy(),
       adsbdbProxy(),

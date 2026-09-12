@@ -387,6 +387,251 @@ function isPhenomenonActive(phenomenon, now) {
  *   instruction: string|null, probability: string|null, onsetMs: number|null,
  *   expiresMs: number|null, inEffect: boolean}>}>}
  */
+// ---------------------------------------------------------------------------
+// Municipio forecast (Phase A2) — a third AEMET feed, same envelope
+// indirection again, backing an on-demand "next hours" lookup rather than a
+// polled snapshot: `maestro/municipios` (a fixed, rarely-changing 8k-row
+// lookup table, confirmed live) supplies municipio id/name/lat/lon, and
+// `prediccion/especifica/municipio/horaria/{municipio}` returns that
+// municipio's hourly forecast for ~today plus the next 2 days. Confirmed
+// live against the real API rather than guessed from the endpoint's one-line
+// docs summary, per this plan's own discipline.
+// ---------------------------------------------------------------------------
+
+/** Nationwide municipio lookup table envelope (id/name/lat/lon/altitude/population). */
+export const AEMET_MUNICIPIOS_ENVELOPE_URL =
+  'https://opendata.aemet.es/opendata/api/maestro/municipios';
+
+/** Build the envelope request URL for a given key. Never logged — embeds the key. */
+export function aemetMunicipiosEnvelopeUrl(apiKey) {
+  return `${AEMET_MUNICIPIOS_ENVELOPE_URL}?api_key=${encodeURIComponent(apiKey)}`;
+}
+
+/** Build the hourly-forecast envelope request URL for one municipio id (e.g. "28079"). */
+export function aemetMunicipioForecastEnvelopeUrl(apiKey, municipioId) {
+  return `https://opendata.aemet.es/opendata/api/prediccion/especifica/municipio/horaria/${encodeURIComponent(municipioId)}?api_key=${encodeURIComponent(apiKey)}`;
+}
+
+/**
+ * Normalize one raw `maestro/municipios` record. AEMET's `id` field is
+ * `"id" + the 5-digit INE municipio code` (e.g. `"id28079"`) — confirmed live
+ * to be the exact value the forecast endpoint's `{municipio}` path segment
+ * wants (`"28079"`), which is NOT the same as the record's own `id_old`
+ * field (a different, legacy code that the forecast endpoint rejects).
+ * Returns `null` for a record with no usable id or coordinates, matching
+ * `normalizeAemetStationRecord`'s "unusable record → null" contract.
+ * @param {object} raw One element of the `maestro/municipios` JSON array.
+ * @returns {{id: string, name: string, lat: number, lon: number,
+ *   altitudeM: number|null, populationCount: number|null}|null}
+ */
+export function normalizeAemetMunicipioRecord(raw) {
+  const idMatch = /^id(\d+)$/.exec(String(raw?.id ?? '').trim());
+  if (!idMatch) return null;
+  const lat = finiteOrNull(raw?.latitud_dec);
+  const lon = finiteOrNull(raw?.longitud_dec);
+  if (lat === null || lon === null || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  const name = (typeof raw?.nombre === 'string' && raw.nombre.trim())
+    || (typeof raw?.capital === 'string' && raw.capital.trim())
+    || null;
+  if (!name) return null;
+  return {
+    id: idMatch[1],
+    name,
+    lat,
+    lon,
+    altitudeM: finiteOrNull(raw?.altitud),
+    populationCount: finiteOrNull(raw?.num_hab),
+  };
+}
+
+/**
+ * @param {Array<object>} rawRecords The raw `maestro/municipios` JSON array.
+ * @returns {Array<ReturnType<typeof normalizeAemetMunicipioRecord>>}
+ */
+export function normalizeAemetMunicipiosSnapshot(rawRecords) {
+  if (!Array.isArray(rawRecords)) return [];
+  const result = [];
+  for (const raw of rawRecords) {
+    const record = normalizeAemetMunicipioRecord(raw);
+    if (record) result.push(record);
+  }
+  return result;
+}
+
+const EARTH_RADIUS_KM = 6371;
+
+/** Great-circle distance between two lat/lon points, in km. */
+export function haversineDistanceKm(lat1, lon1, lat2, lon2) {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(a));
+}
+
+/**
+ * Nearest municipio to a lat/lon (a station's, or any clicked point) by
+ * straight-line great-circle distance — a click-to-inspect forecast doesn't
+ * need administrative-boundary precision, just "close enough to be the
+ * locally relevant forecast", which every AEMET station location already is
+ * by construction (all ~850 stations sit inside Spain, where this 8k-entry
+ * municipio table has dense coverage). O(n) linear scan over ~8k records is
+ * cheap enough for one on-demand click; no spatial index needed.
+ * @param {Array<ReturnType<typeof normalizeAemetMunicipioRecord>>} municipios
+ * @param {number} lat
+ * @param {number} lon
+ * @returns {{municipio: object, distanceKm: number}|null}
+ */
+export function findNearestAemetMunicipio(municipios, lat, lon) {
+  if (!Array.isArray(municipios) || !municipios.length) return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  let best = null;
+  let bestDistanceKm = Infinity;
+  for (const municipio of municipios) {
+    const distanceKm = haversineDistanceKm(lat, lon, municipio.lat, municipio.lon);
+    if (distanceKm < bestDistanceKm) {
+      bestDistanceKm = distanceKm;
+      best = municipio;
+    }
+  }
+  return best ? { municipio: best, distanceKm: bestDistanceKm } : null;
+}
+
+/**
+ * AEMET's hourly `estadoCielo`/`precipitacion`/`temperatura`/`humedadRelativa`
+ * arrays are each keyed by their own `periodo` (a zero-padded hour-of-day
+ * string, e.g. `"09"`), so one hour's full picture has to be assembled by
+ * matching `periodo` across four separate arrays rather than read off one.
+ * `vientoAndRachaMax` is the odd one out: it interleaves TWO entry shapes at
+ * the same `periodo` — a wind entry (`{direccion: [...], velocidad: [...],
+ * periodo}`) and a gust entry (`{value, periodo}`, no `direccion` key) —
+ * confirmed against real bytes; only the wind-shaped entries are used here,
+ * gust is left for a future pass rather than guessed at.
+ */
+function indexByPeriodo(entries) {
+  const byPeriodo = new Map();
+  for (const entry of entries ?? []) {
+    if (entry?.periodo !== undefined) byPeriodo.set(String(entry.periodo), entry);
+  }
+  return byPeriodo;
+}
+
+/**
+ * Parse the `datos` payload of `prediccion/especifica/municipio/horaria/*`
+ * into a flat, chronologically-ordered list of hourly forecast points.
+ * Deliberately does NOT compute an epoch timestamp: AEMET's `fecha`/`periodo`
+ * fields are naive local (Europe/Madrid) civil time with no UTC offset
+ * anywhere in this response (unlike the CAP warnings feed's `onset`/
+ * `expires`, which DO carry an explicit `+01:00`/`+02:00` offset) — silently
+ * running them through `Date.parse` would let the SERVER's own timezone (not
+ * Spain's) decide what "future" means, a wrong-timezone bug that would be
+ * invisible in a UTC-scheduled CI run but wrong for a real user. `dateIso` +
+ * `hour` are kept as the plain civil values AEMET published; filtering
+ * "upcoming" against a caller-supplied civil "now" (see
+ * `filterUpcomingAemetForecastHours`) compares like-for-like instead.
+ * @param {Array<object>} raw The `datos` JSON array (always one element per
+ *   requested municipio).
+ * @returns {{municipioId: string, name: string|null, province: string|null,
+ *   elaborated: string|null, hours: Array<{dateIso: string, hour: number,
+ *   temperatureC: number|null, skyDescription: string|null,
+ *   precipitationMm: number|null, windSpeedKmh: number|null,
+ *   windDirection: string|null}>}|null}
+ */
+export function normalizeAemetHourlyForecast(raw) {
+  const record = Array.isArray(raw) ? raw[0] : null;
+  const days = record?.prediccion?.dia;
+  if (!record || !Array.isArray(days)) return null;
+
+  const hours = [];
+  for (const day of days) {
+    const dateIso = typeof day?.fecha === 'string' ? day.fecha.slice(0, 10) : null;
+    if (!dateIso) continue;
+    const temperaturaByHour = indexByPeriodo(day.temperatura);
+    const skyByHour = indexByPeriodo(day.estadoCielo);
+    const precipByHour = indexByPeriodo(day.precipitacion);
+    const windByHour = new Map();
+    for (const entry of day.vientoAndRachaMax ?? []) {
+      if (Array.isArray(entry?.direccion) && entry.periodo !== undefined) {
+        windByHour.set(String(entry.periodo), entry);
+      }
+    }
+    // Union of every periodo any field reports for this day, not just
+    // temperature's — a hierarchical AEMET failure in one array must not
+    // hide an hour the others still have data for.
+    const periodos = new Set([
+      ...temperaturaByHour.keys(),
+      ...skyByHour.keys(),
+      ...precipByHour.keys(),
+      ...windByHour.keys(),
+    ]);
+    for (const periodo of periodos) {
+      const hour = Number(periodo);
+      if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue; // "24" = next day's midnight, not this day's
+      const wind = windByHour.get(periodo);
+      hours.push({
+        dateIso,
+        hour,
+        temperatureC: finiteOrNull(temperaturaByHour.get(periodo)?.value),
+        skyDescription: skyByHour.get(periodo)?.descripcion || null,
+        precipitationMm: finiteOrNull(precipByHour.get(periodo)?.value),
+        windSpeedKmh: finiteOrNull(wind?.velocidad?.[0]),
+        windDirection: (typeof wind?.direccion?.[0] === 'string' && wind.direccion[0]) || null,
+      });
+    }
+  }
+  hours.sort((a, b) => (a.dateIso === b.dateIso ? a.hour - b.hour : a.dateIso < b.dateIso ? -1 : 1));
+
+  return {
+    municipioId: String(record.id ?? ''),
+    name: typeof record.nombre === 'string' ? record.nombre : null,
+    province: typeof record.provincia === 'string' ? record.provincia : null,
+    elaborated: typeof record.elaborado === 'string' ? record.elaborado : null,
+    hours,
+  };
+}
+
+/**
+ * Madrid civil "now" — every AEMET forecast timestamp in this feed is
+ * naive Europe/Madrid local time (see `normalizeAemetHourlyForecast`), so
+ * "upcoming" has to be judged against the same civil clock, not the
+ * server's own timezone or a raw UTC epoch comparison.
+ * @param {number} [nowMs]
+ * @returns {{dateIso: string, hour: number}}
+ */
+export function madridCivilNow(nowMs = Date.now()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Madrid',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(nowMs));
+  const get = (type) => parts.find((p) => p.type === type)?.value;
+  // Intl's midnight hour can format as "24" depending on locale/engine; fold
+  // it back to "00" so it compares correctly against `normalizeAemetHourlyForecast`'s
+  // 0–23 hour range rather than silently sorting after every real hour.
+  const hour = Number(get('hour')) % 24;
+  return { dateIso: `${get('year')}-${get('month')}-${get('day')}`, hour };
+}
+
+/**
+ * Drop hours strictly before `civilNow`, then cap to `limit` — the Phase-A2
+ * equivalent of `filterFreshAemetStations`/`filterActiveAemetWarnings`,
+ * applied at serve time so a cached forecast still reads as "upcoming"
+ * against the caller's clock rather than the moment it was fetched.
+ * @param {ReturnType<typeof normalizeAemetHourlyForecast>['hours']} hours
+ * @param {{dateIso: string, hour: number}} civilNow
+ * @param {number} [limit]
+ */
+export function filterUpcomingAemetForecastHours(hours, civilNow, limit = 6) {
+  if (!Array.isArray(hours)) return [];
+  const isUpcoming = (h) => h.dateIso > civilNow.dateIso
+    || (h.dateIso === civilNow.dateIso && h.hour >= civilNow.hour);
+  return hours.filter(isUpcoming).slice(0, Math.max(0, limit));
+}
+
 export function filterActiveAemetWarnings(zones, now = Date.now()) {
   if (!Array.isArray(zones)) return [];
   const result = [];

@@ -1,106 +1,135 @@
 # Weather data integrations — design plan
 
-Status (2026-09-12): **Phase A0 (AEMET Weather Stations) and Phase A1 (AEMET
-Weather Warnings) are both shipped** on `feat/weather-layers` — see
-[Phase A0](#phase-a0--station-layer--shipped-2026-09-12) and
-[Phase A1](#phase-a1--warnings-overlay-avisos--shipped-2026-09-12) for the
-full record, including bugs found and fixed from live use in each. AEMET
-OpenData is now fully integrated for both live station observations and
-live weather warnings. Open-Meteo's map layer and NASA GIBS remain
-**design-only, not started**. This file stays the design record for work on
-branch `feat/weather-layers` (branched from `main`, following this repo's
-`<type>/<kebab-description>` convention), kept under version control so the
-plan stays reviewable alongside the code that implements it. For verified
-*runtime* behavior (not plans), see `docs/CURRENT-STATE.md`, which is
-authoritative where the two disagree. Docs get folded into
+Status (2026-09-12): **Scope narrowed to AEMET-only, by owner direction.**
+This plan now tracks one PR: connect **every** AEMET OpenData dataset to a
+GEV layer (or record a deliberate, reasoned exception for the handful that
+genuinely don't fit). Phase A0 (Weather Stations), Phase A1 (Weather
+Warnings), and Phase A2 (forecast tooltip) are **shipped** on
+`feat/weather-layers` — see [Phase A0](#phase-a0--station-layer--shipped-2026-09-12),
+[Phase A1](#phase-a1--warnings-overlay-avisos--shipped-2026-09-12), and
+[Phase A2](#phase-a2--forecast-tooltip--shipped-2026-09-12). Phases A3
+through A14 (below) are the complete, concrete criteria for the rest of
+this PR — nothing in that list is optional to *decide*, though build order
+and effort vary. Open-Meteo's map layer and NASA GIBS — this plan's original
+other two providers — are **out of this PR's scope** and relegated to
+[Deferred — non-AEMET work](#deferred--non-aemet-work-tracked-not-in-this-pr)
+at the end: tracked so the earlier design work isn't lost, revisited only
+after the AEMET set is complete. This file stays the design record for work
+on branch `feat/weather-layers` (branched from `main`, following this
+repo's `<type>/<kebab-description>` convention), kept under version control
+so the plan stays reviewable alongside the code that implements it. For
+verified *runtime* behavior (not plans), see `docs/CURRENT-STATE.md`, which
+is authoritative where the two disagree. Docs get folded into
 `docs/CURRENT-STATE.md`, `DATA_SOURCES.md`, `CHANGELOG.md`, `README.md` as
 each phase ships, per `CONTRIBUTING.md` — already done for Phase A0 and A1.
 
 ## Goal
 
-Add real, live weather data to the globe: Spain-specific station/forecast/
-warning detail from **AEMET OpenData**, a global numeric fallback from
-**Open-Meteo**, and a global near-real-time cloud/satellite visual from
-**NASA GIBS**. EUMETSAT was considered and deliberately **excluded** — it
-needs OAuth token refresh every hour and ships raw NetCDF/HRIT rather than
-map-ready output, the heaviest lift of everything reviewed, worth revisiting
-only if GIBS's 3–6 h latency over Europe proves insufficient later.
+Every dataset AEMET OpenData exposes becomes reachable from GEV as its own
+toggleable layer — stations, warnings, radar, lightning, fire risk,
+maritime and beach forecasts, UV index, sea-surface temperature, and the
+smaller specialty networks — so that "what does AEMET know" and "what can
+GEV show" become the same question. A small number of datasets genuinely
+aren't layer-shaped (raw model grids, historical climatology, static
+analysis charts); those get a stated reason for exclusion rather than being
+silently dropped. Non-AEMET work (a global Open-Meteo fallback layer, a
+NASA GIBS cloud-imagery overlay) is real and still wanted eventually, but is
+explicitly **not** part of connecting AEMET's own catalog, so it moves to
+the end of this document rather than competing for attention here.
+
+## Architecture principles for new AEMET layers
+
+Set once, applies to every phase below, so it doesn't need repeating per
+phase:
+
+- **Stack, don't couple.** Every new AEMET layer is its own
+  `LAYER_STATE_REGISTRY` entry, its own `DataLayerManager` registration, and
+  — for imagery-shaped ones — its own `Cesium.ImageryLayer` instance. None
+  of them may reach into another layer's module to render (an
+  `aemet-sea-surface-temp` overlay must work identically whether
+  `ais-live-vessels` is on, off, or doesn't exist). The concrete test: a
+  user enables `ais-live-vessels` and `aemet-sea-surface-temp` together,
+  sees both, and can turn either off independently without the other
+  reacting. This is *stacking* (independent, simultaneous, layered), not
+  *building onto* (one layer's code depending on another's).
+- **One `LAYER_STATE_REGISTRY` entry per dataset, for now.** Every phase
+  below gets its own token and its own toggle-panel row, even where two
+  datasets are related (radar and lightning are both "storm weather" but
+  are still two separate toggles). This matches how `aemet-stations` and
+  `aemet-warnings` already ship as two independent layers rather than one
+  combined one.
+- **Chip-based grouping is a later refinement, only where grouping
+  genuinely makes sense** — the same `getRowControls` per-layer-options
+  mechanism `cctv.js`/`flights.js`/`satellites.js` already use, generalized
+  from "which product" to "which sub-network" or "which time horizon."
+  Candidates identified so far, **not built now**, listed here so the
+  decision isn't lost:
+  - `redes-especiales` (ozone / background pollution / solar radiation,
+    [Phase A10](#phase-a10--environmental-networks-ozone-pollution-radiation))
+    is the one exception where grouping from day one is proposed, not
+    deferred — see A10 for why.
+  - `red-radares` national vs. regional composite — plausibly one
+    `aemet-radar` layer with a coverage-area chip instead of two toggles,
+    revisit once A3 ships and the real tile behavior is known.
+  - `indices-incendios` estimado (today) vs. previsto (forecast day) — a
+    time-horizon chip inside `aemet-fire-risk` rather than two layers.
+  - Everything else (`aemet-radar` vs `aemet-lightning` vs `aemet-maritime`
+    vs `aemet-beaches` vs `aemet-uv-index` vs `aemet-sea-surface-temp` vs
+    `aemet-stations` vs `aemet-warnings`) differs enough in subject matter
+    that a user should be able to toggle each on/off independently — these
+    stay separate layers, not future chip candidates.
 
 ## What's already there (don't re-build this)
 
 - **NASA FIRMS is already a full live layer** — `server/providers/firms.js`
   (memory + disk cache, `FIRMS_MAP_KEY`), `src/data/firmsCsv.js`,
   `firmsHeatmap.js`, `firmsLabels.js`, `firmsAdapt.js`, registered in
-  `layerState.js` as `local-firms` (token `w`). **A NASA GIBS "fire/thermal
-  anomaly" tile layer would be pure duplication of this — out of scope,
-  don't add it.**
-- **Open-Meteo is already integrated, twice, but narrowly.** Both call
-  `https://api.open-meteo.com/v1/forecast` with only
-  `current=temperature_2m,apparent_temperature,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_direction_10m,visibility`
-  for a single point — no forecast horizon, no marine/air-quality/historical
-  APIs, no map layer:
-  - `regionalBriefProxy` (`/api/regional-brief`, `server/providers/local.js`)
-    → the cockpit "Local Info" current-conditions text.
-  - `weatherEffectsProxy` (`/api/weather-effects`, same file) → drives
-    `src/cockpitCloudEffects.js`'s real-time cloud/precip visual near the
-    camera. Not decorative/procedural as it might look — it's genuinely
-    data-driven, just rendered as an atmospheric effect rather than a toggle-
-    able layer with map entities.
-  - Both share `fetchRegionalWeather()` (`server/providers/local.js:4196`).
-    A new map-layer use of Open-Meteo should call the **same function**
-    rather than adding a third parallel Open-Meteo client, and its credit in
-    `DATA_SOURCES.md`/`dataCredits.js` already exists — extend the "used
-    for" description rather than adding a duplicate entry.
-- **"Satellite imagery" in GEV means basemap orthophotography**
-  (`mapStackController.js`: Bing Aerial, Esri World Imagery, Google
-  Photorealistic 3D Tiles) — static ground appearance, not live atmospheric
-  imagery. GIBS true-color/IR is a different category (current weather, not
-  ground truth) and doesn't compete with these.
-- **No existing layer stacks a second raster imagery layer.** Every current
-  "layer" in `layerState.js`'s `LAYER_STATE_REGISTRY` is Cesium entities
-  (points/polylines/labels). `mapStackController.js` owns exactly **one**
-  exclusive base `Cesium.ImageryLayer` (swapped, never stacked — see
-  `_imageryLayer`/`_removeImageryLayer`). TomTom traffic flow, the other tile-
-  shaped live source, is *not* a stacked imagery layer either. **GIBS is
-  therefore the first "translucent overlay imagery layer on top of the base
-  map" in this app** — a new capability, not a variation on an existing one.
-  See [Architecture — NASA GIBS](#architecture--nasa-gibs) below.
+  `layerState.js` as `local-firms` (token `w`). AEMET's own fire-risk
+  *forecast* ([Phase A5](#phase-a5--forest-fire-risk-forecast)) is a
+  different signal (predictive index vs. satellite-detected fire) and does
+  **not** duplicate this — see A5 for the distinction to keep clear in UI
+  copy.
+- **Open-Meteo is already integrated, twice, but narrowly**, and
+  **"satellite imagery" in GEV means basemap orthophotography**, not live
+  atmospheric imagery — both still true, both now only relevant to the
+  [Deferred](#deferred--non-aemet-work-tracked-not-in-this-pr) section
+  since neither is AEMET.
+- **No existing layer stacks a second raster imagery layer — yet.** Every
+  current "layer" in `layerState.js`'s `LAYER_STATE_REGISTRY` is Cesium
+  entities (points/polylines/labels/polygons). `mapStackController.js` owns
+  exactly **one** exclusive base `Cesium.ImageryLayer` (swapped, never
+  stacked). Several AEMET phases below (`aemet-radar`, `aemet-fire-risk`,
+  `aemet-uv-index`, `aemet-sea-surface-temp`) are the **first** translucent
+  overlay imagery layers in this app, stacked *above* the base map — a new
+  capability this PR introduces, not a variation on an existing one. Cesium
+  supports multiple simultaneously stacked imagery layers natively; this
+  app just hasn't needed more than the one base layer before now.
 
-## Layer summary — what's actually shipping
+## AEMET layer table — what's shipping and what's next
 
-Four toggleable things, each independent, each gets the standard toggle-panel
-button for free (`dataManager.register(...)` + a `LAYER_STATE_REGISTRY`
-entry — no manual panel UI, per `_renderToggles()` in `src/data/manager.js`,
-confirmed still true post-refactor: `src/standalone/data.js` is the actual
-registration site now, not `main.js`).
+Every row below is (or will be) `dataManager.register(...)` + one
+`LAYER_STATE_REGISTRY` entry — no manual panel UI needed, per
+`_renderToggles()` in `src/data/manager.js` (registration site:
+`src/standalone/data.js`, confirmed post-refactor). Tokens are tentative —
+confirm the live registry immediately before implementing each phase, since
+other branches can claim letters in the meantime (this has already happened
+twice — see A0's own note below).
 
-| Layer | Shows | Coverage | Disposition | Toggle |
-|---|---|---|---|---|
-| `aemet-stations` **(shipped)** | Live station pins, continuous temperature-gradient color; click for the full reading (temp+range, dew point, humidity, wind+gust+direction, station+sea-level pressure, precipitation, altitude) | Spain only (~850 AEMET stations, verified) | `enabled-only` | Single click, on/off — **live now**, token `h` |
-| `aemet-warnings` **(shipped)** | Zone polygons tinted by avisos level (amarillo/naranja/rojo — verde is "no warning," never rendered); click for every active phenomenon (event, probability, in-effect-or-upcoming) | Spain only (~233 avisos zones, ~9 typically active) | `enabled-only` | Single click, on/off — **live now**, token `j` |
-| `global-weather` | Same marker style as `aemet-stations`, backed by Open-Meteo instead of a real station network | Everywhere *except* Spain (resolves the Option-1/2 question below) | `enabled-only` | Single click, on/off |
-| `satellite-weather` | Translucent NASA GIBS true-color cloud-cover tiles over the current basemap | Global | `enabled+options` | Single click on/off; product choice (v1: true-color only) via the same chip mechanism CCTV/flights/satellites already use |
-
-**Resolving the two open design questions from the first pass**, so this is
-buildable rather than still-undecided:
-
-- **Open-Meteo point source → Option 1, world-cities grid, not click-to-query.**
-  A toggleable layer fits this app's existing mental model (every other
-  source is a panel button, not a special interaction), and reusing
-  `aemet-stations`' rendering code is cheap. Points come from Natural Earth's
-  "populated places" dataset — already a credited, public-domain source in
-  this app (`NATURAL_EARTH_CREDIT`, used today for region boundaries), so
-  adding its points layer is a licensing non-event, not a new source to
-  vet. Filter to capitals + places above a population threshold (~200–300
-  points worldwide keeps Open-Meteo's free-tier call volume trivial even
-  polled every 10–15 min) and **exclude anything inside Spain's bounding
-  box**, so `aemet-stations` and `global-weather` never show two markers for
-  the same city — they tile together into one seamless worldwide set instead
-  of overlapping.
-- **GIBS v1 product → true-color only.** IR and snow-cover stay real, just
-  deferred: the `enabled+options` disposition and `getRowControls` chip
-  mechanism are already reserved, so adding a product switcher later is a
-  small follow-up, not a registry change.
+| Layer | Shows | Shape | Phase | Token | Status |
+|---|---|---|---|---|---|
+| `aemet-stations` | Live station pins, temperature-gradient color, full reading on click | points | A0 | `h` | **shipped** |
+| `aemet-warnings` | Zone polygons tinted by avisos level, phenomena on click | polygons | A1 | `j` | **shipped** |
+| `aemet-forecast` | Next-hours forecast on an existing station/municipio click | click-to-query, no new entities | A2 | *(none — extends A0's click, no new registry row)* | **shipped** |
+| `aemet-radar` | National/regional precipitation radar composite | imagery overlay | A3 | `o` | not started |
+| `aemet-lightning` | Live lightning strikes | points or imagery (shape TBD) | A4 | `p` | not started |
+| `aemet-fire-risk` | Meteorological forest-fire risk index | imagery overlay or zone polygons (shape TBD) | A5 | `v` | not started |
+| `aemet-maritime` | High-seas + coastal forecast zones | zone polygons + click text | A6 | `y` | not started |
+| `aemet-beaches` | Per-beach forecast (UV, sea temp, waves, wind) | points | A7 | `z` | not started |
+| `aemet-uv-index` | National UV index | imagery overlay or zone set (shape TBD) | A8 | `0` | not started |
+| `aemet-sea-surface-temp` | Sea-surface temperature | imagery overlay | A9 | `1` | not started |
+| `aemet-environmental` | Ozone / background pollution / solar radiation, chip-selected | points, with a network-type chip | A10 | `2` | not started |
+| *(folds into `aemet-stations`)* | Spain's two Antarctic bases | points | A11 | *(none — extends A0)* | not started |
+| `aemet-regional-forecast` | CCAA/provincia forecast text on region click | zone polygons (Natural Earth boundaries) + text | A12 | `3` | not started |
 
 ## How each one turns on/off
 
@@ -112,42 +141,41 @@ uses — nothing new to build for basic on/off:
 - **Share links / persistence**: each gets one `[a-z0-9]` token in
   `LAYER_STATE_REGISTRY`; enabled-state round-trips through
   `layerState.js`'s existing encode/decode exactly like every other layer.
-- **Voice**: per `CONTRIBUTING.md`'s pattern for new layers (and the still-
-  open item in `local-usb-sdr.md`'s own plan), each needs a
-  `GEV_REALTIME_TOOLS` entry + `src/voice/gevActions.js` handler — "turn on
-  Spanish weather stations," "show cloud cover," etc. Not needed for A0 to
-  be usable, but expected before the layer is considered done, matching how
-  every existing layer is voice-controllable.
-- **`satellite-weather` only**: also gets a per-layer options chip (product
-  choice) via `getRowControls`, the same row-control mechanism `cctv.js`/
-  `flights.js`/`satellites.js` already implement — no new panel plumbing.
+- **Voice**: per `CONTRIBUTING.md`'s pattern for new layers, each eventually
+  needs a `GEV_REALTIME_TOOLS` entry + `src/voice/gevActions.js` handler.
+  Deliberately **not** part of any individual phase's done-criteria here —
+  see [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set), a
+  single batched pass across every AEMET layer once A0–A12 exist, instead of
+  wiring the same pattern piecemeal ten separate times.
+- **`aemet-environmental` only**: gets a per-layer options chip (network
+  choice: ozone / pollution / radiation) via `getRowControls`, the same
+  mechanism `cctv.js`/`flights.js`/`satellites.js` already implement.
 
-## Which ones make sense together
+## Which layers pair well (stacking demos)
 
-- **`aemet-stations` + `aemet-warnings`**: the intended default pairing —
-  warnings explain *why* a cluster of stations reads extreme. Both Spain-
-  only, both cheap, no reason to ship one without eventually shipping the
-  other.
-- **`aemet-stations` + `global-weather`**: designed to combine into one
-  continuous worldwide temperature layer — dense/real inside Spain, coarse/
-  interpolated everywhere else, non-overlapping by the Spain bounding-box
-  exclusion above. This is the pairing worth demoing first.
-- **`satellite-weather` + anything**: it's an imagery overlay, not an entity
-  layer, so it never competes for toggle state or visual space with the
-  other three (or with FIRMS, flights, military, etc.) — Cesium renders
-  entities above imagery layers, so warning polygons and station pins stay
-  legible on top of it. The natural flagship demo is Esri/Bing basemap +
-  `satellite-weather` true-color clouds + `aemet-stations` pins, i.e. "real
-  current weather, in 3D, over Spain."
-- **Nothing here conflicts with FIRMS** (`local-firms`) — confirmed out of
-  scope for GIBS specifically to avoid duplicating it (see above), and nothing
-  about these four layers touches fire data.
+- **`aemet-stations` + `aemet-warnings`**: the existing default pairing —
+  warnings explain *why* a cluster of stations reads extreme.
+- **`aemet-radar` + `aemet-lightning` + `aemet-warnings`**: the "storm cell"
+  demo — reflectivity, strikes, and the `TO` (tormentas) warning polygon
+  all visible together. Motivates building A4 right after A3.
+- **`aemet-sea-surface-temp` + `aemet-maritime` + `ais-live-vessels`**: the
+  "everything about the water" demo — ship traffic, sea-state/wind
+  warnings, and sea temperature for the water those ships are actually in.
+  Motivates building A9 so it's ready once A6 exists.
+- **`aemet-fire-risk` + `local-firms`**: deliberately shown as *distinct*
+  layers with distinct legends (risk-level palette vs. detection markers) —
+  a demo of "here's where risk is elevated" next to "here's what's actually
+  burning," not a merge of the two.
+- Every pairing above is two or three independently-toggleable layers, per
+  the stacking principle above — none of them share rendering code or
+  depend on each other being enabled.
 
-## AEMET OpenData (new)
+## AEMET OpenData — phases
 
-Spain-specific, nothing else here covers it: live station observations
-(temp/wind/humidity/pressure/precip with real lat/lon), municipal forecasts,
-and CAP-format province warning polygons (severity-coded).
+Spain-specific, nothing else covers it. Confirmed against AEMET's own
+OpenAPI spec (`https://opendata.aemet.es/opendata/documentation/v2/api-docs?group=AEMET_API`,
+151 endpoints across 19 tag groups, pulled live against the real key — not
+guessed from marketing pages).
 
 ### Phase A0 — station layer — **shipped 2026-09-12**
 
@@ -273,8 +301,8 @@ and CAP-format province warning polygons (severity-coded).
   `normalizeAemetStationRecord`, the click-to-inspect card, the HTML
   description, and `getAnalystRecords()`. Nothing from the raw feed is
   withheld now.
-- **Also deferred, matching every other layer's own bring-up**: voice-tool
-  wiring (`GEV_REALTIME_TOOLS` / `src/voice/gevActions.js`).
+- **Voice tools**: deferred to [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set)'s
+  batched pass, matching every other layer's own bring-up.
 - Docs updated in this same pass per `CONTRIBUTING.md`:
   `docs/CURRENT-STATE.md`, `DATA_SOURCES.md`, `dataCredits.js`, `CHANGELOG.md`,
   README's layer table (13→14 layers).
@@ -348,10 +376,18 @@ verified live:
   unlike points' `CLAMP_TO_GROUND` history in Phase A0. Click-to-inspect,
   multi-phenomenon cards, and clean enable/disable all verified with no
   console errors.
-- Still deferred, not blocking: voice-tool wiring (same as Phase A0), the
+- Still deferred, not blocking: voice-tool wiring (now formally
+  [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set)), the
   in-effect-vs-upcoming visual distinction (data already carries `inEffect`
   per phenomenon, just not yet styled differently), and confirming
   naranja/rojo rendering against a real one when a real one occurs.
+- **Worth a look, not scheduled**: the catalog has a plain `avisos` tag
+  distinct from `avisos-cap` — `/api/avisos/vectorial/ultimoelaborado`
+  ("AVISOS georreferenciado"). This might be a pre-georeferenced
+  (GeoJSON-like) alternative to the tar/CAP-XML pipeline this phase already
+  parses by hand. Not urgent (A1 works and is tested), but worth one live
+  pull to see if it could *replace* the tar reader with something simpler,
+  or if it's a different/older product. Flagged here so it isn't lost.
 
 #### The real API shape
 
@@ -530,8 +566,6 @@ verified live:
   `REGISTERED_LAYER_IDS` count assertion in `layerState.test.mjs` bumps
   17→18. Registered in `src/standalone/data.js` alongside
   `aemetStationsLayer`, same import-and-register pattern.
-- Voice tools: deferred, same as Phase A0 — not blocking, expected before
-  the layer is considered fully done.
 
 #### Testing strategy
 
@@ -555,144 +589,444 @@ verified live:
   regression pin if depth-testing/height quirks analogous to Phase A0's
   turn up during implementation (don't assume none will).
 
-### Phase A2 — forecast tooltip (optional, low priority)
+### Definition of done (applies to every phase A2 and later)
 
-Click a station/municipality to show AEMET's next-hours forecast. Only worth
-doing once A0 ships and proves the interaction pattern is worth the extra
-call volume against the 50 req/min cap.
+Established by A0/A1 and now the fixed template so "done" means the same
+thing for every remaining phase — nothing ships half-way through this list:
 
-## Open-Meteo (extend existing integration)
+1. **Live-verify the real response first**, same discipline both shipped
+   phases followed — every "shape TBD" note in the table above gets
+   resolved by an actual pull with the real key before any code is written,
+   not guessed from the endpoint's one-line summary.
+2. **Pure normalize function(s)** in `src/data/weatherProviderRequests.js`
+   (or a sibling module for anything genuinely not portable, e.g. an image-
+   decoding step), unit-tested against real captured fixtures, not
+   synthetic-only ones — the stations-encoding and warnings-tar bugs were
+   both caught this way.
+3. **Server proxy** in `server/providers/weather/aemet.js` (or a same-
+   pattern sibling file), mirroring `aemetStationsProxy`/`aemetWarningsProxy`
+   exactly: memory + disk cache under `.gev-cache/`, single-flight
+   `inflight`, serve-stale-on-failure, a TTL sized to the dataset's real
+   update cadence, `GET /api/aemet/<name>` + `/status` routes, keyless →
+   503 `{error: 'no_key'}`. Covered by a behavioral test in
+   `src/tooling/environmentProviders.test.mjs`.
+4. **Frontend layer** implementing `init/enable/disable/update/destroy/
+   getStats` (+ `getAnalystRecords` where it makes sense), following
+   `aemetStations.js`/`aemetWarnings.js`'s proven shape — click-to-inspect
+   via the shared `ScreenSpaceEventHandler` + `pickRegistry` +
+   `worldOverlay` pattern for entity layers; a small opacity-slider
+   controller (sibling to, not shared with, the others) for imagery layers.
+5. **Own `LAYER_STATE_REGISTRY` entry**, confirmed-free token, count
+   assertion bump in `layerState.test.mjs`, registered in
+   `src/standalone/data.js`.
+6. **Live-verified in the Browser pane** against the real API: entity/tile
+   count, correct rendering (color, draping, occlusion — don't assume
+   Phase A0's terrain-height and depth-testing lessons don't apply to a new
+   shape; check), click-to-inspect (if applicable), clean toggle on/off with
+   no console errors.
+7. **Docs updated in the same PR**: `docs/CURRENT-STATE.md`,
+   `CHANGELOG.md`, README's layer table. `DATA_SOURCES.md`/`dataCredits.js`
+   need **no new entry** — the existing AEMET entry already covers the whole
+   connection; extend its "used for" description instead.
+8. **Voice-tool wiring is explicitly NOT required per-phase** — deferred by
+   design to [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set),
+   a single batched pass once A0–A12 exist, rather than repeating the same
+   `GEV_REALTIME_TOOLS` wiring pattern piecemeal across many separate PRs.
+
+### Phase A2 — forecast tooltip — **shipped 2026-09-12**
+
+Click a station to show AEMET's "next hours" forecast, appended to the
+already-open card once it arrives. No new `LAYER_STATE_REGISTRY` entry —
+extends A0's existing click-to-inspect card, per the original design.
+
+- **Live-verified before building**, per this phase's own point 1 of the
+  Definition of Done: `maestro/municipios` (~8,100 rows) DOES carry lat/lon
+  (`latitud_dec`/`longitud_dec`), so a station click resolves to its nearest
+  municipio server-side rather than needing a separate geometry source —
+  confirmed live, not assumed. Also confirmed live: the record's `id` field
+  (e.g. `"id28079"`) — not its separate `id_old` field, a different legacy
+  code — is the value `prediccion/especifica/municipio/horaria/{municipio}`
+  actually wants.
+- Went with **horaria** (hourly), not **diaria** (daily) — the plan's own
+  "next-hours" framing matches hourly granularity, and a live pull confirmed
+  `horaria` returns ~today-plus-2-days of per-hour data.
+- **Timezone gotcha found and handled**: AEMET's hourly timestamps are naive
+  Europe/Madrid civil time with no UTC offset anywhere in the response
+  (unlike the CAP warnings feed, which does carry one) — running them
+  through `Date.parse` would let the SERVER's own timezone decide what
+  "upcoming" means, a wrong-timezone bug invisible in a same-timezone dev
+  test but wrong for a real deployment. `madridCivilNow()`
+  (`src/data/weatherProviderRequests.js`, via `Intl.DateTimeFormat`) reads
+  Madrid's actual civil time regardless of the server process's own
+  timezone; tested against both CEST and CET to confirm the DST transition
+  itself is handled correctly, not just one arbitrary date.
+- **Parsing gotcha found and handled**: one hour's data is split across four
+  separately `periodo`-keyed arrays that have to be joined by hour, and
+  `vientoAndRachaMax` additionally interleaves two different entry shapes
+  at the same `periodo` (a wind entry with `direccion`, a gust entry
+  without) — confirmed live; only the wind-shaped entries are used for v1,
+  gust deferred rather than guessed at.
+- Shipped: `normalizeAemetMunicipioRecord`/`normalizeAemetMunicipiosSnapshot`/
+  `findNearestAemetMunicipio`/`normalizeAemetHourlyForecast`/
+  `madridCivilNow`/`filterUpcomingAemetForecastHours` in
+  `src/data/weatherProviderRequests.js` (14 new tests, real-shaped fixtures);
+  `aemetForecastProxy()` in `server/providers/weather/aemet.js` — the one
+  proxy in this whole plan that's query-driven rather than a polled
+  snapshot: an in-memory-only 24h-TTL municipio table (no disk cache — a
+  rarely-changing lookup table has no "serve yesterday's snapshot" story
+  worth building) plus a 45-minute-TTL, 300-entry-capped per-municipio
+  forecast cache, single-flight per municipio id (1 new behavioral test in
+  `environmentProviders.test.mjs`); `aemetStations.js` extended with a
+  selection-generation token so a slow forecast for a station the user has
+  since deselected is dropped, never misapplied to a newer card (6 new
+  tests, including a live-simulated race between two selections).
+- **Verified live against the real API**: clicking real stations near
+  Madrid showed correct "Next hours" lines (e.g. `17:00 33°C · 18:00 32°C`
+  for Arganda del Rey); a forecast request that hit AEMET's rate limit
+  during testing returned a clean `502` from the proxy without disturbing
+  an already-open card for a different, cached station — confirming the
+  "never blocks or corrupts the existing card" design held under a real
+  failure, not just a simulated one.
+- Voice-tool wiring deferred to [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set), same as every other phase.
+
+### Phase A3 — weather radar composite
+
+- **Endpoints**: `red/radar/raster/nacional`, `red/radar/raster/regional`
+  (both confirmed georeferenced — "georreferenciado" in their own API
+  summaries), plus a plain (non-georeferenced) `red/radar/nacional` PNG.
+- **Shape**: imagery overlay — the first AEMET-side stacked
+  `Cesium.ImageryLayer`, same underlying mechanism as the (deferred) GIBS
+  design, built and owned independently per the stacking principle above.
+- **Cadence**: ~10 min refresh per AEMET's own radar update rate — much
+  faster than the deferred GIBS layer's 3–6 h, worth a "last updated Xm ago"
+  indicator since users will expect radar currency.
+- **Open item**: confirm the actual tile/projection format live (WMS-style
+  tiles vs. a single full-extent image) before committing to
+  `WebMapTileServiceImageryProvider` vs. a simpler single-image overlay.
+
+### Phase A4 — lightning strikes
+
+- **Endpoint**: `red/rayos/mapa` ("Mapa con los rayos registrados en
+  periodo estándar, último elaborado").
+- **Shape**: unconfirmed — could be a strike-point list (→ points, same
+  click-to-inspect pattern as stations) or a rendered image (→ imagery
+  overlay). This is the first thing to resolve, before any other design
+  decision on this phase.
+- **Build-order rationale**: placed right after radar so both can be
+  verified together against a real storm — see
+  [stacking demos](#which-layers-pair-well-stacking-demos) above.
+
+### Phase A5 — forest-fire risk forecast
+
+- **Endpoints**: `indices-incendios/mapasriesgo/estimado` (today),
+  `.../mapasriesgo/previsto/dia/{dia}` (forecast day), `.../riesgo/raster`
+  (confirmed raster).
+- **Shape**: imagery overlay (raster confirmed) or zone polygons — confirm
+  live which `mapasriesgo` vs. `riesgo/raster` actually returns before
+  committing.
+- **Not a FIRMS duplicate**: FIRMS (`local-firms`) shows satellite-
+  *detected* fires already burning; this is AEMET's *predictive*
+  meteorological risk index, before anything ignites. Keep UI copy explicit
+  about the distinction (see [What's already there](#whats-already-there-dont-re-build-this)).
+- **Legend**: AEMET's own risk vocabulary (bajo/moderado/alto/extremo, to
+  confirm live), not the warnings layer's amarillo/naranja/rojo scale — a
+  different classification, needs its own palette.
+- **Future chip candidate**: estimado (today) vs. previsto (forecast day)
+  as a time-horizon chip within this one layer, once it ships and the
+  choice is proven worth exposing — not built now.
+
+### Phase A6 — maritime forecast
+
+- **Endpoints**: `prediccion-maritima/altamar/area/{area}` (high seas),
+  `.../costera/costa/{costa}` (coastal).
+- **Shape**: zone polygons + click-to-inspect text, same rendering pattern
+  as `aemet-warnings`.
+- **The one real open question in this whole roadmap**: unlike
+  `avisos_cap`, these bulletins are **text only** — no inline geometry.
+  A zone-boundary source (`area`/`costa` code → polygon) has to be found
+  before this phase can render anything; AEMET's own public maritime-zone
+  map isn't obviously machine-readable via this API. This needs its own
+  research pass, equivalent to what A1 did for warnings zones, **before**
+  implementation starts — don't assume this is a quick reuse of the
+  warnings-zone code just because the rendering shape matches.
+- **Pairs with**: `ais-live-vessels` and (once built) A9's sea-surface
+  temperature — see [stacking demos](#which-layers-pair-well-stacking-demos).
+
+### Phase A7 — beach forecast
+
+- **Endpoint**: `predicciones-especificas/playa/{playa}`.
+- **Shape**: points, one per beach.
+- **Open question**: no beach code/coordinate list exists in this API
+  (`maestro` only covers municipios) — a nomenclátor (code → name/lat/lon)
+  needs an external source before the per-beach endpoint is queryable at
+  all. Smaller version of A6's problem (points, not polygons), but real.
+
+### Phase A8 — UV index
+
+- **Endpoint**: `predicciones-especificas/uvi/{dia}`.
+- **Shape**: unconfirmed — a national raster/map, or per-zone numeric data.
+  Smallest phase by data volume (one value/map per day); the only blocker
+  is confirming this shape live.
+
+### Phase A9 — sea-surface temperature
+
+- **Endpoint**: `informacion-satelite/producto/sst`.
+- **Shape**: imagery overlay, no blockers beyond the standard live-
+  verification step every phase here follows.
+- **Pairs with**: `ais-live-vessels` and A6's maritime forecast — see
+  [stacking demos](#which-layers-pair-well-stacking-demos). Build after A6
+  so both are ready together.
+
+### Phase A10 — environmental networks (ozone, pollution, radiation)
+
+- **Endpoints**: `redes-especiales/ozono`, `.../contaminacionfondo/estacion/{nombre}`,
+  `.../radiacion`, `.../perfilozono/estacion/{estacion}`.
+- **Shape**: points — small dedicated station networks (a few dozen sites
+  each), much smaller footprint than AEMET's ~850 weather stations.
+- **The one deliberate exception to "one layer per dataset for now"**: these
+  three networks are proposed as a single `aemet-environmental` layer with
+  a network-type chip from the start, not three near-empty toggle-panel
+  rows. This is exactly the case the architecture principles above call out
+  as "grouping genuinely makes sense" — same shape (points), same provider,
+  each individually too sparse to be a compelling standalone toggle.
+
+### Phase A11 — Antarctic stations
+
+- **Endpoints**: `antartida/datos/...` (exterior), `antartida_est_int/datos/...`
+  (interior).
+- **Shape**: points, folded into the existing `aemet-stations` layer rather
+  than a new registry entry — only two stations worldwide (Juan Carlos I,
+  Gabriel de Castilla).
+- **Open item**: `aemet-stations` is currently framed and filtered as
+  "Spain only" (bounding-box logic likely exists for the mainland+islands
+  extent) — this phase needs that framing explicitly revisited so two
+  Antarctic points aren't filtered out as "outside Spain."
+
+### Phase A12 — regional (CCAA/provincia) forecast layer
+
+- **Endpoints**: `predicciones-normalizadas-texto/ccaa/*`, `.../provincia/*`
+  (hoy/mañana/medio plazo/tendencia, each with a "today" and "as originally
+  published" variant).
+- **Shape**: zone polygons (CCAA/provincia administrative boundaries) +
+  click-to-inspect text. AEMET provides text only, no boundary geometry —
+  reuse the Natural Earth admin-boundary source already credited and used
+  elsewhere in this app (`NATURAL_EARTH_CREDIT`) rather than sourcing a new
+  one.
+
+### Phase A13 — climatological values (not a toggle layer)
+
+- **Endpoints**: `valores-climatologicos/diarios|horarios|mensualesanuales`,
+  `.../normales` (1981–2010), `.../valoresextremos`,
+  `.../inventarioestaciones`.
+- **Not a `LAYER_STATE_REGISTRY` entry** — this is a query/comparison
+  feature ("how does today compare to the historical normal for this
+  station"), a genuinely different UI shape (a chart or table triggered
+  from an existing station's click-to-inspect card, most likely
+  `aemet-stations`') than every toggleable layer above. Still "connects"
+  this data to GEV, just not via a new toggle — tracked here so it isn't
+  mistaken for an oversight.
+
+### Phase A14 — voice-tool wiring for the whole AEMET set
+
+Once A0–A12 exist, one batched pass adds `GEV_REALTIME_TOOLS` entries +
+`src/voice/gevActions.js` handlers for every AEMET layer at once ("turn on
+weather radar," "show sea temperature," "any storm warnings near me,"
+etc.), rather than the piecemeal per-layer wiring A0 and A1 each
+individually deferred. Deliberately sequenced last: doing it once, after
+the full layer set's naming and interaction patterns have stabilized, means
+writing the tool-registration boilerplate one time instead of revising it
+across ten separate additions.
+
+### Deliberately excluded (AEMET side)
+
+Real datasets, reviewed and consciously left out — not oversights:
+
+- **NDVI (`informacion-satelite/producto/nvdi`)** — a vegetation index, not
+  weather. Out of scope for *this* plan specifically; a legitimate candidate
+  for a separate land/ecology-focused plan someday.
+- **Raw numerical model output (`modelos-numericos`,
+  `predicciones-georreferenciadas`)** — Harmonie/AESPOL/AEWAM/ECMWF raster
+  fields meant for meteorologists, not map-ready output. Heavy to decode and
+  render for what it would add, and already substantially covered by
+  Open-Meteo's own forecast API for this app's purposes.
+- **Analysis / significant-weather charts (`mapas-y-graficos`)** —
+  meteorologist chart images (PDF/GIF), not globe-shaped or georeferenced
+  the way a WMTS/WMS tile layer is.
+- **Text bulletins beyond A12's scope
+  (`predicciones-normalizadas-texto/nacional`)** — national-level prose is
+  redundant with the CCAA/provincia granularity A12 already covers, and
+  with Open-Meteo's existing numeric cockpit panel.
+
+## Testing strategy (no live network required for most of it)
+
+- Mock the two-step `descripcion/estado/datos` response shape the same way
+  `celestrakProxy`'s tests mock CelesTrak — a fake first response pointing
+  at a fake second URL, asserting the proxy resolves both. Every AEMET proxy
+  (shipped and planned) follows this same envelope, so this pattern covers
+  all of them.
+- Imagery-shaped layers (A3, A5, A8, A9): cover the opacity-slider
+  controller's add/remove/opacity logic against a fake
+  `Cesium.ImageryLayerCollection`, matching how `aisLiveVessels.test.mjs`-
+  style tests fake a viewer — no real tile fetch needed in tests.
+- `scripts/qa-*.mjs` headless scripts for each phase once wired into the
+  app, matching the existing `scripts/qa-*.mjs` convention (never against
+  real upstream hosts).
+
+## Open questions
+
+Resolved, against the real APIs:
+- ~~AEMET avisos zone geometry source~~ — **there isn't a separate one.**
+  Every CAP alert carries its own zone polygon(s) inline; no shapefile,
+  GeoJSON, or extra download to source, license, or keep in sync.
+- ~~AEMET rate-limit headroom~~ — concrete TTLs now sized (stations 20 min,
+  warnings 10–15 min), a few requests/hour total against a 50/min cap. Not a
+  real constraint at this usage level, and nothing in A2–A14 changes that
+  math meaningfully (each new dataset is its own low-frequency poll).
+- ~~Polygon ground-draping specifics~~ — confirmed live during A1: no
+  explicit height/heightReference needed, Cesium drapes correctly on loaded
+  terrain.
+
+Still genuinely open:
+- **AEMET key acquisition** — unverified whether the current sign-up flow
+  still works as described (email-only, no approval wait); confirm at
+  implementation time for any NEW key someone requests. Moot for continuing
+  on the current key, already working and registered in POWER UP.
+- **In-effect vs. upcoming warning styling** (A1) — v1 renders any non-
+  expired warning as solid regardless of whether `onset` is already past.
+  Worth a visual distinction eventually — deferred by design, not an
+  oversight, since both timestamps are already in the data model.
+- **naranja/rojo verified only from documentation, not live traffic** (A1)
+  — worth a sanity check against a real orange/red day if one comes up.
+- Every "shape TBD" / "open question" / "blocker" called out per-phase
+  above (A3–A12) — each is a concrete, named unknown to resolve via a live
+  pull before that phase's implementation starts, per point 1 of the
+  [Definition of done](#definition-of-done-applies-to-every-phase-a2-and-later).
+
+## Docs to update once each phase actually ships
+
+Per `CONTRIBUTING.md`, in the same PR as the implementation (not before):
+`docs/CURRENT-STATE.md` (verified runtime behavior), `CHANGELOG.md`, and the
+layers table in `README.md`. **`DATA_SOURCES.md`/`dataCredits.js` need no
+new entry for any AEMET phase** — the existing AEMET entry already covers
+the whole connection (stations and warnings today, everything through A14
+eventually); each new phase just extends its "used for" description, the
+same way A1 needed no new attribution entry beyond what A0 already
+established.
+
+## Deferred — non-AEMET work (tracked, not in this PR)
+
+Everything below predates the 2026-09-12 scoping decision to make this PR
+AEMET-only. It's real design work, still wanted eventually, kept here
+verbatim as a tracked backlog rather than discarded — revisit only after
+the AEMET phases above (A0–A14) are complete.
+
+### Deferred layer summary
+
+| Layer | Shows | Coverage | Disposition |
+|---|---|---|---|
+| `global-weather` | Same marker style as `aemet-stations`, backed by Open-Meteo instead of a real station network | Everywhere *except* Spain | `enabled-only` |
+| `satellite-weather` | Translucent NASA GIBS true-color cloud-cover tiles over the current basemap | Global | `enabled+options` |
+
+- **`aemet-stations` + `global-weather`** (once both exist): designed to
+  combine into one continuous worldwide temperature layer — dense/real
+  inside Spain, coarse/interpolated everywhere else, non-overlapping by a
+  Spain bounding-box exclusion on the Open-Meteo side.
+- **`satellite-weather` + anything**: an imagery overlay, not an entity
+  layer, so it never competes for toggle state or visual space with any
+  entity layer — Cesium renders entities above imagery layers.
+
+### Open-Meteo (extend existing integration)
 
 The two existing single-point call sites stay as-is (cockpit text + cloud
 effects). What's missing is a **map layer** — Open-Meteo has no station
 network of its own, so "where do the points come from" is a real design
 decision, not a given:
 
-- **Option 1 — global fallback for AEMET's layer.** Outside Spain, plot a
-  fixed or camera-relative set of sample points using the same marker style
-  as `aemetStations.js`, backed by Open-Meteo instead of AEMET. Reuses the
-  Phase A0 rendering code, cheapest to build, but "where are the points"
-  needs an answer (major cities? a lat/lon grid? viewport-sampled?).
+- **Option 1 — global fallback for AEMET's layer (recommended).** Outside
+  Spain, plot a fixed or camera-relative set of sample points using the
+  same marker style as `aemetStations.js`, backed by Open-Meteo instead of
+  AEMET. Reuses the Phase A0 rendering code, cheapest to build. Points come
+  from Natural Earth's "populated places" dataset — already a credited,
+  public-domain source in this app (`NATURAL_EARTH_CREDIT`, used today for
+  region boundaries). Filter to capitals + places above a population
+  threshold (~200–300 points worldwide keeps Open-Meteo's free-tier call
+  volume trivial even polled every 10–15 min) and **exclude anything inside
+  Spain's bounding box**, so `aemet-stations` and `global-weather` tile
+  together into one seamless worldwide set instead of overlapping.
 - **Option 2 — on-demand point query.** Generalize the existing cockpit
   current-conditions call so *any* clicked point on the globe (not just
   camera-follow) can show current conditions via Open-Meteo — no new layer
   registry entry, just extending what the cockpit info panel already knows
   how to do.
-- Left as an [open question](#open-questions) — pick one before writing
-  code, since they lead to different files (a new layer vs. extending
-  `cockpitCloudEffects.js`/the regional-brief panel).
-- Whichever option: call the existing `fetchRegionalWeather()` (extended with
-  more fields, e.g. `precipitation_probability`, if Option 1's marker style
-  needs it) rather than adding a parallel client, and keep it on the existing
-  `/api/weather-effects`-style cache/rate-limit posture (`common/rate-limit.js`).
+- Whichever option: call the existing `fetchRegionalWeather()`
+  (`server/providers/local.js:4196`, extended with more fields if Option
+  1's marker style needs them) rather than adding a parallel client, and
+  keep it on the existing `/api/weather-effects`-style cache/rate-limit
+  posture (`common/rate-limit.js`). Its credit in
+  `DATA_SOURCES.md`/`dataCredits.js` already exists — extend the "used for"
+  description rather than adding a duplicate entry.
 - Marine and air-quality Open-Meteo sub-APIs are real future extensions
-  (both free, same host, no separate key) but out of scope for this pass —
-  not needed until a maritime or pollution layer is actually planned.
+  (both free, same host, no separate key) but out of scope even for this
+  deferred item — not needed until a maritime or pollution layer is
+  actually planned on the Open-Meteo side specifically.
 
-## NASA GIBS
+### NASA GIBS
 
 Global, keyless WMTS tiles (`https://gibs.earthdata.nasa.gov/wmts/...`),
 3–6 h latency. True-color/IR near-real-time cloud imagery, distinct from
-FIRMS (already covered) and from the static basemap imagery (see above).
+FIRMS and from the static basemap imagery. EUMETSAT was considered and
+deliberately **excluded** as an alternative — it needs OAuth token refresh
+every hour and ships raw NetCDF/HRIT rather than map-ready output, the
+heaviest lift of everything reviewed, worth revisiting only if GIBS's 3–6 h
+latency over Europe proves insufficient later.
 
-### Architecture — NASA GIBS
+#### Architecture — NASA GIBS
 
 This needs a **second, non-exclusive imagery layer stacked on top of the
-current base map**, not another entity-based `LAYER_STATE_REGISTRY` toggle
-like every other layer here, and not a swap through
-`mapStackController.js`'s single `_imageryLayer` slot (that's reserved for
-the base map itself — Bing/Esri/Google — and swapping it would replace the
-ground texture, not add a translucent weather layer above it).
+current base map**, not another entity-based `LAYER_STATE_REGISTRY` toggle,
+and not a swap through `mapStackController.js`'s single `_imageryLayer`
+slot (that's reserved for the base map itself — Bing/Esri/Google — and
+swapping it would replace the ground texture, not add a translucent weather
+layer above it).
 
 Concretely:
 - `Cesium.WebMapTileServiceImageryProvider` pointed at a GIBS layer id (e.g.
   `MODIS_Terra_CorrectedReflectance_TrueColor`), added via
   `viewer.imageryLayers.add(layer, <higher index than the base>)` — Cesium
-  supports multiple stacked imagery layers natively, this app just hasn't
-  needed a second one yet.
+  supports multiple stacked imagery layers natively.
 - A small new controller (e.g. `src/gibsOverlayController.js`, sibling to
-  `mapStackController.js` rather than folded into it, since its lifecycle —
-  add/remove one extra translucent layer — is simpler than exclusive
-  base-map switching) owning: enable/disable, an opacity slider (GIBS tiles
-  are meant to sit *over* a basemap, so full opacity would obscure it), and
+  `mapStackController.js`) owning: enable/disable, an opacity slider, and
   which GIBS product is active (true-color vs. IR vs. snow-cover — pick one
-  at a time, matching how `satellites.js`'s options work today).
+  at a time, matching how `satellites.js`'s options work today). **v1
+  product: true-color only** — IR and snow-cover stay real, just deferred:
+  the `enabled+options` disposition and `getRowControls` chip mechanism
+  would already be reserved, so adding a product switcher later is a small
+  follow-up, not a registry change.
 - Still worth a `layerState.js` entry purely for persistence/share-links
   (e.g. `{ id: 'satellite-weather', token: 'k', disposition:
   'enabled+options', optionOwner: 'satellite-weather' }` — `k` picked over
   the originally-proposed `n`, since `n` was claimed by the `liveuamap`
   layer (branch `mi-main`) after this plan was first written; confirm
-  against the current registry before implementing — for the
-  opacity/product choice), even though its *rendering* path is imagery, not
-  entities — the registry's job is state, not rendering mechanism.
+  against the current registry before implementing).
 - No API key, no server-side proxy needed (GIBS answers CORS-enabled tile
-  requests directly) — this is the cheapest of the three to wire up.
+  requests directly).
+- A NASA GIBS "fire/thermal anomaly" tile layer would be pure duplication
+  of `local-firms` (NASA FIRMS) — out of scope, don't add it, regardless of
+  when this phase is picked back up.
 
-## Testing strategy (no live network required for most of it)
+#### Deferred testing notes
 
-- AEMET: mock the two-step `descripcion/estado/datos` response shape the
-  same way `celestrakProxy`'s tests mock CelesTrak — a fake first response
-  pointing at a fake second URL, asserting the proxy resolves both.
-- Open-Meteo layer/tooltip: mock `fetchRegionalWeather`'s upstream fetch,
-  same style as the existing `weatherEffectsProxy` tests (if any exist yet —
-  check and follow that pattern, or `firmsProxy.test.mjs`'s style if not).
-- GIBS: no server code to test (client-only, no proxy) — cover the
+- Mock `fetchRegionalWeather`'s upstream fetch for the Open-Meteo layer,
+  same style as the existing `weatherEffectsProxy` tests (if any exist yet
+  — check and follow that pattern, or `firmsProxy.test.mjs`'s style if
+  not).
+- GIBS has no server code to test (client-only, no proxy) — cover the
   overlay controller's add/remove/opacity logic against a fake
-  `Cesium.ImageryLayerCollection`, matching how `mapStackController.test.mjs`
-  (if present) or `aisLiveVessels.test.mjs`-style tests fake a viewer.
-- `scripts/qa-*.mjs` headless scripts for each phase once wired into the app,
-  matching the existing `scripts/qa-*.mjs` convention (never against real
-  upstream hosts).
+  `Cesium.ImageryLayerCollection`.
 
-## Open questions
+#### Deferred docs note
 
-Resolved in earlier passes, see [Layer summary](#layer-summary--whats-actually-shipping):
-Open-Meteo's point source (world-cities grid via Natural Earth, Spain
-excluded) and GIBS's v1 product (true-color only).
-
-Resolved this pass (2026-09-12), against the real `avisos_cap` API, see
-[Phase A1](#phase-a1--warnings-overlay-avisos--ready-to-build-verified-2026-09-12):
-- ~~AEMET avisos zone geometry source~~ — **there isn't a separate one.**
-  Every CAP alert carries its own zone polygon(s) inline; no shapefile,
-  GeoJSON, or extra download to source, license, or keep in sync.
-- ~~AEMET rate-limit headroom~~ — concrete TTLs now sized (stations 20 min,
-  warnings 10–15 min), a few requests/hour total against a 50/min cap. Not a
-  real constraint at this usage level.
-- **AEMET key acquisition** — still genuinely open, unverified: confirm the
-  current sign-up flow still works as described (email-only, no approval
-  wait) at implementation time for any NEW key someone requests — AEMET's
-  process has changed before. (Moot for continuing on the current key,
-  already working and registered in POWER UP.)
-
-New from this pass, not blocking but worth deciding before/while building
-Phase A1:
-- **In-effect vs. upcoming warning styling**: v1 renders any non-expired
-  warning as a solid polygon regardless of whether `onset` is already past.
-  Worth a visual distinction (e.g. outline-only until `onset`) once the base
-  layer is proven — deferred by design, not an oversight, since both
-  timestamps are already in the data model.
-- **Polygon ground-draping specifics**: confirmed points need
-  `heightReference`; the equivalent correctness question for `polygon`
-  graphics (per-position height vs. classification type, terrain z-fighting
-  at close zoom) hasn't been hit yet because no polygon layer has shipped —
-  worth deliberately checking during A1 implementation rather than assuming
-  polygons are exempt from the exact class of bug points just went through.
-- **naranja/rojo verified only from documentation, not live traffic**: the
-  live pull that grounded this plan only had verde/amarillo active. The
-  4-level vocabulary and CAP severity mapping are AEMET's documented scheme,
-  not something this pass observed in the wild — worth a sanity check
-  against a real orange/red day if one comes up during/after implementation.
-
-## Docs to update once each phase actually ships
-
-Per `CONTRIBUTING.md`, in the same PR as the implementation (not before):
-`docs/CURRENT-STATE.md` (verified runtime behavior), `DATA_SOURCES.md`,
-`CHANGELOG.md`, and the layers table in `README.md`. **Already done for
-Phase A0** — the AEMET entry in `DATA_SOURCES.md` and `dataCredits.js`
-already exists and covers the whole AEMET connection (stations today,
-warnings once A1 ships), so A1 needs no new attribution entry, just a
-`CURRENT-STATE.md`/`CHANGELOG.md`/README row update the same shape as A0's.
-NASA GIBS still needs its own new `DATA_SOURCES.md`/`dataCredits.js` entry
-when that phase starts (check GIBS's current citation requirements then);
-Open-Meteo's existing entry still just needs its "used for" column
-broadened once its map-layer use ships.
+NASA GIBS will need its own new `DATA_SOURCES.md`/`dataCredits.js` entry
+when that phase starts (check GIBS's current citation requirements then).
+Open-Meteo's existing entry just needs its "used for" column broadened once
+its map-layer use ships.
