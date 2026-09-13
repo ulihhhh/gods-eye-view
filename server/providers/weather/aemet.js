@@ -2,6 +2,8 @@ import path from 'node:path';
 import { promises as fsp } from 'node:fs';
 
 import {
+  AEMET_BEACHES_NOMENCLATOR_URL,
+  aemetBeachForecastEnvelopeUrl,
   aemetFireRiskEstimadoEnvelopeUrl,
   aemetFireRiskPrevistoEnvelopeUrl,
   aemetLightningEnvelopeUrl,
@@ -16,6 +18,8 @@ import {
   filterUpcomingAemetForecastHours,
   findNearestAemetMunicipio,
   madridCivilNow,
+  normalizeAemetBeachesNomenclator,
+  normalizeAemetBeachForecastRecord,
   normalizeAemetHourlyForecast,
   normalizeAemetMunicipiosSnapshot,
   normalizeAemetStationsSnapshot,
@@ -1168,6 +1172,237 @@ export function aemetSeaSurfaceTempProxy() {
         } catch (err) {
           console.warn('[aemet-sea-surface-temp-proxy] error:', err?.message || err);
           sendJson(500, { error: 'aemet sea-surface-temp proxy error' });
+        }
+      });
+    },
+  };
+}
+
+/**
+ * AEMET beach-forecast proxy (Phase A7).
+ *
+ * The plan originally flagged this phase as blocked ("no beach code/
+ * coordinate list exists in this API"), same shape as Phase A6's maritime-
+ * zone blocker. Unblocked by a real find: AEMET's own public website widget
+ * (aemet.es, not opendata.aemet.es — no API key) serves a GeoJSON
+ * nomenclator of all 160 beaches it forecasts for, and its `ID` field is
+ * confirmed live to be the exact id `prediccion/especifica/playa/{id}`
+ * expects. This is an undocumented internal endpoint of AEMET's own site,
+ * not part of the official OpenData contract — see
+ * `AEMET_BEACHES_NOMENCLATOR_URL`'s own comment in weatherProviderRequests.js
+ * for the full live-verification trail.
+ *
+ * Unlike every other AEMET feed here, there is no bulk "all beaches"
+ * endpoint — each beach's forecast is its own two-step envelope/datos round
+ * trip. A first attempt fetched all 160 with a concurrency-8 worker pool and
+ * hit real, confirmed-live AEMET rate limiting partway through: the envelope
+ * endpoint returns a `Remaining-request-endpoint` response header (confirmed
+ * live to be scoped per api-key-and-endpoint-path, independent of every
+ * other AEMET proxy's own budget) that started around 39–40 and was
+ * exhausted — with 429s on the rest — after roughly 20 concurrent calls in
+ * quick succession. The `datos` short-link fetch that follows a successful
+ * envelope call carries no such header and was never observed to 429, so
+ * only the envelope call needs pacing.
+ *
+ * Rebuilt as a slow, fully-sequential, non-blocking BACKGROUND sweep instead
+ * of a concurrent one a request awaits: `PACE_MS` between beaches keeps
+ * steady-state usage well under the observed budget, and the sweep also
+ * reads the live `Remaining-request-endpoint` value after every call,
+ * cooling down for `THROTTLE_COOLDOWN_MS` whenever it (or an explicit 429)
+ * signals the budget is nearly spent — real-time feedback instead of a
+ * blind guess at AEMET's own limit. A full pass over 160 beaches takes
+ * several minutes; no HTTP request ever waits for it; the route always
+ * responds immediately with whatever is already cached, which fills in
+ * across this layer's own 5-minute poll interval rather than in one
+ * blocking round trip. An individual beach's failed fetch never drops its
+ * last-known reading — only a fresh success overwrites `beachById`.
+ */
+export function aemetBeachesProxy({
+  // Conservative pacing against the observed ~39-40 request budget for this
+  // specific endpoint: one beach every 2.5s is 24/min, comfortably under
+  // that ceiling with margin for the budget's own refill behavior. Injectable
+  // (like `loadImage`/`overlayHost` on the frontend layers) so tests can run
+  // a whole sweep without either sleeping in real time or fighting fake
+  // timers against a fire-and-forget background loop — never overridden in
+  // production, where the real pacing is what protects the real budget.
+  paceMs = 2500,
+  throttleCooldownMs = 65_000, // AEMET's own bucket appears to be roughly a 1-minute window
+} = {}) {
+  const NOMENCLATOR_TTL_MS = 24 * 3600_000;
+  const FORECAST_TTL_MS = 6 * 3600_000;
+  const THROTTLE_FLOOR = 5;
+
+  /** @type {?{at: number, beaches: Array<{id:string,name:string,lat:number,lon:number}>}} */
+  let nomenclatorMem = null;
+  /** @type {?Promise<Array<object>>} single-flight nomenclator refresh */
+  let nomenclatorInflight = null;
+  /** @type {Map<string, {name:string,lat:number,lon:number,forecast:object,updatedAt:number}>} */
+  const beachById = new Map();
+  // Two separate clocks: `lastAttemptAt` throttles how often a new full
+  // sweep is even started (advances once the sweep finishes, success or
+  // not, so a fully-down upstream doesn't restart a sweep on every request);
+  // `lastSuccessAt` is what "freshness" actually means to a caller (advances
+  // only when at least one beach's forecast was genuinely refreshed this
+  // sweep). Collapsing these into one timestamp would report a wholesale-
+  // failed sweep as fresh simply because an attempt just happened.
+  let lastAttemptAt = null;
+  let lastSuccessAt = null;
+  let sweeping = false;
+
+  const apiKey = () => String(process.env.AEMET_API_KEY || '').trim();
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function fetchNomenclator() {
+    if (nomenclatorMem && Date.now() - nomenclatorMem.at < NOMENCLATOR_TTL_MS) return nomenclatorMem.beaches;
+    if (!nomenclatorInflight) {
+      nomenclatorInflight = fetch(AEMET_BEACHES_NOMENCLATOR_URL, { signal: AbortSignal.timeout(20_000) })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const beaches = normalizeAemetBeachesNomenclator(await res.json());
+          if (!beaches.length) throw new Error('empty nomenclator');
+          nomenclatorMem = { at: Date.now(), beaches };
+          return beaches;
+        })
+        .finally(() => {
+          nomenclatorInflight = null;
+        });
+    }
+    const fresh = await nomenclatorInflight.catch(() => null);
+    if (fresh) return fresh;
+    if (nomenclatorMem) return nomenclatorMem.beaches; // upstream down — stale beats empty
+    throw new Error('beach nomenclator unavailable');
+  }
+
+  /**
+   * @returns {Promise<{record: object, rateLimited: boolean}>} `rateLimited`
+   *   distinguishes "AEMET said slow down" from every other failure so the
+   *   sweep can cool down specifically for that case.
+   */
+  async function fetchOneBeachForecast(key, beachId) {
+    const envelopeRes = await fetch(aemetBeachForecastEnvelopeUrl(key, beachId), { signal: AbortSignal.timeout(20_000) });
+    const remainingHeader = envelopeRes.headers.get('remaining-request-endpoint');
+    const remaining = remainingHeader === null ? null : Number(remainingHeader);
+    if (envelopeRes.status === 429) return { record: null, rateLimited: true, remaining };
+    if (!envelopeRes.ok) throw new Error(`HTTP ${envelopeRes.status}`);
+    const envelope = await envelopeRes.json();
+    if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
+      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+    }
+    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(20_000) });
+    if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
+    // Same ISO-8859-15-despite-being-JSON gotcha as every other AEMET datos response.
+    const buffer = Buffer.from(await dataRes.arrayBuffer());
+    const raw = JSON.parse(buffer.toString('latin1'));
+    const record = normalizeAemetBeachForecastRecord(raw);
+    if (!record) throw new Error('malformed beach forecast response');
+    return { record, rateLimited: false, remaining };
+  }
+
+  async function runSweep(key) {
+    let anySuccess = false;
+    try {
+      const nomenclator = await fetchNomenclator();
+      for (const beach of nomenclator) {
+        try {
+          const { record, rateLimited, remaining } = await fetchOneBeachForecast(key, beach.id);
+          if (rateLimited) {
+            console.warn(`[aemet-beaches-proxy] rate limited on beach ${beach.id} — cooling down ${throttleCooldownMs}ms`);
+            await sleep(throttleCooldownMs);
+            continue; // revisited on the next full sweep rather than retried immediately
+          }
+          beachById.set(beach.id, { name: beach.name, lat: beach.lat, lon: beach.lon, forecast: record, updatedAt: Date.now() });
+          anySuccess = true;
+          await sleep(Number.isFinite(remaining) && remaining <= THROTTLE_FLOOR ? throttleCooldownMs : paceMs);
+        } catch (err) {
+          console.warn(`[aemet-beaches-proxy] beach ${beach.id} refresh failed (${err?.message || err}) — keeping last-known reading if any`);
+          await sleep(paceMs);
+        }
+      }
+    } catch (err) {
+      console.warn(`[aemet-beaches-proxy] sweep failed (${err?.message || err}) — serving cache if any`);
+    } finally {
+      // Advances even when the nomenclator itself is unreachable, so a
+      // sustained outage is throttled to one attempt per TTL window rather
+      // than a new sweep starting on every incoming request.
+      lastAttemptAt = Date.now();
+      if (anySuccess) lastSuccessAt = Date.now();
+      sweeping = false;
+    }
+  }
+
+  /** @type {?Promise<void>} the currently-running sweep, if any — exposed read-only for tests. */
+  let sweepPromise = null;
+
+  /** Fire-and-forget: never awaited by a request. */
+  function ensureSweepRunning(key) {
+    if (sweeping) return;
+    if (lastAttemptAt && Date.now() - lastAttemptAt < FORECAST_TTL_MS) return;
+    sweeping = true;
+    sweepPromise = runSweep(key);
+  }
+
+  function snapshot() {
+    return [...beachById.entries()].map(([id, entry]) => ({ id, ...entry }));
+  }
+
+  return {
+    name: 'aemet-beaches-proxy',
+    // Test-only hook: await the in-flight background sweep directly instead
+    // of polling — mirrors the `_xForTest()` convention the frontend layers
+    // use, applied here because this proxy's sweep is fire-and-forget and a
+    // request never awaits it.
+    _sweepPromiseForTest: () => sweepPromise,
+    configureServer(server) {
+      server.middlewares.use('/api/aemet/beaches', async (req, res) => {
+        const sendJson = (status, obj) => {
+          if (res.headersSent) return;
+          res.writeHead(status, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+          });
+          res.end(JSON.stringify(obj));
+        };
+        try {
+          const subPath = String(req.url || '').split('?')[0];
+          const key = apiKey();
+          const stale = !lastSuccessAt || Date.now() - lastSuccessAt >= FORECAST_TTL_MS;
+
+          if (subPath === '/status') {
+            sendJson(200, {
+              hasKey: Boolean(key),
+              lastFetch: lastSuccessAt,
+              count: beachById.size,
+              stale,
+              ttlMs: FORECAST_TTL_MS,
+              sweeping,
+            });
+            return;
+          }
+
+          if (!key) {
+            sendJson(503, { error: 'no_key' });
+            return;
+          }
+
+          ensureSweepRunning(key);
+          // Always responds with whatever is cached right now — a cold
+          // start legitimately means an empty array, filled in by later
+          // polls as the background sweep progresses, never a blocked
+          // request or a fabricated reading. `sweeping` lets the frontend
+          // tell "still building the first sweep" apart from "genuinely
+          // stuck on stale data" — both report `stale: true`, but only the
+          // second is actually a problem worth surfacing to the user.
+          sendJson(200, {
+            fetchedAt: lastSuccessAt,
+            stale,
+            sweeping,
+            ttlMs: FORECAST_TTL_MS,
+            count: beachById.size,
+            beaches: snapshot(),
+          });
+        } catch (err) {
+          console.warn('[aemet-beaches-proxy] error:', err?.message || err);
+          sendJson(500, { error: 'aemet beaches proxy error' });
         }
       });
     },

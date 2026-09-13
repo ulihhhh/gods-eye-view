@@ -78,6 +78,12 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   EUMETSAT-sourced sea-surface-temperature composite for Iberia, the
   Mediterranean, and NW Africa.
 
+- Add an AEMET Beach Forecast layer: real points for all 160 beaches AEMET
+  forecasts for nationwide, colored by water temperature, behind a new
+  `/api/aemet/beaches` proxy. Refreshes as a slow paced background sweep
+  (real per-beach forecasts, no bulk endpoint exists) that respects AEMET's
+  own live rate-limit signal rather than a fixed guess.
+
 - Separate terrain, traffic, FIRMS and GBFS middleware into focused provider
   modules, preserving local configuration, routes and cache/error behavior.
 

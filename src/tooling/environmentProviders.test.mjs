@@ -6,6 +6,7 @@ import { tomtomProxy } from 'gods-eye-view/server/providers/traffic';
 import { firmsProxy } from 'gods-eye-view/server/providers/firms';
 import { gbfsProxy } from 'gods-eye-view/server/providers/gbfs';
 import {
+  aemetBeachesProxy,
   aemetFireRiskProxy,
   aemetForecastProxy,
   aemetLightningProxy,
@@ -79,6 +80,7 @@ test('standalone composition mounts every extracted provider exactly once withou
     aemetFireRiskProxy,
     aemetUvIndexProxy,
     aemetSeaSurfaceTempProxy,
+    aemetBeachesProxy,
   ])
     assert.equal(plugins.filter((p) => p.name === factory().name).length, 1);
 });
@@ -703,6 +705,173 @@ test('AEMET UV-index joins each city to its municipio coordinates, drops unmatch
   const stale = json(await request());
   assert.equal(stale.stale, true);
   assert.equal(stale.count, 1, 'stale cache beats an empty layer');
+});
+
+const BEACH_NOMENCLATOR_FIXTURE = {
+  type: 'FeatureCollection',
+  features: [
+    { type: 'Feature', geometry: { type: 'Point', coordinates: [-6.9944, 36.9589] }, properties: { NOMBRE: 'La Barrosa', ID: '1101503' } },
+    { type: 'Feature', geometry: { type: 'Point', coordinates: [-4.4078, 36.7192] }, properties: { NOMBRE: 'La Malagueta', ID: '2906707' } },
+  ],
+};
+
+function beachForecastFixture(nombre, localidad, waterTempC = 22) {
+  return Buffer.from(JSON.stringify([{
+    nombre, localidad,
+    prediccion: { dia: [{ estadoCielo: { descripcion1: 'despejado' }, tAgua: { valor1: waterTempC }, fecha: 20260913 }] },
+  }]), 'latin1');
+}
+
+test('AEMET beaches proxy never blocks a request on its own sweep, and fills in as the paced background sweep completes, cached at 6h', async (t) => {
+  isolate(t, { AEMET_API_KEY: '' });
+  let now = Date.UTC(2026, 8, 13, 12);
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async (raw) => {
+    calls++;
+    const url = new URL(raw);
+    if (url.hostname === 'www.aemet.es') {
+      assert.equal(url.pathname, '/es/api-eltiempo/municipios/9/playas');
+      return Response.json(BEACH_NOMENCLATOR_FIXTURE);
+    }
+    assert.equal(url.hostname, 'opendata.aemet.es');
+    if (url.pathname.endsWith('/playa-1101503-datos-fixture')) {
+      return new Response(beachForecastFixture('La Barrosa', 11015), { headers: { 'content-type': 'text/plain;charset=ISO-8859-15' } });
+    }
+    if (url.pathname.endsWith('/playa-2906707-datos-fixture')) {
+      return new Response(beachForecastFixture('La Malagueta', 29067), { headers: { 'content-type': 'text/plain;charset=ISO-8859-15' } });
+    }
+    assert.equal(url.searchParams.get('api_key'), 'fixture-key');
+    if (url.pathname.endsWith('/prediccion/especifica/playa/1101503')) {
+      return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/playa-1101503-datos-fixture' });
+    }
+    assert.ok(url.pathname.endsWith('/prediccion/especifica/playa/2906707'), `unexpected path ${url.pathname}`);
+    return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/playa-2906707-datos-fixture' });
+  });
+  // paceMs/throttleCooldownMs: 0 — this test drives the real sweep to
+  // completion via `_sweepPromiseForTest()` rather than fighting fake timers
+  // against a fire-and-forget background loop; production always uses the
+  // real conservative pacing (see the factory's own defaults).
+  const plugin = aemetBeachesProxy({ paceMs: 0, throttleCooldownMs: 0 });
+  const request = install(plugin);
+  assert.equal((await request()).status, 503, 'keyless');
+  assert.equal(json(await request('/status')).hasKey, false);
+  assert.equal(calls, 0, 'keyless never even fetches the (keyless) nomenclator');
+  process.env.AEMET_API_KEY = 'fixture-key';
+
+  const cold = json(await request());
+  assert.equal(cold.count, 0, 'a cold start responds immediately — never blocks on the sweep it just kicked off');
+  assert.equal(cold.stale, true);
+
+  await plugin._sweepPromiseForTest();
+  const warm = json(await request());
+  assert.equal(warm.count, 2);
+  const byId = Object.fromEntries(warm.beaches.map((b) => [b.id, b]));
+  assert.equal(byId['1101503'].name, 'La Barrosa');
+  assert.equal(byId['1101503'].forecast.waterTempC, 22);
+  assert.equal(byId['1101503'].forecast.municipioId, '11015');
+  assert.equal(byId['2906707'].name, 'La Malagueta');
+  assert.equal(calls, 5, 'one nomenclator fetch + 2 beaches × (envelope + datos)');
+  assert.equal(warm.stale, false);
+
+  const callsAfterFirstSweep = calls;
+  json(await request());
+  assert.equal(calls, callsAfterFirstSweep, 'within the 6h TTL: served from memory cache, no new sweep started');
+
+  const status = json(await request('/status'));
+  assert.equal(status.hasKey, true);
+  assert.equal(status.count, 2);
+  assert.equal(status.stale, false);
+
+  now += 6 * 3600_000 + 60_000; // past the 6-hour TTL
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('upstream down');
+  });
+  const staleResponse = json(await request());
+  assert.equal(staleResponse.count, 2, 'a new sweep starting still serves the last-known readings immediately');
+  await plugin._sweepPromiseForTest();
+  const afterFailedSweep = json(await request('/status'));
+  assert.equal(afterFailedSweep.stale, true, 'a wholesale-failed sweep must not report freshness it never earned');
+  assert.equal(afterFailedSweep.count, 2, 'the failed sweep did not drop any previously-cached beach');
+});
+
+test('AEMET beaches proxy keeps a beach\'s last-known forecast when only that beach\'s refresh fails, instead of dropping it from the layer', async (t) => {
+  isolate(t, { AEMET_API_KEY: 'fixture-key' });
+  let now = Date.UTC(2026, 8, 13, 12);
+  t.mock.method(Date, 'now', () => now);
+  let brosaFails = false;
+  t.mock.method(globalThis, 'fetch', async (raw) => {
+    const url = new URL(raw);
+    if (url.hostname === 'www.aemet.es') return Response.json(BEACH_NOMENCLATOR_FIXTURE);
+    if (url.pathname.endsWith('/playa-1101503-datos-fixture')) {
+      if (brosaFails) throw new Error('flaky upstream');
+      return new Response(beachForecastFixture('La Barrosa', 11015, 21), { headers: { 'content-type': 'text/plain;charset=ISO-8859-15' } });
+    }
+    if (url.pathname.endsWith('/playa-2906707-datos-fixture')) {
+      return new Response(beachForecastFixture('La Malagueta', 29067, 24), { headers: { 'content-type': 'text/plain;charset=ISO-8859-15' } });
+    }
+    if (url.pathname.endsWith('/prediccion/especifica/playa/1101503')) {
+      return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/playa-1101503-datos-fixture' });
+    }
+    return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/playa-2906707-datos-fixture' });
+  });
+  const plugin = aemetBeachesProxy({ paceMs: 0, throttleCooldownMs: 0 });
+  const request = install(plugin);
+
+  json(await request());
+  await plugin._sweepPromiseForTest();
+  const first = json(await request());
+  assert.equal(first.count, 2);
+  assert.equal(Object.fromEntries(first.beaches.map((b) => [b.id, b]))['1101503'].forecast.waterTempC, 21);
+
+  now += 6 * 3600_000 + 60_000; // past the 6-hour TTL
+  brosaFails = true;
+  json(await request()); // kicks off the next sweep
+  await plugin._sweepPromiseForTest();
+  const second = json(await request());
+  assert.equal(second.count, 2, 'the flaky beach is kept from its last successful sweep, not dropped');
+  const byId = Object.fromEntries(second.beaches.map((b) => [b.id, b]));
+  assert.equal(byId['1101503'].forecast.waterTempC, 21, 'still the OLD reading — this sweep never overwrote it');
+  assert.equal(byId['2906707'].forecast.waterTempC, 24, 'the healthy beach refreshed normally');
+});
+
+test('AEMET beaches proxy cools down on an explicit 429 without corrupting cached data, and revisits that beach on the next sweep', async (t) => {
+  isolate(t, { AEMET_API_KEY: 'fixture-key' });
+  let now = Date.UTC(2026, 8, 13, 12);
+  t.mock.method(Date, 'now', () => now);
+  let brosaCallCount = 0;
+  t.mock.method(globalThis, 'fetch', async (raw) => {
+    const url = new URL(raw);
+    if (url.hostname === 'www.aemet.es') return Response.json(BEACH_NOMENCLATOR_FIXTURE);
+    if (url.pathname.endsWith('/playa-1101503-datos-fixture')) {
+      return new Response(beachForecastFixture('La Barrosa', 11015, 21), { headers: { 'content-type': 'text/plain;charset=ISO-8859-15' } });
+    }
+    if (url.pathname.endsWith('/playa-2906707-datos-fixture')) {
+      return new Response(beachForecastFixture('La Malagueta', 29067, 24), { headers: { 'content-type': 'text/plain;charset=ISO-8859-15' } });
+    }
+    if (url.pathname.endsWith('/prediccion/especifica/playa/1101503')) {
+      brosaCallCount++;
+      if (brosaCallCount === 1) {
+        return Response.json({}, { status: 429, headers: { 'remaining-request-endpoint': '0' } });
+      }
+      return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/playa-1101503-datos-fixture' });
+    }
+    return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/playa-2906707-datos-fixture' });
+  });
+  const plugin = aemetBeachesProxy({ paceMs: 0, throttleCooldownMs: 1 });
+  const request = install(plugin);
+
+  json(await request());
+  await plugin._sweepPromiseForTest();
+  const first = json(await request());
+  assert.equal(first.count, 1, 'the rate-limited beach is skipped this sweep, not fabricated');
+  assert.equal(first.beaches[0].id, '2906707');
+
+  now += 6 * 3600_000 + 60_000; // past the 6-hour TTL — a fresh sweep retries the previously-limited beach
+  json(await request());
+  await plugin._sweepPromiseForTest();
+  const second = json(await request());
+  assert.equal(second.count, 2, 'the previously rate-limited beach succeeds on the next sweep');
 });
 
 test('GBFS keeps host/path/method guards, response caps and distinct information/status cache headers', async (t) => {

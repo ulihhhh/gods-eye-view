@@ -1,22 +1,24 @@
 # Weather data integrations — design plan
 
-Status (2026-09-12): **Scope narrowed to AEMET-only, by owner direction.**
+Status (2026-09-13): **Scope narrowed to AEMET-only, by owner direction.**
 This plan now tracks one PR: connect **every** AEMET OpenData dataset to a
 GEV layer (or record a deliberate, reasoned exception for the handful that
 genuinely don't fit). Phase A0 (Weather Stations), Phase A1 (Weather
 Warnings), Phase A2 (forecast tooltip), Phase A4 (lightning activity),
-Phase A5 (fire risk), Phase A8 (UV index), and Phase A9 (sea-surface
-temperature) are **shipped** on `feat/weather-layers` — see
+Phase A5 (fire risk), Phase A7 (beach forecast), Phase A8 (UV index), and
+Phase A9 (sea-surface temperature) are **shipped** on `feat/weather-layers`
+— see
 [Phase A0](#phase-a0--station-layer--shipped-2026-09-12),
 [Phase A1](#phase-a1--warnings-overlay-avisos--shipped-2026-09-12),
 [Phase A2](#phase-a2--forecast-tooltip--shipped-2026-09-12),
 [Phase A4](#phase-a4--lightning-activity--shipped-2026-09-12),
 [Phase A5](#phase-a5--forest-fire-risk-forecast--shipped-2026-09-12),
+[Phase A7](#phase-a7--beach-forecast--shipped-2026-09-13),
 [Phase A8](#phase-a8--uv-index--shipped-2026-09-12), and
 [Phase A9](#phase-a9--sea-surface-temperature--shipped-2026-09-12). **Phase
 A3 (radar) and Phase A6 (maritime forecast) are blocked**, not skipped —
 radar on AEMET's own broken cached endpoint, maritime on a genuinely
-unresolved zone-geometry source; see their sections below. Phases A7, A10
+unresolved zone-geometry source; see their sections below. Phases A10
 through A14 (below) are the complete, concrete criteria for the rest of
 this PR — nothing in that list is optional to *decide*, though build order
 and effort vary. Open-Meteo's map layer and NASA GIBS — this plan's original
@@ -133,7 +135,7 @@ twice — see A0's own note below).
 | `aemet-lightning` | Nationwide lightning-composite snapshot (ambient thumbnail, not entities) | pre-rendered image, no coordinates | A4 | `p` | **shipped** |
 | `aemet-fire-risk` | Meteorological forest-fire risk forecast (ambient click-to-expand thumbnail) | pre-rendered image, no coordinates | A5 | `v` | **shipped** |
 | `aemet-maritime` | High-seas + coastal forecast zones | zone polygons + click text | A6 | `k` | **blocked** — endpoint confirmed live, but no geometry source found for its ~30 subzones |
-| `aemet-beaches` | Per-beach forecast (UV, sea temp, waves, wind) | points | A7 | `z` | not started |
+| `aemet-beaches` | Per-beach forecast (UV, sea temp, waves, wind) | points | A7 | `n` | **shipped** — took `n`, not this table's original tentative `z`: several existing tests hardcode `z` as their canonical "token not in the registry" fixture, so claiming it would have broken them |
 | `aemet-uv-index` | UV index per provincial-capital city (real points) | points, joined to `maestro/municipios` | A8 | `0` | **shipped** |
 | `aemet-sea-surface-temp` | Sea-surface temperature (ambient click-to-expand thumbnail) | pre-rendered image, no coordinates | A9 | `y` | **shipped** — took `y` (this table's original tentative token, `1`, was left unused; `aemet-maritime`'s own tentative token reassigned to `k` here since it's still unimplemented) |
 | `aemet-environmental` | Ozone / background pollution / solar radiation, chip-selected | points, with a network-type chip | A10 | `1` | not started |
@@ -931,14 +933,80 @@ once A3 unblocks.
 - **Pairs with**: `ais-live-vessels` and (once built) A9's sea-surface
   temperature — see [stacking demos](#which-layers-pair-well-stacking-demos).
 
-### Phase A7 — beach forecast
+### Phase A7 — beach forecast — **shipped 2026-09-13**
 
-- **Endpoint**: `predicciones-especificas/playa/{playa}`.
-- **Shape**: points, one per beach.
-- **Open question**: no beach code/coordinate list exists in this API
-  (`maestro` only covers municipios) — a nomenclátor (code → name/lat/lon)
-  needs an external source before the per-beach endpoint is queryable at
-  all. Smaller version of A6's problem (points, not polygons), but real.
+The nomenclator problem this phase was blocked on turned out to have a real
+fix, unlike A6's still-unresolved maritime-zone geometry — found by
+following the same "check AEMET's own public-facing page for the lookup it
+must be using internally" instinct that unblocked A9's endpoint path.
+
+- **Endpoint confirmed live**: `prediccion/especifica/playa/{playa}` (not
+  `predicciones-especificas/playa/{playa}` as originally guessed in this
+  plan). Two-step envelope, same ISO-8859-15-declared `datos` response as
+  every other AEMET feed; the `datos` payload is a one-element array with
+  `nombre`/`localidad` (the beach's containing municipio's 5-digit INE
+  code — an unused free join key here) and a `prediccion.dia[]` list.
+- **The nomenclator blocker resolved**: AEMET's own public website
+  (`www.aemet.es`, not `opendata.aemet.es` — no API key) serves a GeoJSON
+  nomenclator of all 160 beaches it forecasts for, at
+  `es/api-eltiempo/municipios/{zoom}/playas` (an XYZ-tile-style zoom
+  parameter, matching the sibling map-tile URLs the same page loads; feature
+  count plateaus at 160 for any zoom ≥ 9). Each feature's `ID` (e.g.
+  `"2106004"`) is confirmed live to be the exact id the OpenData
+  `prediccion/especifica/playa/{id}` endpoint expects, verified across four
+  ids spanning different regions (Peninsula, Ceuta, Melilla). This is an
+  undocumented internal endpoint of AEMET's own site, not the official
+  OpenData contract — documented as such, used anyway since it's what
+  AEMET's own beach-forecast page relies on for the identical lookup.
+- **Shape resolved as a real point layer**, same as A8 — no ambient
+  thumbnail needed, the nomenclator already carries real coordinates.
+- **A real rate-limit incident, found and fixed live**: unlike every other
+  AEMET feed in this plan (one resource, one request), a beach-forecast
+  refresh needs ~160 individual per-beach round trips — no bulk endpoint
+  exists. The first implementation (concurrency-8 worker pool, mirroring
+  `mapRadioConcurrent`'s pattern from `local.js`) hit AEMET's real rate limit
+  partway through a live test sweep: the envelope endpoint's
+  `Remaining-request-endpoint` response header (confirmed live to be scoped
+  per api-key-and-endpoint-path, independently of every other AEMET proxy's
+  own budget) started around 39–40 and was exhausted, with 429s on 143 of
+  160 beaches, after roughly 20 concurrent calls. Rebuilt as a slow,
+  sequential, **non-blocking background sweep**: paced one beach every 2.5s,
+  reading the live `Remaining-request-endpoint` value after every call and
+  cooling down ~65s whenever it (or an explicit 429) signals the budget is
+  nearly spent — confirmed live afterward to complete a full sweep with zero
+  further 429s, including recovering gracefully through a single throttle
+  window caused by budget already partly consumed by earlier manual
+  testing. No request ever awaits the sweep; each responds immediately with
+  whatever is cached (`beaches: []` on an honest cold start), filling in
+  across this layer's own 5-minute poll interval.
+- **A follow-on UX bug found and fixed the same session**: the layer
+  initially reported "DEGRADED · Serving stale AEMET data (upstream
+  unavailable)" during a perfectly healthy first sweep — `stale` alone
+  doesn't distinguish "still filling in for the first time" from "genuinely
+  stuck" the way it does for every other AEMET proxy's one-shot refresh.
+  Fixed by adding a `sweeping` flag to the response and only surfacing the
+  degraded message when stale AND no sweep is currently running.
+- Colored by water temperature (`WATER_TEMP_COLOR_STOPS`, a 14–29°C range
+  distinct from `aemetStations.js`'s -10..40°C air-temperature scale), with
+  click-to-inspect showing water temp, air max, sky, wind, waves, and UV
+  max — `src/data/aemetBeaches.js` mirrors `aemetUvIndex.js`'s point-layer
+  shape directly, including its `getAnalystRecords` hook.
+- Shipped: `AEMET_BEACHES_NOMENCLATOR_URL`/
+  `normalizeAemetBeachNomenclatorEntry`/`normalizeAemetBeachesNomenclator`/
+  `aemetBeachForecastEnvelopeUrl`/`normalizeAemetBeachForecastRecord` in
+  `weatherProviderRequests.js` (real captured fixtures, 8 tests),
+  `aemetBeachesProxy()` (3 behavioral tests: paced background sweep with
+  cache-first responses, per-beach failure isolation, 429 cooldown and
+  retry-next-sweep — pacing injectable via factory options so tests don't
+  sleep in real time or fight fake timers against a fire-and-forget loop),
+  `src/data/aemetBeaches.js` (13 tests).
+- **Verified live against the real API**: a fresh sweep filled in from 0 to
+  60+ real beaches within a few minutes with no further 429s; points
+  render along the Spanish coastline; clean "ON" status throughout, never a
+  false "DEGRADED."
+- TTL 6h for a completed sweep, memory-only. Nomenclator cached 24h
+  separately (it rarely changes).
+- Voice-tool wiring deferred to Phase A14, same as every other phase.
 
 ### Phase A8 — UV index — **shipped 2026-09-12**
 

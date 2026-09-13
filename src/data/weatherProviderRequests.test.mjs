@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  AEMET_BEACHES_NOMENCLATOR_URL,
   AEMET_LIGHTNING_ENVELOPE_URL,
   AEMET_SEA_SURFACE_TEMP_ENVELOPE_URL,
   AEMET_STATIONS_ENVELOPE_URL,
   AEMET_STATION_STALE_MS,
   AEMET_WARNINGS_ENVELOPE_URL,
   AEMET_WARNING_LEVEL_RANK,
+  aemetBeachForecastEnvelopeUrl,
   aemetFireRiskEstimadoEnvelopeUrl,
   aemetFireRiskPrevistoEnvelopeUrl,
   aemetLightningEnvelopeUrl,
@@ -22,6 +24,9 @@ import {
   findNearestAemetMunicipio,
   haversineDistanceKm,
   madridCivilNow,
+  normalizeAemetBeachesNomenclator,
+  normalizeAemetBeachForecastRecord,
+  normalizeAemetBeachNomenclatorEntry,
   normalizeAemetHourlyForecast,
   normalizeAemetMunicipioRecord,
   normalizeAemetMunicipiosSnapshot,
@@ -695,6 +700,103 @@ test('the sea-surface-temperature envelope URL embeds the key as a query param, 
     `${AEMET_SEA_SURFACE_TEMP_ENVELOPE_URL}?api_key=K`,
   );
   assert.ok(!aemetSeaSurfaceTempEnvelopeUrl('K').includes('K/'), 'the key is never a path segment');
+});
+
+test('the beach forecast envelope URL places the beach id as a path segment and the key as a query param', () => {
+  const url = aemetBeachForecastEnvelopeUrl('K', '2106004');
+  assert.ok(url.includes('/prediccion/especifica/playa/2106004?'));
+  assert.ok(url.endsWith('api_key=K'));
+});
+
+/** A real feature from a live pull of AEMET's public (keyless) beaches nomenclator. */
+const REAL_BEACH_FEATURE = Object.freeze({
+  type: 'Feature',
+  geometry: { type: 'Point', coordinates: [-4.4077777777777785, 36.719166666666666] },
+  properties: { NOMBRE: 'La Malagueta', ID: '2906707' },
+});
+
+test('normalizeAemetBeachNomenclatorEntry extracts id/name/lat/lon from a real GeoJSON feature', () => {
+  assert.deepEqual(normalizeAemetBeachNomenclatorEntry(REAL_BEACH_FEATURE), {
+    id: '2906707',
+    name: 'La Malagueta',
+    lat: 36.719166666666666,
+    lon: -4.4077777777777785,
+  });
+});
+
+test('normalizeAemetBeachNomenclatorEntry rejects a feature with no id, no name, or out-of-range coordinates', () => {
+  assert.equal(normalizeAemetBeachNomenclatorEntry({ properties: { NOMBRE: 'X', ID: '' } }), null);
+  assert.equal(normalizeAemetBeachNomenclatorEntry({ properties: { ID: '123' } }), null);
+  assert.equal(
+    normalizeAemetBeachNomenclatorEntry({
+      properties: { NOMBRE: 'X', ID: '123' },
+      geometry: { coordinates: [200, 36] },
+    }),
+    null,
+  );
+  assert.equal(normalizeAemetBeachNomenclatorEntry(null), null);
+});
+
+test('normalizeAemetBeachesNomenclator filters a real FeatureCollection down to valid beaches, dropping malformed ones', () => {
+  const collection = {
+    type: 'FeatureCollection',
+    features: [REAL_BEACH_FEATURE, { type: 'Feature', properties: {} }],
+  };
+  const beaches = normalizeAemetBeachesNomenclator(collection);
+  assert.equal(beaches.length, 1);
+  assert.equal(beaches[0].id, '2906707');
+  assert.deepEqual(normalizeAemetBeachesNomenclator({}), []);
+});
+
+test('the beaches nomenclator URL is AEMET\'s own public website widget, not opendata.aemet.es', () => {
+  assert.ok(AEMET_BEACHES_NOMENCLATOR_URL.startsWith('https://www.aemet.es/'));
+});
+
+/** A real `datos` payload from a live `prediccion/especifica/playa/2106004` pull (Punta Umbría). */
+const REAL_BEACH_FORECAST_PAYLOAD = Object.freeze([
+  {
+    nombre: 'Punta Umbría',
+    localidad: 21060,
+    prediccion: {
+      dia: [
+        {
+          estadoCielo: { descripcion1: 'despejado' },
+          viento: { descripcion1: 'flojo' },
+          oleaje: { descripcion1: 'débil' },
+          tMaxima: { valor1: 32 },
+          sTermica: { valor1: 470, descripcion1: 'calor moderado' },
+          tAgua: { valor1: 22 },
+          uvMax: { valor1: 6 },
+          fecha: 20260913,
+        },
+        {
+          estadoCielo: { descripcion1: 'despejado' },
+          fecha: 20260914,
+        },
+      ],
+    },
+    id: 2106004,
+  },
+]);
+
+test('normalizeAemetBeachForecastRecord pulls today\'s (dia[0]) values from a real beach forecast payload', () => {
+  assert.deepEqual(normalizeAemetBeachForecastRecord(REAL_BEACH_FORECAST_PAYLOAD), {
+    municipioId: '21060',
+    date: '20260913',
+    sky: 'despejado',
+    wind: 'flojo',
+    waves: 'débil',
+    waterTempC: 22,
+    maxTempC: 32,
+    uvMax: 6,
+    thermalSensation: 'calor moderado',
+  });
+});
+
+test('normalizeAemetBeachForecastRecord returns null for a payload with no usable today entry', () => {
+  assert.equal(normalizeAemetBeachForecastRecord([]), null);
+  assert.equal(normalizeAemetBeachForecastRecord([{ prediccion: {} }]), null);
+  assert.equal(normalizeAemetBeachForecastRecord(null), null);
 });
 
 /** Two real entries from a live `prediccion/especifica/uvi/0` pull (Madrid mainland + a Canary Islands city). */

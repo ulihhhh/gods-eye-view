@@ -763,6 +763,103 @@ export function aemetSeaSurfaceTempEnvelopeUrl(apiKey) {
   return `${AEMET_SEA_SURFACE_TEMP_ENVELOPE_URL}?api_key=${encodeURIComponent(apiKey)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Beach forecast (Phase A7) — the blocker this plan originally flagged ("no
+// beach code/coordinate list exists in this API") turned out to have a real
+// fix: AEMET's own public website widget at aemet.es (not opendata.aemet.es,
+// no API key) serves a GeoJSON nomenclator of every beach it forecasts for —
+// `es/api-eltiempo/municipios/{zoom}/playas`, where `{zoom}` is an XYZ-tile
+// zoom level (matching the sibling map-tile URLs the same page loads); the
+// feature count plateaus at 160 for any zoom ≥ 9, confirmed live to be the
+// complete national list (Peninsula, Balearics, Canaries, Ceuta, Melilla, no
+// duplicate ids). Each feature's `ID` (e.g. `"2106004"`) is the SAME id the
+// OpenData API's `prediccion/especifica/playa/{id}` endpoint takes —
+// confirmed live across four ids spanning different regions. This is an
+// undocumented internal endpoint of AEMET's own website, not part of the
+// official OpenData API contract, so it could change without notice; treated
+// as a nomenclator source of record anyway since it is public, keyless, and
+// is what AEMET's own beach-forecast page relies on for the exact same
+// cascading-select lookup this proxy needs.
+//
+// The per-beach forecast payload has the same two-step envelope and
+// ISO-8859-15-declared `datos` response as every other AEMET feed; its
+// `localidad` field is the beach's containing municipio's 5-digit INE code
+// (free bonus join key, unused here since the nomenclator already carries
+// real coordinates directly).
+// ---------------------------------------------------------------------------
+
+/** The complete-beach-list GeoJSON nomenclator. No API key required. */
+export const AEMET_BEACHES_NOMENCLATOR_URL =
+  'https://www.aemet.es/es/api-eltiempo/municipios/9/playas';
+
+/**
+ * Normalize one GeoJSON `Feature` from the beaches nomenclator.
+ * @param {object} feature
+ * @returns {{id: string, name: string, lat: number, lon: number}|null}
+ */
+export function normalizeAemetBeachNomenclatorEntry(feature) {
+  const id = String(feature?.properties?.ID ?? '').trim();
+  const name = typeof feature?.properties?.NOMBRE === 'string' ? feature.properties.NOMBRE.trim() : '';
+  const coordinates = feature?.geometry?.coordinates;
+  if (!/^\d+$/.test(id) || !name || !Array.isArray(coordinates) || coordinates.length < 2) return null;
+  const lon = finiteOrNull(coordinates[0]);
+  const lat = finiteOrNull(coordinates[1]);
+  if (lat === null || lon === null || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  return { id, name, lat, lon };
+}
+
+/**
+ * @param {object} payload The nomenclator's parsed GeoJSON `FeatureCollection`.
+ * @returns {Array<ReturnType<typeof normalizeAemetBeachNomenclatorEntry>>}
+ */
+export function normalizeAemetBeachesNomenclator(payload) {
+  if (!Array.isArray(payload?.features)) return [];
+  const beaches = [];
+  for (const feature of payload.features) {
+    const entry = normalizeAemetBeachNomenclatorEntry(feature);
+    if (entry) beaches.push(entry);
+  }
+  return beaches;
+}
+
+/** One beach's forecast envelope for a given beach id (from the nomenclator). */
+export function aemetBeachForecastEnvelopeUrl(apiKey, beachId) {
+  return `https://opendata.aemet.es/opendata/api/prediccion/especifica/playa/${encodeURIComponent(beachId)}?api_key=${encodeURIComponent(apiKey)}`;
+}
+
+/**
+ * Normalize one beach's forecast `datos` payload — a one-element array
+ * carrying `nombre`/`localidad`/`id` plus a `prediccion.dia[]` list; only
+ * `dia[0]` (today) is used. Returns `null` for a payload with no usable
+ * today entry.
+ * @param {Array<object>} payload
+ * @returns {{municipioId: string|null, date: string|null, sky: string|null,
+ *   wind: string|null, waves: string|null, waterTempC: number|null,
+ *   maxTempC: number|null, uvMax: number|null,
+ *   thermalSensation: string|null}|null}
+ */
+export function normalizeAemetBeachForecastRecord(payload) {
+  const record = Array.isArray(payload) ? payload[0] : payload;
+  const today = record?.prediccion?.dia?.[0];
+  if (!today) return null;
+  const municipioIdRaw = record?.localidad;
+  const municipioId = Number.isFinite(Number(municipioIdRaw))
+    ? String(municipioIdRaw).padStart(5, '0')
+    : null;
+  const fecha = String(today?.fecha ?? '');
+  return {
+    municipioId,
+    date: /^\d{8}$/.test(fecha) ? fecha : null,
+    sky: typeof today?.estadoCielo?.descripcion1 === 'string' ? today.estadoCielo.descripcion1 : null,
+    wind: typeof today?.viento?.descripcion1 === 'string' ? today.viento.descripcion1 : null,
+    waves: typeof today?.oleaje?.descripcion1 === 'string' ? today.oleaje.descripcion1 : null,
+    waterTempC: finiteOrNull(today?.tAgua?.valor1),
+    maxTempC: finiteOrNull(today?.tMaxima?.valor1),
+    uvMax: finiteOrNull(today?.uvMax?.valor1),
+    thermalSensation: typeof today?.sTermica?.descripcion1 === 'string' ? today.sTermica.descripcion1 : null,
+  };
+}
+
 export function filterActiveAemetWarnings(zones, now = Date.now()) {
   if (!Array.isArray(zones)) return [];
   const result = [];

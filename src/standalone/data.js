@@ -2,6 +2,7 @@ import { DataLayerManager } from '../data/manager.js';
 import aemetFireRiskLayer from '../data/aemetFireRisk.js';
 import aemetUvIndexLayer from '../data/aemetUvIndex.js';
 import aemetSeaSurfaceTempLayer from '../data/aemetSeaSurfaceTemp.js';
+import aemetBeachesLayer from '../data/aemetBeaches.js';
 import aemetLightningLayer from '../data/aemetLightning.js';
 import aemetStationsLayer from '../data/aemetStations.js';
 import aemetWarningsLayer from '../data/aemetWarnings.js';
@@ -44,6 +45,7 @@ export function createStandaloneData({
   dataManager.register(aemetFireRiskLayer);
   dataManager.register(aemetUvIndexLayer);
   dataManager.register(aemetSeaSurfaceTempLayer);
+  dataManager.register(aemetBeachesLayer);
   dataManager.register(flightsLayer);
   dataManager.register(militaryFlightsLayer);
   dataManager.register(earthquakesLayer);

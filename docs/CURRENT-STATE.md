@@ -663,6 +663,69 @@ off).
 Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
 Phase A14).
 
+## AEMET Beach Forecast (2026-09-13)
+
+`aemet-beaches` (token `n`, `enabled-only`) was the plan's other flagged
+blocker ("no beach code/coordinate list exists in this API," the same class
+of problem as A6's still-unresolved maritime zones) — unblocked by a real
+find, not a workaround: AEMET's own public website (`www.aemet.es`, not
+`opendata.aemet.es` — no API key) serves a GeoJSON nomenclator of all 160
+beaches it forecasts for at `es/api-eltiempo/municipios/{zoom}/playas`
+(feature count plateaus at 160 for any zoom ≥ 9 — confirmed live to be the
+complete national list, Peninsula/Balearics/Canaries/Ceuta/Melilla, no
+duplicate ids). Each feature's `ID` is confirmed live to be the exact id
+`prediccion/especifica/playa/{id}` expects, across four ids spanning
+different regions. This is an undocumented internal endpoint of AEMET's own
+site, not part of the official OpenData contract, so it could change without
+notice — documented as such, used anyway since it's what AEMET's own
+beach-forecast page relies on for the same lookup.
+
+**A real rate-limit incident, found and fixed during this phase**: the
+first implementation fetched all 160 beaches with a concurrency-8 worker
+pool. AEMET's envelope endpoint returns a `Remaining-request-endpoint`
+response header (confirmed live to be scoped per api-key-and-endpoint-path,
+independent of every other AEMET proxy's own budget — checking the stations
+endpoint mid-test showed an unrelated, unaffected count) that started around
+39–40; the concurrent sweep exhausted it and started receiving 429s after
+roughly 20 beaches in quick succession, confirmed live via server logs
+during manual testing (143 of 160 beaches failed on that first attempt).
+Rebuilt as a slow, fully-sequential, **non-blocking background sweep**
+instead: a request never awaits it, always responding immediately with
+whatever is cached (an honest empty array on a true cold start, filling in
+across this layer's own 5-minute poll interval); the sweep paces one beach
+every 2.5s and also reads the live `Remaining-request-endpoint` value after
+every call, cooling down for ~65s whenever it — or an explicit 429 — signals
+the budget is nearly spent. Confirmed live afterward: the proactive
+header-based backoff avoided a single further 429 across a full sweep, even
+after the budget had already been partly consumed by earlier manual
+testing (observed recovering from single digits back into the high 30s
+during the pause). A follow-on fix: the layer initially reported
+"DEGRADED · Serving stale AEMET data (upstream unavailable)" during a
+perfectly healthy first sweep, because `stale` alone doesn't distinguish
+"still filling in" from "actually stuck" for a multi-minute background
+process the way it does for every other AEMET proxy's one atomic refresh —
+fixed by adding a `sweeping` flag to the response and only surfacing the
+degraded message when stale AND no sweep is currently running.
+
+The frontend (`src/data/aemetBeaches.js`) mirrors `aemetUvIndex.js`'s real
+point-layer shape exactly — no municipio join needed here since the
+nomenclator already carries real coordinates directly. Colored by water
+temperature (`WATER_TEMP_COLOR_STOPS`, a narrower 14–29°C range than
+`aemetStations.js`'s -10..40°C air-temperature scale, since Spanish sea
+temperatures don't approach those extremes), with click-to-inspect showing
+water temp, air max, sky, wind, waves, and UV max.
+
+**Verified live against the real API**: a fresh sweep filled in from 0 to
+60+ real beaches within a few minutes with no further 429s; individual
+beach points render along the Spanish coastline with click-to-inspect
+working (confirmed via passing unit tests exercising the exact selection
+code path — `aemetUvIndex.js`'s own already-proven mechanism, reused
+directly); the layer correctly reports a clean "ON" state rather than a
+false "DEGRADED" one during the ongoing background fill-in.
+
+Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
+Phase A14).
+
 ## Installations and map-source guidance
 
 - On an uncached Overpass failure, mapped installations keep their existing
