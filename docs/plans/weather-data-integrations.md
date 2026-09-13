@@ -6,8 +6,9 @@ GEV layer (or record a deliberate, reasoned exception for the handful that
 genuinely don't fit). Phase A0 (Weather Stations), Phase A1 (Weather
 Warnings), Phase A2 (forecast tooltip), Phase A4 (lightning activity),
 Phase A5 (fire risk), Phase A7 (beach forecast), Phase A8 (UV index),
-Phase A9 (sea-surface temperature), and Phase A10 (environmental networks —
-ozone + radiation) are **shipped** on `feat/weather-layers` — see
+Phase A9 (sea-surface temperature), Phase A10 (environmental networks —
+ozone + radiation), and Phase A14 (voice-tool wiring) are **shipped** on
+`feat/weather-layers` — see
 [Phase A0](#phase-a0--station-layer--shipped-2026-09-12),
 [Phase A1](#phase-a1--warnings-overlay-avisos--shipped-2026-09-12),
 [Phase A2](#phase-a2--forecast-tooltip--shipped-2026-09-12),
@@ -15,14 +16,22 @@ ozone + radiation) are **shipped** on `feat/weather-layers` — see
 [Phase A5](#phase-a5--forest-fire-risk-forecast--shipped-2026-09-12),
 [Phase A7](#phase-a7--beach-forecast--shipped-2026-09-13),
 [Phase A8](#phase-a8--uv-index--shipped-2026-09-12),
-[Phase A9](#phase-a9--sea-surface-temperature--shipped-2026-09-12), and
-[Phase A10](#phase-a10--environmental-networks-ozone-pollution-radiation--shipped-2026-09-13-ozone--radiation).
-**Phase A3 (radar) and Phase A6 (maritime forecast) are blocked**, not
-skipped — radar on AEMET's own broken cached endpoint, maritime on a
-genuinely unresolved zone-geometry source; see their sections below. Phases
-A11 through A14 (below) are the complete, concrete criteria for the rest of
-this PR — nothing in that list is optional to *decide*, though build order
-and effort vary. Open-Meteo's map layer and NASA GIBS — this plan's original
+[Phase A9](#phase-a9--sea-surface-temperature--shipped-2026-09-12),
+[Phase A10](#phase-a10--environmental-networks-ozone-pollution-radiation--shipped-2026-09-13-ozone--radiation),
+and [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set--shipped-2026-09-13).
+**Phase A3 (radar), Phase A6 (maritime forecast), and Phase A12 (regional
+forecast) are blocked**, not skipped — radar on AEMET's own broken cached
+endpoint, maritime on a genuinely unresolved zone-geometry source, regional
+forecast on the same *kind* of missing-geometry problem (this app's bundled
+Natural Earth data turned out to be physical geography, not administrative
+boundaries, on inspection); **Phase A11 (Antarctic stations) is deferred**
+for a different, real reason — a live-confirmed seasonal gap (no current
+reading April-October) that makes folding it into `aemet-stations` as
+originally proposed a poor fit — see their sections below. **Phase A13
+(climatological values) has its endpoint confirmed live but its UI
+deliberately not designed this pass** — a genuinely different kind of work
+(a comparison chart bolted onto an existing click card) than every other
+phase here. Open-Meteo's map layer and NASA GIBS — this plan's original
 other two providers — are **out of this PR's scope** and relegated to
 [Deferred — non-AEMET work](#deferred--non-aemet-work-tracked-not-in-this-pr)
 at the end: tracked so the earlier design work isn't lost, revisited only
@@ -140,8 +149,8 @@ twice — see A0's own note below).
 | `aemet-uv-index` | UV index per provincial-capital city (real points) | points, joined to `maestro/municipios` | A8 | `0` | **shipped** |
 | `aemet-sea-surface-temp` | Sea-surface temperature (ambient click-to-expand thumbnail) | pre-rendered image, no coordinates | A9 | `y` | **shipped** — took `y` (this table's original tentative token, `1`, was left unused; `aemet-maritime`'s own tentative token reassigned to `k` here since it's still unimplemented) |
 | `aemet-environmental` | Ozone / solar radiation, chip-selected (background pollution deferred, see phase notes) | points, with a network-type chip | A10 | `k` | **shipped** — ozone + radiation only |
-| *(folds into `aemet-stations`)* | Spain's two Antarctic bases | points | A11 | *(none — extends A0)* | not started |
-| `aemet-regional-forecast` | CCAA/provincia forecast text on region click | zone polygons (Natural Earth boundaries) + text | A12 | `3` | not started |
+| *(folds into `aemet-stations`)* | Spain's two Antarctic bases | points | A11 | *(none — extends A0)* | **deferred** — real seasonal-dormancy finding (no current reading April-October), see phase notes |
+| `aemet-regional-forecast` | CCAA/provincia forecast text on region click | zone polygons (Natural Earth boundaries) + text | A12 | `3` | **blocked** — the app's bundled Natural Earth data is physical geography, not admin boundaries; no polygon source in hand, see phase notes |
 
 ## How each one turns on/off
 
@@ -156,7 +165,7 @@ uses — nothing new to build for basic on/off:
 - **Voice**: per `CONTRIBUTING.md`'s pattern for new layers, each eventually
   needs a `GEV_REALTIME_TOOLS` entry + `src/voice/gevActions.js` handler.
   Deliberately **not** part of any individual phase's done-criteria here —
-  see [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set), a
+  see [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set--shipped-2026-09-13), a
   single batched pass across every AEMET layer once A0–A12 exist, instead of
   wiring the same pattern piecemeal ten separate times.
 - **`aemet-environmental` only**: gets a per-layer options chip (network
@@ -317,7 +326,7 @@ guessed from marketing pages).
   `normalizeAemetStationRecord`, the click-to-inspect card, the HTML
   description, and `getAnalystRecords()`. Nothing from the raw feed is
   withheld now.
-- **Voice tools**: deferred to [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set)'s
+- **Voice tools**: deferred to [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set--shipped-2026-09-13)'s
   batched pass, matching every other layer's own bring-up.
 - Docs updated in this same pass per `CONTRIBUTING.md`:
   `docs/CURRENT-STATE.md`, `DATA_SOURCES.md`, `dataCredits.js`, `CHANGELOG.md`,
@@ -393,7 +402,7 @@ verified live:
   multi-phenomenon cards, and clean enable/disable all verified with no
   console errors.
 - Still deferred, not blocking: voice-tool wiring (now formally
-  [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set)), the
+  [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set--shipped-2026-09-13)), the
   in-effect-vs-upcoming visual distinction (data already carries `inEffect`
   per phenomenon, just not yet styled differently), and confirming
   naranja/rojo rendering against a real one when a real one occurs.
@@ -645,7 +654,7 @@ thing for every remaining phase — nothing ships half-way through this list:
    need **no new entry** — the existing AEMET entry already covers the whole
    connection; extend its "used for" description instead.
 8. **Voice-tool wiring is explicitly NOT required per-phase** — deferred by
-   design to [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set),
+   design to [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set--shipped-2026-09-13),
    a single batched pass once A0–A12 exist, rather than repeating the same
    `GEV_REALTIME_TOOLS` wiring pattern piecemeal across many separate PRs.
 
@@ -703,7 +712,7 @@ extends A0's existing click-to-inspect card, per the original design.
   an already-open card for a different, cached station — confirming the
   "never blocks or corrupts the existing card" design held under a real
   failure, not just a simulated one.
-- Voice-tool wiring deferred to [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set), same as every other phase.
+- Voice-tool wiring deferred to [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set--shipped-2026-09-13), same as every other phase.
 
 ### Phase A3 — weather radar composite — **blocked, live-verification incomplete (2026-09-12)**
 
@@ -1170,52 +1179,149 @@ found anywhere in this whole plan.
   networks, no "survive a restart" story worth building).
 - Voice-tool wiring deferred to Phase A14, same as every other phase.
 
-### Phase A11 — Antarctic stations
+### Phase A11 — Antarctic stations — **deferred 2026-09-13, real seasonal-dormancy finding, not a nomenclator/geometry blocker**
 
-- **Endpoints**: `antartida/datos/...` (exterior), `antartida_est_int/datos/...`
-  (interior).
-- **Shape**: points, folded into the existing `aemet-stations` layer rather
-  than a new registry entry — only two stations worldwide (Juan Carlos I,
-  Gabriel de Castilla).
-- **Open item**: `aemet-stations` is currently framed and filtered as
-  "Spain only" (bounding-box logic likely exists for the mainland+islands
-  extent) — this phase needs that framing explicitly revisited so two
-  Antarctic points aren't filtered out as "outside Spain."
+- **Endpoint confirmed live**: `antartida/datos/fechaini/{fechaIniStr}/
+  fechafin/{fechaFinStr}/estacion/{identificacion}` — a single endpoint (no
+  separate `antartida_est_int` variant exists in AEMET's own published
+  OpenAPI spec; this plan's guess of two endpoints was wrong), requiring an
+  explicit historical date range rather than returning "current conditions."
+  Station ids are documented directly in the spec's own parameter
+  description: `89064` (Juan Carlos I meteorological), `89064R`/`89064RA`
+  (Juan Carlos I radiometric, `RA` retired 2007-03-08), `89070` (Gabriel de
+  Castilla).
+- **A real, live-confirmed seasonal gap, not a guess**: AEMET's own spec
+  labels this "Frecuencia de actualización: Anual." Verified live what that
+  actually means for "current" data *today* (2026-09-13): querying month by
+  month back from September 2026 found real, populated data through
+  **2026-03-02** and a flat 404 ("no data") for every month from April
+  through September. The Spanish Antarctic bases are only staffed and
+  instrumented during the austral-summer campaign (~November-March); outside
+  that window there is **no current reading to show at all**, not a stale
+  one — a fundamentally different shape than every other AEMET feed in this
+  plan, which always has *some* reading, current or stale-but-recent.
+- **Why this isn't simply folded into `aemet-stations` as originally
+  proposed**: that layer's whole model is "poll a bulk current-conditions
+  endpoint, drop anything older than `AEMET_STATION_STALE_MS` (3h)." An
+  Antarctic station's last real reading being 6+ months old during the
+  Spanish winter isn't a transient staleness case that model already
+  handles — it would need its own long-season-aware staleness rule and its
+  own historical-range query shape bolted onto an endpoint whose input
+  contract (bulk, no params) is completely different, for exactly 2 points
+  that are provably unable to show anything live for roughly half the year
+  (right now included).
+- **Decision**: deferred, not built, this pass. Not a nomenclator/geometry
+  problem like A6/A7 were — both station ids and coordinates are already
+  fully known from the spec itself (no blocker to solve) — genuinely a
+  "very low value to build today, real engineering cost to bolt onto an
+  incompatible existing layer" call. Revisit in Spanish summer
+  (~November-March) when there would actually be a current reading to
+  verify against, or build as its own tiny always-shows-"last known"-style
+  layer if wanted regardless of season.
 
-### Phase A12 — regional (CCAA/provincia) forecast layer
+### Phase A12 — regional (CCAA/provincia) forecast layer — **blocked 2026-09-13, geometry — genuinely checked, not guessed through**
 
-- **Endpoints**: `predicciones-normalizadas-texto/ccaa/*`, `.../provincia/*`
-  (hoy/mañana/medio plazo/tendencia, each with a "today" and "as originally
-  published" variant).
-- **Shape**: zone polygons (CCAA/provincia administrative boundaries) +
-  click-to-inspect text. AEMET provides text only, no boundary geometry —
-  reuse the Natural Earth admin-boundary source already credited and used
-  elsewhere in this app (`NATURAL_EARTH_CREDIT`) rather than sourcing a new
-  one.
+- **Endpoints confirmed live**: `prediccion/ccaa/hoy/{ccaa}` and
+  `prediccion/provincia/hoy/{provincia}` — not
+  `predicciones-normalizadas-texto/ccaa/*`/`.../provincia/*` as this plan
+  originally guessed (found in AEMET's own OpenAPI spec, same source as
+  every other corrected path this pass). Both valid code enums are
+  documented directly in the spec's own parameter descriptions (17 CCAA
+  codes, 52 provincia/island codes — the same "enum in the Swagger
+  description" find that already unblocked A7 and A10's deferred
+  networks). A real pull returns exactly what the plan expected: plain
+  Spanish free-text ("PREDICCIÓN GENERAL PARA LA COMUNIDAD DE MADRID...",
+  ISO-8859-15, genuinely needing this app's usual latin1 decode — unlike
+  A10's ozono/radiacion, this one is NOT the UTF-8 exception), not
+  structured fields.
+- **This plan's proposed geometry fix doesn't hold — checked, not
+  assumed**: `NATURAL_EARTH_CREDIT`/`naturalEarthRegions.js` exists in this
+  repo, but its actual bundled dataset (`src/data/local_data/natural_earth/
+  regions.json`, confirmed by reading its own `meta` block) is Natural
+  Earth's **physical**-geography layer (`ne_10m_geography_regions_polys` —
+  mountain ranges, islands, deserts by name, e.g. "Pentecost"), not
+  **administrative** boundaries. There is no CCAA/provincia polygon source
+  bundled anywhere in this app to reuse — this phase's blocker is the same
+  *kind* as A6's (missing geometry), just discovered by reading the actual
+  data file the plan pointed at instead of assuming it would fit.
+- **Two concrete forward paths, not picked unilaterally** (same call this
+  plan already deferred for A6): (1) fetch a genuine public admin-1
+  boundary source (e.g. Natural Earth's own separate
+  `ne_10m_admin_1_states_provinces` dataset, a different file from the one
+  already bundled) and build a name-based join against AEMET's 52
+  provincia names/17 CCAA names — real work, but a known, bounded shape,
+  reusing A1 `aemet-warnings`' existing zone-polygon-plus-click-text
+  rendering mechanism once the geometry exists; or (2) scope down to
+  points-not-polygons — one marker per CCAA/provincia at a fixed reference
+  coordinate (a capital city or geographic centroid), sacrificing "real
+  administrative boundary on the map" for "immediately buildable with data
+  already in hand," the same points-vs-polygons trade-off A6's own notes
+  already named as its fallback. Not decided here — a scope call, not a
+  technical unknown.
 
-### Phase A13 — climatological values (not a toggle layer)
+### Phase A13 — climatological values (not a toggle layer) — **endpoint confirmed live 2026-09-13, UI design deliberately not started this pass**
 
-- **Endpoints**: `valores-climatologicos/diarios|horarios|mensualesanuales`,
-  `.../normales` (1981–2010), `.../valoresextremos`,
-  `.../inventarioestaciones`.
-- **Not a `LAYER_STATE_REGISTRY` entry** — this is a query/comparison
-  feature ("how does today compare to the historical normal for this
-  station"), a genuinely different UI shape (a chart or table triggered
-  from an existing station's click-to-inspect card, most likely
-  `aemet-stations`') than every toggleable layer above. Still "connects"
-  this data to GEV, just not via a new toggle — tracked here so it isn't
-  mistaken for an oversight.
+- **Endpoint confirmed live**: `valores/climatologicos/normales/estacion/
+  {idema}` (1981–2010 monthly normals) — a real pull for Madrid (idema
+  `3195`) returned genuine data, one row per month, but each row is
+  **~50+ cryptically-abbreviated fields** (`w_racha_max`, `tm_min_q1`,
+  `np_010_s`, `q_med_mn`, ...) — AEMET's own internal climatological
+  shorthand, not self-describing keys. The sibling endpoints this plan
+  named (`diarios`/`horarios`/`mensualesanuales`/`valoresextremos`/
+  `inventarioestaciones`) were not all individually re-verified this pass,
+  since the core design question is the same regardless of which feeds it.
+- **Not a `LAYER_STATE_REGISTRY` entry** — confirmed still true: this is a
+  query/comparison feature ("how does today compare to the historical
+  normal for this station"), a genuinely different UI shape (a chart or
+  table triggered from an existing station's click-to-inspect card, most
+  likely `aemet-stations`') than every toggleable layer above.
+- **Why this pass stops at endpoint verification**: turning ~50 cryptic
+  AEMET field codes per month into a meaningful "today vs. normal"
+  comparison needs a real design decision (which of the ~50 fields are
+  worth surfacing, what the comparison UI looks like bolted onto an
+  existing click-to-inspect card) — a genuinely different kind of work than
+  every other phase in this pass (live-verify → normalize → proxy → layer),
+  which all shipped a point/thumbnail on a map. Tracked here, confirmed
+  live and not geometry-blocked, so it isn't mistaken for an oversight —
+  deliberately not designed or built this pass rather than rushed.
 
-### Phase A14 — voice-tool wiring for the whole AEMET set
+### Phase A14 — voice-tool wiring for the whole AEMET set — **shipped 2026-09-13**
 
-Once A0–A12 exist, one batched pass adds `GEV_REALTIME_TOOLS` entries +
-`src/voice/gevActions.js` handlers for every AEMET layer at once ("turn on
-weather radar," "show sea temperature," "any storm warnings near me,"
-etc.), rather than the piecemeal per-layer wiring A0 and A1 each
-individually deferred. Deliberately sequenced last: doing it once, after
-the full layer set's naming and interaction patterns have stabilized, means
-writing the tool-registration boilerplate one time instead of revising it
-across ten separate additions.
+Turned out to need less new code than this plan's own framing implied —
+`set_layer_visibility` and `analyst_query` are already fully generic tools
+that work for ANY registered layer, given the right registration. No new
+per-layer tool handlers or `GEV_REALTIME_TOOLS` entries were needed; the
+real gap was two separate allow-lists neither of those generic tools
+consults automatically:
+
+- **`LAYER_ALIASES`** (`src/voice/gevActions.js`) — resolves a spoken
+  phrase ("turn on lightning") to a registered layer id for
+  `set_layer_visibility`. Confirmed live this had **zero** AEMET entries
+  before this pass, including for the already-shipped `aemet-stations`/
+  `aemet-warnings` — A0/A1's own voice wiring really had been fully
+  deferred to here, not partially done already. Added aliases for all 8
+  AEMET layers.
+- **`ANALYST_LAYERS`** (`src/data/analystEngine.js`) — a separate allow-list
+  gating `analyst_query` ("how many beaches are above 24 degrees"),
+  independent of whether a layer implements `getAnalystRecords()`.
+  Confirmed live that `aemet-uv-index`/`aemet-beaches`/
+  `aemet-environmental` already had that method but were still unqueryable
+  without an entry here. Added all three, naming their queryable numeric/
+  text/flag fields. The ambient-thumbnail AEMET layers (lightning,
+  fire-risk, sea-surface-temp) have no queryable entities at all, so are
+  correctly absent from both lists.
+- **A real bug found while wiring this, not before**: `aemetBeaches.js`'s
+  `getAnalystRecords()` nested its forecast values under a `forecast`
+  sub-object, but `analystEngine.js`'s filter/sort access fields as
+  `record[field]` with no nested-path support — "beaches above 24 degrees"
+  would have silently matched zero beaches instead of erroring, the
+  quietest possible way for this to fail. Fixed by flattening those fields
+  to the top level before this ever shipped as a live bug.
+- Shipped: `LAYER_ALIASES` entries + `layerTitle()` display names
+  (1 test covering all 8 aliases end-to-end through `set_layer_visibility`),
+  `ANALYST_LAYERS` entries (1 test covering all 3 newly-queryable layers
+  through the real engine), the beaches flattening fix (existing beach
+  layer test updated to assert the flat shape).
 
 ### Deliberately excluded (AEMET side)
 

@@ -33,6 +33,12 @@ export const ANALYST_LAYERS = {
   'ais-live-vessels': { numeric: ['speedKts', 'courseDeg'], text: ['name', 'mmsi', 'shipType', 'destination', 'navStatus'], flags: [] },
   'local-firms': { numeric: ['frp'], text: ['confidence', 'satellite'], flags: [] },
   earthquakes: { numeric: ['magnitude', 'depthKm'], text: ['place'], flags: [] },
+  // Phase A14 — batched voice/analyst wiring for the AEMET layers shipped
+  // with a real point shape (the ambient-thumbnail AEMET layers have no
+  // queryable entities at all, so they're deliberately absent here).
+  'aemet-uv-index': { numeric: ['uvIndex'], text: ['name', 'municipioId'], flags: ['isCanaryIslands'] },
+  'aemet-beaches': { numeric: ['waterTempC', 'maxTempC', 'uvMax'], text: ['name', 'sky', 'wind', 'waves'], flags: [] },
+  'aemet-environmental': { numeric: ['ozoneDobson', 'globalRadiationSum'], text: ['name', 'indicativo'], flags: [] },
 };
 
 const EARTH_R_KM = 6371;

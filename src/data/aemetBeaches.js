@@ -388,7 +388,14 @@ export function createAemetBeachesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } =
       _viewer = null;
     },
 
-    /** Snapshot the layer's in-memory beaches as plain JSON-safe objects for the analyst query engine. */
+    /**
+     * Snapshot the layer's in-memory beaches as plain JSON-safe objects for
+     * the analyst query engine. Forecast fields are flattened to the top
+     * level (`waterTempC`, not `forecast.waterTempC`) — `analystEngine.js`'s
+     * `applyFilter`/sort access fields as `record[field]` with no nested-path
+     * support, so a query like "beaches above 24 degrees" needs `waterTempC`
+     * directly on the record, not buried in a sub-object.
+     */
     getAnalystRecords(maxCount = 200) {
       if (!_dataSource || !_dataSource.show) return [];
       const entities = _dataSource.entities.values;
@@ -400,12 +407,18 @@ export function createAemetBeachesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } =
         if (result.length >= limit) break;
         const p = entity.properties;
         const get = (key) => p?.[key]?.getValue(now) ?? null;
+        const forecast = get('forecast') || {};
         result.push({
           id: get('id'),
           name: get('name'),
           lat: get('lat'),
           lon: get('lon'),
-          forecast: get('forecast'),
+          waterTempC: forecast.waterTempC ?? null,
+          maxTempC: forecast.maxTempC ?? null,
+          uvMax: forecast.uvMax ?? null,
+          sky: forecast.sky ?? null,
+          wind: forecast.wind ?? null,
+          waves: forecast.waves ?? null,
         });
       }
       return result;

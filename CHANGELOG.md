@@ -89,6 +89,13 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   the existing weather-station coordinates. A network-type chip switches
   which metric colors the points; both are always shown on click.
 
+- Wire voice/analyst-query support for every AEMET layer: "turn on beach
+  forecast," "any storm warnings," "which beaches are above 24 degrees,"
+  and similar now resolve. Also fixes a bug found while wiring it — the
+  beach layer's queryable fields were nested where the query engine
+  couldn't reach them, so a filter on water temperature would have silently
+  matched nothing.
+
 - Separate terrain, traffic, FIRMS and GBFS middleware into focused provider
   modules, preserving local configuration, routes and cache/error behavior.
 

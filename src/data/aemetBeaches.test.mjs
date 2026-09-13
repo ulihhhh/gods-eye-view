@@ -184,7 +184,7 @@ test('getAnalystRecords returns [] while disabled, and plain JSON-safe rows once
     const records = layer.getAnalystRecords();
     assert.equal(records.length, 1);
     assert.equal(records[0].id, '2906707');
-    assert.equal(records[0].forecast.waterTempC, 23);
+    assert.equal(records[0].waterTempC, 23, 'forecast fields are flattened to the top level for analystEngine.js field access');
     assert.deepEqual(JSON.parse(JSON.stringify(records)), records, 'output is JSON-safe');
   } finally {
     globalThis.fetch = originalFetch;

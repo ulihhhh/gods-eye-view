@@ -784,6 +784,37 @@ between "OZONE" and "RADIATION" live in the panel; no console errors.
 Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
 Phase A14).
 
+## AEMET voice-tool wiring (Phase A14, 2026-09-13)
+
+The batched pass this plan deferred every individual AEMET phase's own
+voice wiring to. Two separate mechanisms needed updating — both already
+existed and are generic, but neither auto-discovers new layers:
+
+- **`set_layer_visibility` ("turn on/off X")**: resolves a spoken phrase to
+  a registered layer id via `LAYER_ALIASES` (`src/voice/gevActions.js`) —
+  confirmed live that this map had **zero** AEMET entries before this pass,
+  including for the already-shipped `aemet-stations`/`aemet-warnings`
+  (A0/A1's own wiring really had been fully deferred, not partially done).
+  Added aliases for all 8 AEMET layers (`weather stations`, `storm
+  warnings`, `lightning activity`, `fire risk`, `uv index`, `sea surface
+  temperature`, `beach forecast`, `environmental networks`, plus natural
+  variants of each).
+- **`analyst_query` ("how many beaches are above 24 degrees")**: gated by
+  its own separate allow-list, `ANALYST_LAYERS` in `src/data/
+  analystEngine.js` — confirmed live that merely implementing
+  `getAnalystRecords()` (which `aemet-uv-index`/`aemet-beaches`/
+  `aemet-environmental` already did) is **not** sufficient; a layer absent
+  from this allow-list gets "I can't query X yet" regardless. Added entries
+  for all three real point layers, naming their queryable numeric/text/flag
+  fields (the ambient-thumbnail AEMET layers have no queryable entities at
+  all, so are correctly absent). Also found and fixed a related bug while
+  wiring this: `aemetBeaches.js`'s `getAnalystRecords()` nested its values
+  under a `forecast` sub-object (`record.forecast.waterTempC`), but
+  `analystEngine.js`'s filter/sort access fields as `record[field]` with no
+  nested-path support — a query like "beaches above 24 degrees" would have
+  silently matched nothing. Fixed by flattening those fields to the top
+  level.
+
 ## Installations and map-source guidance
 
 - On an uncached Overpass failure, mapped installations keep their existing

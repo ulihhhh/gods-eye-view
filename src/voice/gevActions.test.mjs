@@ -1108,6 +1108,52 @@ test('generic voice visibility maps Space Missions to the explicit mission layer
   assert.equal(contextSettled, true);
 });
 
+test('generic voice visibility maps every AEMET alias to its registered layer id (Phase A14)', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const viewer = {
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+    camera: { moveEnd: { addEventListener() {} } },
+  };
+  const aemetLayerIds = [
+    'aemet-stations',
+    'aemet-warnings',
+    'aemet-lightning',
+    'aemet-fire-risk',
+    'aemet-uv-index',
+    'aemet-sea-surface-temp',
+    'aemet-beaches',
+    'aemet-environmental',
+  ];
+  const spokenPhraseByLayerId = {
+    'aemet-stations': 'weather stations',
+    'aemet-warnings': 'storm warnings',
+    'aemet-lightning': 'lightning activity',
+    'aemet-fire-risk': 'fire risk',
+    'aemet-uv-index': 'uv index',
+    'aemet-sea-surface-temp': 'sea surface temperature',
+    'aemet-beaches': 'beach forecast',
+    'aemet-environmental': 'environmental networks',
+  };
+  for (const layerId of aemetLayerIds) {
+    const calls = [];
+    const dataManager = {
+      layers: new Map([[layerId, { module: {} }]]),
+      getAll: () => [{ id: layerId, name: layerId }],
+      getLayerLifecycleState: () => ({ enabled: true, lifecycleState: 'enabled', uncertain: false }),
+      async setEnabled(...args) { calls.push(args); return true; },
+    };
+    const runner = createGevActionRunner({
+      viewer,
+      styleManager: { async _waitForContextLayerSettlement() {} },
+      dataManager,
+    });
+    const result = await runner('set_layer_visibility', { layerId: spokenPhraseByLayerId[layerId], enabled: true });
+    assert.equal(result.ok, true, `"${spokenPhraseByLayerId[layerId]}" should resolve and enable ${layerId}`);
+    assert.equal(calls[0]?.[0], layerId, `"${spokenPhraseByLayerId[layerId]}" must resolve to ${layerId}, not a raw unmatched string`);
+  }
+});
+
 test('voice CCTV focus reports tracking ownership separately from no active camera', () => {
   assert.deepEqual(
     cctvVoiceFocusOutcome(CCTV_FOCUS_RESULT.TRACKING_HOLDS_VIEW),
