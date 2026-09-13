@@ -236,584 +236,82 @@ fetching, trailing-24-hour filtering and partial-success caching are unchanged.
 
 ## AEMET Weather Stations (2026-09-12)
 
-`aemet-stations` (token `h`, `enabled-only`) polls `/api/aemet/stations`
-(`server/providers/weather/aemet.js`) and renders one colored point per live
-Spanish station (~850 after dedup and the 3-hour staleness filter, confirmed
-against the real upstream), colored by a continuous temperature gradient
-(`TEMPERATURE_COLOR_STOPS`, -10°C to 40°C, linearly interpolated; unknown
-temperature reads neutral gray). Per-station points use normal depth testing
-against the globe, so a station on the far side of Earth is correctly hidden
-(verified: flying to Spain's antipode near New Zealand shows zero of the 766
-loaded stations on screen). Points use `heightReference:
-Cesium.HeightReference.RELATIVE_TO_GROUND` with a fixed 2 m offset, not
-`CLAMP_TO_GROUND` (which visibly sinks a point into sloped terrain once real
-elevation data is loaded and the camera is close) and not a one-time
-`scene.sampleHeight()` snapshot baked into a static position (tried second —
-`bikeshare.js` uses that approach successfully, but only because it samples
-for stations near wherever the camera already is; sampling all ~850 stations
-nationwide regardless of camera position meant most samples silently failed
-against not-yet-loaded terrain tiles, and which stations succeeded vs. fell
-back changed between polls depending on where the camera had been, which
-looked exactly like stations sitting at "inexact positions" and drifting as
-the camera moved). `RELATIVE_TO_GROUND` has Cesium re-clamp continuously
-against whatever terrain is actually loaded at render time — the same
-mechanism `CLAMP_TO_GROUND` already uses, just with real clearance — so
-there is no stale snapshot to go wrong.
-
-Clicking a station follows this app's real click-to-inspect pattern (copied
-from `bikeshare.js`, since this app runs Cesium with `infoBox: false` and the
-built-in InfoBox is not used anywhere): a `ScreenSpaceEventHandler` picks the
-station, hides its base point, adds one enlarged highlight point (the only
-per-station point exempted from depth testing — a deliberate one-marker
-exception, not the default), and publishes a floating in-world card via the
-shared `worldOverlay` host (`variant: 'selected'`) showing every reading
-AEMET's feed carries for that station: temperature (with its trailing-hour
-min/max and dew point), humidity, wind (speed/direction, gust speed/
-direction, and turbulence std-dev), both station and sea-level-corrected
-pressure, precipitation, and altitude. Pick ownership is registered/
-unregistered via `pickRegistry.js` on enable/disable. A refresh (every 5 min)
-re-resolves an open selection against the fresh data rather than leaving it
-pointed at a destroyed entity, or clears it if that station drops out of the
-feed. The full reading is also available via `layer.getAnalystRecords()` for
-the analyst query engine.
-
-The proxy performs AEMET's required two-step fetch (an envelope response
-naming a second `datos` URL) and decodes that second response as
-`ISO-8859-15` rather than UTF-8 — confirmed against the live API, whose
-`Content-Type` header actually says `text/plain;charset=ISO-8859-15`; UTF-8
-decoding it mangles accented station names (e.g. "VANDELLÓS" renders as
-"VANDELL�S"). The raw feed carries up to ~12 trailing hourly rows per
-station, not one row per station; `src/data/weatherProviderRequests.js`
-dedups to the most recent `fint` per `idema` before caching. Cache TTL 20
-min, memory + disk (`.gev-cache/aemet-stations.json`), serve-stale-on-failure,
-matching `firmsProxy`. Keyless: `/api/aemet/stations` → 503 `{error:'no_key'}`;
-the layer reports `AEMET_API_KEY not configured` and stays empty rather than
-fabricating data.
-
-Voice-tool wiring (`GEV_REALTIME_TOOLS` / `src/voice/gevActions.js`) is not
-yet done for this layer, matching every other still-pending item tracked in
-`docs/plans/weather-data-integrations.md`.
-
-### Phase A2 — "next hours" forecast tooltip (2026-09-12)
-
-Selecting a station (the click-to-inspect flow above) fires an on-demand
-fetch to `/api/aemet/forecast?lat=&lon=` and, once it resolves, appends one
-extra line to the already-open card — e.g. `Next hours: 17:00 33°C · 18:00
-32°C` — without ever blocking or replacing the base reading. This is an
-extension of `aemet-stations`, not a new layer: no new `LAYER_STATE_REGISTRY`
-entry, per the plan's design.
-
-The proxy (`aemetForecastProxy()` in `server/providers/weather/aemet.js`) is
-deliberately shaped differently from the two snapshot proxies above, since
-it's query-driven rather than a polled whole-country pull: it loads AEMET's
-~8,100-row `maestro/municipios` lookup table once (memory-only, 24h TTL — no
-disk cache, since there is no "serve yesterday's snapshot" story worth
-having for a table that barely changes), resolves the clicked lat/lon to the
-nearest municipio by great-circle distance (`findNearestAemetMunicipio`, a
-plain O(n) scan — accurate enough and fast enough for one click), then
-fetches and caches that municipio's hourly forecast (45 min TTL, per-
-municipio memory cache capped at 300 entries, single-flight per municipio
-id). Confirmed live: AEMET's `id` field on a municipio record (e.g.
-`"id28079"`) is the value the forecast endpoint's path segment wants
-(`"28079"`) — its separate `id_old` field is a different, legacy code the
-endpoint rejects.
-
-AEMET's hourly forecast (`prediccion/especifica/municipio/horaria/*`) splits
-one hour's data across four separately `periodo`-keyed arrays
-(`temperatura`/`estadoCielo`/`precipitacion`/`vientoAndRachaMax`) that have
-to be joined by hour; `vientoAndRachaMax` additionally interleaves two
-different entry shapes at the same `periodo` (a wind entry with `direccion`,
-and a gust entry without it) — confirmed live, and only the wind-shaped
-entries are used for v1. Every timestamp in this feed is naive
-Europe/Madrid civil time with no UTC offset (unlike the CAP warnings feed's
-`onset`/`expires`, which do carry one) — `madridCivilNow()` reads Madrid's
-actual civil time via `Intl.DateTimeFormat`, so "upcoming" is judged
-correctly regardless of the server process's own timezone, verified against
-both CEST and CET (Node's `Intl` handles the DST transition correctly).
-
-A slow, failed, or malformed forecast response never blocks or corrupts the
-already-shown card — the base reading is complete and correct without it;
-the forecast line simply doesn't appear (verified live: a request that hit
-AEMET's rate limit while testing returned a clean `502` from the proxy, and
-the just-opened card for a different, already-cached station was
-unaffected). A selection-generation token guards against a slow forecast for
-station A resolving after the user has already selected station B — the
-stale response is dropped, never applied to the wrong card.
-
-Voice-tool wiring is not yet done, same as stations (and deferred as a
-single batched pass across the whole AEMET layer set, not per-phase — see
-the plan doc's Phase A14).
+`aemet-stations` (token `h`, `enabled-only`) polls `/api/aemet/stations` and
+renders one point per live Spanish station (~850, deduped from AEMET's
+trailing hourly rows), colored by a continuous temperature gradient (-10°C
+to 40°C). Points use `HeightReference.RELATIVE_TO_GROUND` with a 2 m offset
+(neither sinking into terrain nor drifting as the camera moves) and normal
+depth testing (a station on the far side of the globe is hidden). Clicking a
+station shows temperature (with trailing min/max and dew point), humidity,
+wind, gust, both pressures, precipitation, and altitude, plus — once it
+resolves — a "next hours" forecast line from an on-demand
+`/api/aemet/forecast?lat=&lon=` lookup that never blocks or replaces the base
+reading. The `datos` response decodes as ISO-8859-15, not UTF-8. The
+click-to-inspect card's accent color matches the station's own temperature
+color, same as every other data-driven AEMET layer's card.
 
 ## AEMET Weather Warnings (2026-09-12)
 
-`aemet-warnings` (token `j`, `enabled-only`) polls `/api/aemet/warnings`
-(`server/providers/weather/aemet.js`) and renders one polygon per active
-avisos zone ring (a zone can have several disjoint rings — e.g. Lanzarote +
-La Graciosa — each its own `Cesium.Entity`, id `aemet-warning:<geocode>:
-<ringIndex>`). Colored by a discrete 3-step palette (amarillo/naranja/rojo);
-AEMET's `verde` level ("nothing to see here" — bundled for most of the
-country per phenomenon as a matter of course) is parsed but never rendered.
-Polygons use no `height`/`perPositionHeight`/`extrudedHeight`, so Cesium
-drapes them on whatever terrain is loaded (the polygon equivalent of a
-point's ground clamp) — verified live over real hill terrain near Cádiz with
-no z-fighting or clipping.
+`aemet-warnings` (token `j`, `enabled-only`) polls `/api/aemet/warnings` and
+renders one polygon per active avisos zone ring, colored by a discrete
+amarillo/naranja/rojo palette (the baseline `verde` status is parsed but
+never rendered). Geometry comes inline from AEMET's CAP 1.2 XML bulletins,
+delivered as a plain tar archive — no separate zone shapefile needed. These
+CAP files are UTF-8, the opposite of the stations feed's ISO-8859-15.
+Clicking a zone lists every currently active phenomenon (event, probability,
+in-effect vs. upcoming).
 
-The proxy's upstream (`avisos_cap/ultimoelaborado/area/esp`) is the same
-two-step envelope as stations, but the `datos` payload is a plain
-(**not gzipped**, despite the `.tar.gz` filename — confirmed via magic
-bytes) POSIX tar archive of ~190 CAP 1.2 XML bulletins, hand-parsed
-(`parseAemetCapTar`/`parseAemetCapAlert` in
-`src/data/weatherProviderRequests.js`) rather than pulling in a tar/XML
-library — the format is simple, fixed, and AEMET-controlled. Each XML file's
-`<info language="es-ES">` block is used (AEMET always pairs it with an
-`en-GB` block); **the individual files are genuinely UTF-8**, the opposite
-of the stations feed's ISO-8859-15 quirk (confirmed live: UTF-8 decodes
-"Almería" correctly, latin1 would mangle it) — reusing the stations proxy's
-latin1 decode here would introduce the reverse bug. Every CAP alert carries
-its own zone polygon(s) inline, so there is no separate zone shapefile to
-fetch or keep in sync. TTL 12 min (shorter than stations' 20, since warnings
-can escalate), memory + disk (`.gev-cache/aemet-warnings.json`),
-serve-stale-on-failure, matching the stations proxy. Keyless: 503
-`{error:'no_key'}`.
+## AEMET Lightning, Fire Risk, and Sea Surface Temperature (2026-09-12/13)
 
-A zone's `phenomena` list keeps every currently non-expired, non-verde entry
-(not just its highest), so a zone under both a live wind warning and an
-upcoming coastal one shows both. `inEffect` (derived from `onset` vs. now)
-distinguishes "in effect now" from "starts later" per phenomenon; v1 renders
-both as the same solid polygon (no visual distinction yet — a deferred
-refinement, not an oversight, tracked in the plan doc).
-
-Click-to-inspect mirrors `aemetStations.js`'s pattern (`ScreenSpaceEventHandler`
-+ `pickRegistry` + `worldOverlay` `variant: 'selected'`), adapted for
-polygons: selecting a zone brightens the outline/fill of every ring entity
-belonging to it (not a hide-and-replace like the stations layer's single
-point), and the card anchors at the centroid of the zone's first ring — a
-pragmatic choice since a multi-ring zone has no single natural "ground
-point." A refresh re-resolves an open selection against fresh data or clears
-it if the zone drops out, same as stations. `getAnalystRecords()` returns
-one row per zone (deduped across its ring entities), not one per ring.
-
-Voice-tool wiring is not yet done, same as stations.
-
-## AEMET Lightning Activity (2026-09-12)
-
-`aemet-lightning` (token `p`, `enabled-only`) is architecturally different
-from every other AEMET layer: it is **not** a polled entity/imagery layer,
-but a single always-on "picture-in-picture" thumbnail floating over central
-Spain, because AEMET's `red/rayos/mapa` exposes no strike coordinate list —
-only a pre-rendered GIF composite (confirmed live: `image/gif`, 640×480)
-with a province-outline map, plotted strikes, and a legend strip baked into
-the pixels, and no bounding box anywhere in the API response. That rules out
-draping it as a geo-referenced `Cesium.ImageryLayer` (unlike Phase A3's
-radar, once unblocked) — the only honest placement is a fixed reference
-anchor over the country it depicts.
-
-Implemented by reusing this app's existing world-overlay **thumbnail**
-mechanism (`variant: 'thumbnail'`, the same primitive `cctvCards.js` already
-uses for camera preview images: an `HTMLImageElement` handed to the shared
-canvas painter via `image: {frame, stamp}`) rather than building a second
-image-panel system. One real bug found and fixed during live verification:
-the entry's overlay-source options were copied from `aemet-stations`'
-*selected* card (`collisionCapacity: 0`, meaningful only because a
-`protected: true` entry bypasses the collision budget entirely) — an
-ordinary ambient entry like this one needs a real, non-zero collision slot
-(`collisionCapacity: 1`, matching `satellites.js`'s own single-ambient-entry
-source) or the collision-avoidance solver silently drops it before painting
-(confirmed via `worldOverlay.js`'s `getWorldOverlayDiagnostics()`:
-`projectedCount: 1` but `selectedCount: 0`/`paintedCount: 0` before the
-fix).
-
-The proxy (`aemetLightningProxy()`) is a straight binary pass-through — no
-parsing, since there is nothing to parse — with a 6-hour TTL matching
-AEMET's own stated refresh cadence ("cada seis horas o 00Z, 06Z, 12Z, 18Z")
-and a **memory-only** cache (deliberately no disk persistence, unlike
-stations/warnings: an image this infrequently updated has no meaningful
-"serve yesterday's snapshot across a restart" story beyond what a fresh
-fetch already costs). The frontend only re-fetches the actual image bytes
-when `/api/aemet/lightning/status`'s `lastFetch` timestamp moves — cheap
-polling on the normal 5-minute layer interval, real image loads roughly
-every 6 hours. The card's title carries a live "updated Xm/Xh ago" label.
-
-**Click-to-expand — added 2026-09-12.** The small ambient card (168×126) was
-reported too small to actually read the image's baked-in text from.
-Clicking it toggles to a much larger card (560×420 — close to, but still
-below, the source's native 640×480, so this is a straight canvas
-`drawImage` scale-up of already-captured pixels, never an upscale past
-source resolution) anchored at the same spot; clicking again, or clicking
-anywhere else on the globe, collapses it back. Wired via the same
-`ScreenSpaceEventHandler` + `overlayHost.hitTest` pattern
-`firmsHeatmap.js`'s ambient fire cards already use for a world-overlay-only
-click target (no real Cesium entity exists here to `scene.pick`, so only
-the overlay hit-test path is needed). **One real bug found and fixed via
-live verification**: the expanded entry initially set `selected: true`
-(mirroring stations'/warnings' own protected click-to-inspect cards) —
-but `variant: 'thumbnail'` and `selected: true` disagreeing sends
-`measureOverlayEntry` (`worldOverlayDraw.js`) down the *selected*-card
-sizing branch instead of the thumbnail one, which never reads
-`thumbnailWidth`/`thumbnailHeight` at all. The measured rect collapsed to
-title-text size and the image drew far outside it — confirmed live (the
-expanded card rendered as an empty title bar with no image visible at all).
-Fixed by matching `cctvCards.js`'s own thumbnail entries, which hard-code
-`selected: false` regardless of active/protected state for exactly this
-reason; `protected: true` alone is sufficient to keep the expanded card
-pinned past the collision budget.
-
-No further click-to-inspect beyond expand/collapse: AEMET's API gives no
-additional structured data beyond the image itself.
-
-Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
-Phase A14).
-
-### Phase A3 (radar) — corroborating research (2026-09-12)
-
-Investigated a live third-party site (radarspain.es, a commercial Spanish
-radar/lightning viewer) and AEMET's own official API client repo
-(`gitlab.aemet.es/opendata/API`) to sanity-check Phase A3's block. Findings:
-
-- radarspain.es's own attribution reads "Radares españoles AEMET **vía
-  EUMETNET**" — its rich per-site radar mosaic (raw ODIM-HDF5 polar volumes,
-  decoded client-side in a Web Worker) comes from **EUMETNET's OPERA radar
-  exchange network**, not AEMET's public OpenData REST API. Its own frame
-  metadata explicitly labels a fallback path — `"Fuente de contingencia
-  AEMET Legacy GIF (5 de 16 radares)"` — for radars it can't reach via the
-  primary EUMETNET feed, i.e. the exact GIF-based endpoint family
-  (`red/radar/raster/*`) this plan already targets. Several of those
-  fallback entries carried an identical, suspiciously-small byte count at
-  the time of this check — independent, external corroboration that AEMET's
-  own legacy GIF radar delivery is degraded right now, not something wrong
-  with our key or request pattern.
-- A follow-up direct retry against `red/radar/raster/nacional` and
-  `.../regional` (hours after the original block) returned the **exact same
-  broken cached short-link hashes** as before — conclusively not a
-  transient rate limit.
-- AEMET's official API client repo confirms 429s are a known, common issue
-  across the whole OpenData API generally, officially mitigated via
-  RSS/Atom "check before you fetch" feeds for datasets that publish one.
-  Radar does not have one (confirmed by searching AEMET's own RSS/Atom
-  directory for "radar" — zero results), so that mitigation doesn't apply
-  here regardless.
-- **Real alternative path worth its own future investigation**: EUMETNET's
-  OPERA composite is apparently available under a CC BY 4.0 license per
-  radarspain.es's own credit line — a potentially much richer radar source
-  (real per-site reflectivity volumes, not a single flattened GIF) than
-  anything AEMET's own public OpenData API exposes, but via a completely
-  different host/access mechanism not yet researched. Not started; noted
-  here so it isn't lost.
-
-## AEMET Fire Risk (2026-09-12)
-
-`aemet-fire-risk` (token `v`, `enabled-only`) mirrors `aemet-lightning`'s
-architecture exactly: a single ambient click-to-expand world-overlay
-thumbnail, not a polled entity/imagery layer, for the same reason —
-AEMET's `incendios/mapasriesgo/*` exposes no risk-grid data, only a
-pre-rendered PNG (confirmed live: 1525×1017) with AEMET's own header,
-6-level risk legend (muy bajo/bajo/moderado/alto/muy alto/extremo), and
-logo baked into the pixels, no bounding box anywhere in the response.
-**Not** a `local-firms` (NASA FIRMS) duplicate: FIRMS shows satellite-
-*detected* fires already burning; this is AEMET's *predictive*
-meteorological risk index, before anything ignites.
-
-**Real "today vs. tomorrow" gap found and handled**: `mapasriesgo/estimado`
-(today's map) returned `404 "No hay datos que satisfagan esos criterios"`
-at verification time — AEMET doesn't always have "today" published yet —
-while `mapasriesgo/previsto/dia/1` (tomorrow's forecast) succeeded
-immediately. The proxy (`aemetFireRiskProxy()`) tries `estimado` first and
-falls back to `previsto` day 1 on ANY failure, not just a 404, and reports
-which one it actually served via `/status`'s `source` field
-(`'estimado'`/`'previsto-1'`); the frontend's title reflects that
-("TODAY"/"TOMORROW") so a user is never misled about which day's map
-they're looking at. `v1` fixes `area` to `p` (Península) — Baleares/
-Canarias are a future per-layer chip, not built yet. TTL 3h (well inside
-AEMET's own `periodicidad: diario`), memory-only cache — same reasoning as
-lightning (an image this infrequently updated has no "survive a restart"
-story worth disk persistence). The frontend reloads the image when either
-`lastFetch` moves OR `source` flips (e.g. today's real estimate replaces
-yesterday's `previsto-1` fallback with the same-ish timestamp but genuinely
-different bytes) — checking `lastFetch` alone would have missed that case.
-
-Click-to-expand reuses `aemet-lightning`'s exact mechanism (built the same
-day, immediately applied here) — 168×112 ambient card (matching the
-source's own ~1525:1017 aspect ratio) to 640×427 expanded, `protected: true`
-+ max priority, deliberately never `selected: true` (see `aemet-lightning`'s
-notes on why that breaks `variant: 'thumbnail'` sizing). **One live-
-verification note, not a bug**: in a genuinely narrow browser viewport
-(~800px wide, panel included), the 640px-wide expanded card can fail to
-find a placement and silently doesn't paint that frame — confirmed via
-`worldOverlay.js`'s `getWorldOverlayDiagnostics()` (entry present,
-`isExpanded: true`, but `paintedBySource` empty for it) and via
-`getOverlayPaintRect()` returning `null`. Re-verified at a realistic
-desktop width (1440×900): renders correctly, full legend and header
-legible. Not addressed by shrinking the card — that would undermine the
-whole point of expanding it — noted here as a known constraint of very
-narrow viewports rather than silently ignored.
-
-Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
-Phase A14).
-
-## AEMET Maritime Forecast — blocked (2026-09-12)
-
-`prediccion-maritima/altamar/area/{area}` and `.../costera/costa/{costa}`
-are both confirmed live and return real structured JSON (the valid `area`/
-`costa` values — `0`/`1`/`2` and `40`–`47` respectively — were revealed by
-the API's own error messages when queried with an invalid value). The
-actual granularity is ~30 nationwide named subzones (e.g. "Aguas costeras
-de Lugo", numeric id `8112710`), each with its own forecast text — finer
-than the 8 coarse regional names ("Costa de Galicia" etc.) AEMET's public
-site groups them under.
-
-**Genuinely blocked, not attempted with a guess**: these subzones carry no
-geometry anywhere in the API response. A search for a public boundary
-source came up short — AEMET's own PDF on coastal zones only shows the 8
-coarse regional groupings on a province map, not the actual ~30 API-level
-subzones, and no GeoJSON/shapefile for the real boundaries was found.
-Hand-digitizing approximate boundaries from a map was deliberately not
-attempted, since that would be guessing geometry rather than verifying it.
-Not built; see the plan doc's Phase A6 for the options considered for
-resuming this (a more thorough geometry search, or a deliberate scope-down
-to fixed-point zone markers instead of true polygons).
+`aemet-lightning` (token `p`), `aemet-fire-risk` (token `v`), and
+`aemet-sea-surface-temp` (token `y`) are ambient "picture-in-picture"
+thumbnails, not entity layers — each AEMET endpoint returns a single
+pre-rendered image (a lightning-strike composite, a fire-risk map, a
+EUMETSAT sea-surface-temperature composite) with no coordinates or bounding
+box to plot against. Each floats over a fixed reference point near central
+Spain and expands to a larger, still-legible size on click. Fire risk falls
+back to tomorrow's forecast when today's map isn't published yet. Because
+all three anchor at the same point, only one paints at a time when more than
+one is enabled simultaneously — flagged as a stability issue to address, see
+`docs/plans/weather-data-integrations.md`.
 
 ## AEMET UV Index (2026-09-12)
 
-`aemet-uv-index` (token `0`, `enabled-only`) is a real point layer — unlike
-Phases A4/A5's ambient thumbnails, `prediccion/especifica/uvi/0` returns
-genuine structured JSON with no image or missing-geometry problem: 59
-provincial-capital cities, each keyed by the same 5-digit INE municipio
-code `maestro/municipios` already uses for the Phase A2 forecast tooltip,
-with a plain numeric UV value. The proxy (`aemetUvIndexProxy()`) joins each
-city to its lat/lon via that same municipios lookup (re-fetched and cached
-independently of `aemetForecastProxy()`'s own copy — this file's existing
-convention of self-contained proxies rather than shared cross-proxy state;
-a second daily-cached fetch of the ~8k-row table is trivial), dropping any
-city whose municipio isn't found rather than fabricating a position.
-
-The frontend (`src/data/aemetUvIndex.js`) mirrors `aemetStations.js`'s
-point-layer shape directly: colored points on a continuous WHO-scale
-gradient (Low/Moderate/High/Very High/Extreme — the same "gradient, not
-stepped bands" lesson `TEMPERATURE_COLOR_STOPS` already established) with
-click-to-inspect, applying Phase A0's `RELATIVE_TO_GROUND` +
-no-`disableDepthTestDistance` treatment from the start rather than
-re-discovering those bugs. TTL 3h, memory-only cache for both the UV
-snapshot and the municipios table (same "cheap, small, no restart story
-worth building" reasoning as A4/A5). v1 fixes the day offset to `0`
-(today).
-
-**Verified live against the real API**: 59 real points across Spain
-(today's values clustering in the "High" orange band); clicking Madrid's
-point showed "UV index 6 · High" with the matching accent color; clean
-click/clear cycle, no console errors.
-
-Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
-Phase A14).
-
-## AEMET Sea Surface Temperature (2026-09-12)
-
-`aemet-sea-surface-temp` (token `y`, `enabled-only`) is the same ambient
-"picture-in-picture" thumbnail mechanism as Phase A4 (lightning) and Phase
-A5 (fire risk) — `satelites/producto/sst` returns another opaque
-legend-annotated raster with no bounding box: a 1000×773 `image/gif`
-credited "AEMET / EUMETSAT OSI SAF" (AEMET redistributing a EUMETSAT
-satellite product, not an AEMET-original observation), covering Iberia,
-the Mediterranean and NW Africa — wider than just Spain — with a baked-in
-0–35°C legend strip. `periodicidad` is confirmed `"1 vez al día"`; the
-proxy (`aemetSeaSurfaceTempProxy()`) caches memory-only at 6h TTL, same
-shape as the lightning proxy (envelope → datos → binary passthrough,
-single-flight refresh, stale-serves-on-failure, `/status` route).
-
-The frontend (`src/data/aemetSeaSurfaceTemp.js`) is a direct copy of
-`aemetLightning.js`'s click-to-expand thumbnail, applying both bugs that
-phase already found so neither had to be rediscovered: `selected: false`
-is hard-coded regardless of expand state (a thumbnail entry with
-`selected: true` silently breaks `measureOverlayEntry`'s sizing branch),
-and `collisionCapacity: 1` on the ambient source options (a `0` copied from
-a *selected* card's options — valid only because that entry is separately
-`protected: true` — silently drops an ordinary ambient entry before
-painting).
-
-**A third sizing bug surfaced and was fixed during this phase**: the first
-expanded-card size (640×495, matching the real image's 1000:773 aspect
-ratio at a fire-risk-like 640 width) reliably failed to render — clicking
-to expand made the card vanish instead of growing. A temporary debug dump
-of `placementVariants()`'s rejected rects against `_uiOcclusionRects`
-(`src/overlays/worldOverlay.js`) showed why: at 640×495 the card's own
-height is large enough that, from this anchor's on-screen position, all
-four candidate placements (above/below/left/right) overlapped one of the
-persistent bottom-left/bottom-right control-panel "hard" occlusion rects —
-a placement veto that composites-under-the-host chrome triggers regardless
-of corner. Fire-risk's own 640×427 expanded card doesn't trip this because
-its source image's wider ~1525:1017 aspect ratio keeps it shorter at the
-same width. Fixed by shrinking to 560×433 (same aspect ratio, scaled down
-to a lightning-like footprint instead of matching fire-risk's width) —
-confirmed live afterward, including at a camera framing where fire-risk's
-own expand was independently confirmed to hit the exact same placement
-failure at 640×495-scale sizing near a similarly cluttered anchor position,
-showing this is a general "expanded card vs. persistent UI chrome"
-constraint of the shared overlay mechanism rather than a defect specific to
-this layer.
-
-**Verified live against the real API**: real EUMETSAT SST composite
-rendering as the ambient thumbnail; click-to-expand shows the full legible
-map with legend and AEMET/EUMETSAT OSI SAF branding; click-to-collapse
-returns to the small card; no console errors. Since lightning, fire-risk,
-and sea-surface-temp all anchor at the identical fixed reference point,
-only one is ever painted at a time when more than one is enabled
-simultaneously (a pre-existing collision-avoidance interaction, confirmed
-not a regression — each is independently viewable by toggling the others
-off).
-
-Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
-Phase A14).
+`aemet-uv-index` (token `0`, `enabled-only`) polls `/api/aemet/uv-index` and
+renders a real point per provincial-capital city (59), joined to
+`maestro/municipios` for coordinates, colored on a continuous WHO UV scale.
+Click for the exact value and risk category.
 
 ## AEMET Beach Forecast (2026-09-13)
 
-`aemet-beaches` (token `n`, `enabled-only`) was the plan's other flagged
-blocker ("no beach code/coordinate list exists in this API," the same class
-of problem as A6's still-unresolved maritime zones) — unblocked by a real
-find, not a workaround: AEMET's own public website (`www.aemet.es`, not
-`opendata.aemet.es` — no API key) serves a GeoJSON nomenclator of all 160
-beaches it forecasts for at `es/api-eltiempo/municipios/{zoom}/playas`
-(feature count plateaus at 160 for any zoom ≥ 9 — confirmed live to be the
-complete national list, Peninsula/Balearics/Canaries/Ceuta/Melilla, no
-duplicate ids). Each feature's `ID` is confirmed live to be the exact id
-`prediccion/especifica/playa/{id}` expects, across four ids spanning
-different regions. This is an undocumented internal endpoint of AEMET's own
-site, not part of the official OpenData contract, so it could change without
-notice — documented as such, used anyway since it's what AEMET's own
-beach-forecast page relies on for the same lookup.
-
-**A real rate-limit incident, found and fixed during this phase**: the
-first implementation fetched all 160 beaches with a concurrency-8 worker
-pool. AEMET's envelope endpoint returns a `Remaining-request-endpoint`
-response header (confirmed live to be scoped per api-key-and-endpoint-path,
-independent of every other AEMET proxy's own budget — checking the stations
-endpoint mid-test showed an unrelated, unaffected count) that started around
-39–40; the concurrent sweep exhausted it and started receiving 429s after
-roughly 20 beaches in quick succession, confirmed live via server logs
-during manual testing (143 of 160 beaches failed on that first attempt).
-Rebuilt as a slow, fully-sequential, **non-blocking background sweep**
-instead: a request never awaits it, always responding immediately with
-whatever is cached (an honest empty array on a true cold start, filling in
-across this layer's own 5-minute poll interval); the sweep paces one beach
-every 2.5s and also reads the live `Remaining-request-endpoint` value after
-every call, cooling down for ~65s whenever it — or an explicit 429 — signals
-the budget is nearly spent. Confirmed live afterward: the proactive
-header-based backoff avoided a single further 429 across a full sweep, even
-after the budget had already been partly consumed by earlier manual
-testing (observed recovering from single digits back into the high 30s
-during the pause). A follow-on fix: the layer initially reported
-"DEGRADED · Serving stale AEMET data (upstream unavailable)" during a
-perfectly healthy first sweep, because `stale` alone doesn't distinguish
-"still filling in" from "actually stuck" for a multi-minute background
-process the way it does for every other AEMET proxy's one atomic refresh —
-fixed by adding a `sweeping` flag to the response and only surfacing the
-degraded message when stale AND no sweep is currently running.
-
-The frontend (`src/data/aemetBeaches.js`) mirrors `aemetUvIndex.js`'s real
-point-layer shape exactly — no municipio join needed here since the
-nomenclator already carries real coordinates directly. Colored by water
-temperature (`WATER_TEMP_COLOR_STOPS`, a narrower 14–29°C range than
-`aemetStations.js`'s -10..40°C air-temperature scale, since Spanish sea
-temperatures don't approach those extremes), with click-to-inspect showing
-water temp, air max, sky, wind, waves, and UV max.
-
-**Verified live against the real API**: a fresh sweep filled in from 0 to
-60+ real beaches within a few minutes with no further 429s; individual
-beach points render along the Spanish coastline with click-to-inspect
-working (confirmed via passing unit tests exercising the exact selection
-code path — `aemetUvIndex.js`'s own already-proven mechanism, reused
-directly); the layer correctly reports a clean "ON" state rather than a
-false "DEGRADED" one during the ongoing background fill-in.
-
-Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
-Phase A14).
+`aemet-beaches` (token `n`, `enabled-only`) renders one point per beach (160
+nationwide, from AEMET's own undocumented public nomenclator), colored by
+water temperature. Refreshed via a paced, sequential, non-blocking
+background sweep (2.5s/beach) that reads AEMET's live
+`Remaining-request-endpoint` header to back off before hitting its rate
+limit; a route handler never awaits the sweep, always serving the current
+cache. Reports `sweeping: true` during an in-progress first fill so a
+healthy cold start isn't shown as degraded.
 
 ## AEMET Environmental Networks (2026-09-13)
 
-`aemet-environmental` (token `k`, `enabled-only`) is the plan's one
-deliberate grouping exception: ozone and solar radiation, two small station
-networks (a few dozen sites each) folded into one layer with a network-type
-chip rather than two near-empty toggle rows. The plan's guessed endpoint
-paths (`redes-especiales/ozono`, `redes-especiales/radiacion`) don't exist —
-the real ones, found in AEMET's own published OpenAPI spec
-(`https://opendata.aemet.es/AEMET_OpenData_specification.json`, linked from
-the AEMET GitLab repo's own POSTMAN.md rather than guessed), are
-`red/especial/ozono` and `red/especial/radiacion`. Both are confirmed live
-to return **CSV, not JSON**, and — a genuine first for this app — are
-**correctly UTF-8-encoded**: every other AEMET feed's ISO-8859-15-declared
-response really is ISO-8859-15 (hence this codebase's blanket "always
-decode as latin1" habit), but these two are the opposite — confirmed live
-by latin1-decoding a real pull and getting "CoruÃ±a" instead of "Coruña".
-The proxy decodes these two specifically as UTF-8 because of this.
-
-Each row's `Indicativo` field is the same station id (`idema`)
-`aemet-stations` already uses — confirmed live by cross-referencing all 7
-ozone stations against a real stations pull (6 of 7 matched instantly; the
-7th, Zaragoza, simply wasn't in that particular live snapshot). No new
-geometry source needed, same "join to an existing id space" pattern as
-A2/A8; `aemetEnvironmentalProxy()` does its own independent stations fetch
-for this (mirroring `aemetUvIndexProxy()`'s own self-contained convention).
-
-Two further networks the plan proposed folding in here — `contaminacionfondo`
-(EMEP background pollution, 13 fixed stations) and `perfilozono` (vertical
-ozone profile, 2 fixed stations) — are real, live-verified, and **not**
-geometry-blocked (their station enums are documented directly in the
-OpenAPI spec's own parameter descriptions, the same kind of find that
-unblocked A7). Deliberately deferred out of v1 anyway:
-`contaminacionfondo`'s `datos` response is a proprietary fixed-field text
-format ("FINN", confirmed live) with 144 ten-minute readings per station per
-day, needing its own bespoke parser; `perfilozono` returns an
-altitude-indexed vertical profile on a weekly cadence, not a single current
-value — a fundamentally different shape than "one point, one reading."
-
-The frontend (`src/data/aemetEnvironmental.js`) is a real point layer
-mirroring `aemetUvIndex.js`, with one addition: a `networkType` chip
-(`getRowControls()`/`setParams()`, the same mechanism `satellites.js`'s
-DENSE chip uses) switches which metric drives point color — ozone
-(`OZONE_COLOR_STOPS`, 260–340 Dobson Units) or radiation
-(`RADIATION_COLOR_STOPS`, 500–3600 in `10·kJ/m²`) — while the click-to-inspect
-card always shows both metrics regardless of the active chip, labeling
-whichever one a given station doesn't report rather than omitting it. v1
-scoping note: the chip's selection is **not** persisted into share-links —
-registered as `enabled-only` rather than wiring a full option codec (the
-share-link encoding satellites/flights/cctv/radio use), a deliberate
-simplification the same way UV-index fixed its day offset to `0`.
-
-**Verified live against the real API**: 28 real stations rendered with
-correct UTF-8 names ("A Coruña", "Izaña"); the network-type chip toggles
-between "OZONE" and "RADIATION" live in the panel; no console errors.
-
-Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
-Phase A14).
+`aemet-environmental` (token `k`, `enabled-only`) renders ozone and
+solar-radiation station readings (joined to `aemet-stations`' own `idema`
+ids), with a network-type chip (`getRowControls()`/`setParams()`) switching
+which metric drives point color; the click-to-inspect card always shows
+both. These two feeds are genuinely UTF-8-encoded, unlike every other AEMET
+feed in this app. Chip selection is not persisted to share-links.
 
 ## AEMET voice-tool wiring (Phase A14, 2026-09-13)
 
-The batched pass this plan deferred every individual AEMET phase's own
-voice wiring to. Two separate mechanisms needed updating — both already
-existed and are generic, but neither auto-discovers new layers:
-
-- **`set_layer_visibility` ("turn on/off X")**: resolves a spoken phrase to
-  a registered layer id via `LAYER_ALIASES` (`src/voice/gevActions.js`) —
-  confirmed live that this map had **zero** AEMET entries before this pass,
-  including for the already-shipped `aemet-stations`/`aemet-warnings`
-  (A0/A1's own wiring really had been fully deferred, not partially done).
-  Added aliases for all 8 AEMET layers (`weather stations`, `storm
-  warnings`, `lightning activity`, `fire risk`, `uv index`, `sea surface
-  temperature`, `beach forecast`, `environmental networks`, plus natural
-  variants of each).
-- **`analyst_query` ("how many beaches are above 24 degrees")**: gated by
-  its own separate allow-list, `ANALYST_LAYERS` in `src/data/
-  analystEngine.js` — confirmed live that merely implementing
-  `getAnalystRecords()` (which `aemet-uv-index`/`aemet-beaches`/
-  `aemet-environmental` already did) is **not** sufficient; a layer absent
-  from this allow-list gets "I can't query X yet" regardless. Added entries
-  for all three real point layers, naming their queryable numeric/text/flag
-  fields (the ambient-thumbnail AEMET layers have no queryable entities at
-  all, so are correctly absent). Also found and fixed a related bug while
-  wiring this: `aemetBeaches.js`'s `getAnalystRecords()` nested its values
-  under a `forecast` sub-object (`record.forecast.waterTempC`), but
-  `analystEngine.js`'s filter/sort access fields as `record[field]` with no
-  nested-path support — a query like "beaches above 24 degrees" would have
-  silently matched nothing. Fixed by flattening those fields to the top
-  level.
+`set_layer_visibility` and `analyst_query` are generic tools gated by two
+separate allow-lists that don't auto-discover new layers: `LAYER_ALIASES`
+(`src/voice/gevActions.js`, e.g. "turn on beach forecast") and
+`ANALYST_LAYERS` (`src/data/analystEngine.js`, e.g. "which beaches are above
+24 degrees"). All 8 AEMET layers have alias entries; the 3 real point layers
+(`aemet-uv-index`, `aemet-beaches`, `aemet-environmental`) are queryable. The
+ambient-thumbnail layers (lightning, fire-risk, sea-surface-temp) have no
+queryable entities.
 
 ## Installations and map-source guidance
 

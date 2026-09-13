@@ -271,6 +271,19 @@ test('selected overlay entry mirrors the bikeshare card contract', () => {
   assert.equal(createAemetStationSelectedOverlayEntry('x', null, GOOD_STATION), null);
 });
 
+test('selected overlay entry accent matches the point\'s own temperature color, not a fixed color', () => {
+  const position = Cesium.Cartesian3.fromDegrees(0.87, 40.96);
+  const hot = createAemetStationSelectedOverlayEntry('a', position, { ...GOOD_STATION, temperatureC: 33 });
+  const cold = createAemetStationSelectedOverlayEntry('b', position, { ...GOOD_STATION, temperatureC: -10 });
+  const [hr, hg, hb] = temperatureColorRgb(33);
+  const toHex = (r, g, b) => `#${[r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+  assert.equal(hot.accent, toHex(hr, hg, hb));
+  assert.notEqual(hot.accent, cold.accent);
+
+  const unknown = createAemetStationSelectedOverlayEntry('c', position, { ...GOOD_STATION, temperatureC: NaN });
+  assert.equal(unknown.accent, '#91a4b4');
+});
+
 test('clicking a station hides its point, adds one highlight entity, and publishes one card', async () => {
   const originalFetch = globalThis.fetch;
   const viewer = fakeViewer();

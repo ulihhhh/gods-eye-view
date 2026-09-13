@@ -13,88 +13,14 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 
 ## [Unreleased]
 
-- Add a live AEMET Weather Stations layer (~850 Spanish stations, colored by
-  a continuous temperature gradient) behind a new `/api/aemet/stations`
-  proxy. Handles AEMET's two-step envelope/datos fetch and its
-  ISO-8859-15-encoded response server-side, dedups the feed's trailing hourly
-  rows to one current reading per station, and serves stale data on upstream
-  failure. Requires a free `AEMET_API_KEY`, now offered in the POWER UP panel
-  alongside the other provider keys. Points use a live ground-relative height
-  clamp (`RELATIVE_TO_GROUND`, not `CLAMP_TO_GROUND` or a one-time terrain
-  snapshot), so they neither sink into sloped terrain up close nor drift to
-  inexact positions as the camera moves. Clicking a station shows a floating
-  card with temperature (plus its trailing-hour min/max and dew point),
-  humidity, wind (speed/direction, gust speed/direction, and turbulence
-  std-dev), both station and sea-level pressure, precipitation, and altitude.
-
-- Add an expiry countdown/expired badge to the POWER UP panel for keys with a
-  known validity window (currently AEMET's 3-month issue cycle) — shown only
-  once a key has actually been saved through the panel, never guessed.
-
-- Add a live AEMET Weather Warnings layer (avisos) behind a new
-  `/api/aemet/warnings` proxy: active zone polygons (amarillo/naranja/rojo —
-  the baseline "verde" status is never rendered) parsed from AEMET's CAP
-  1.2 XML bulletins, which arrive packed in a plain tar archive with no
-  separate zone shapefile needed — every alert carries its own polygon
-  geometry inline. Clicking a zone lists every currently active phenomenon
-  (event, probability, and whether it's already in effect or starts later)
-  in a floating card; a zone can show more than one at once (e.g. wind and
-  coastal warnings together). Shares the AEMET key already configured for
-  the stations layer.
-
-- Add a "next hours" forecast tooltip to the AEMET Weather Stations layer:
-  clicking a station now also fetches AEMET's hourly municipio forecast via
-  a new on-demand `/api/aemet/forecast?lat=&lon=` proxy (resolves the
-  clicked point to its nearest municipio, no separate layer or toggle) and
-  appends a compact `Next hours: 17:00 33°C · 18:00 32°C` line to the
-  already-open card once it arrives. A slow or failed forecast never blocks
-  or replaces the base reading.
-
-- Add an AEMET Lightning Activity layer: a live-updating "picture-in-picture"
-  thumbnail of AEMET's nationwide lightning composite image, floating over
-  Spain, behind a new `/api/aemet/lightning` proxy. Unlike the other AEMET
-  layers this is a single ambient snapshot rather than a polled entity
-  layer — AEMET's feed exposes no strike coordinates, only a pre-rendered
-  image — refetched only when AEMET actually publishes a new one (roughly
-  every 6 hours), with a live "updated Xm/Xh ago" label. Clicking the
-  thumbnail expands it to a much larger, still-crisp size so its baked-in
-  legend and labels are actually readable; clicking again collapses it.
-
-- Add an AEMET Fire Risk layer, same click-to-expand picture-in-picture
-  shape as AEMET Lightning Activity, behind a new `/api/aemet/fire-risk`
-  proxy: AEMET's meteorological forest-fire risk forecast for the
-  Peninsula, automatically falling back to tomorrow's forecast when
-  today's map isn't published yet. Not a duplicate of the existing FIRMS
-  fire layer — this is a predictive risk index, not detected fires.
-
-- Add an AEMET UV Index layer: real UV-index points for 59 Spanish
-  provincial-capital cities, colored on a continuous Low-to-Extreme scale,
-  behind a new `/api/aemet/uv-index` proxy. Click a city for its exact
-  value and risk category.
-
-- Add an AEMET Sea Surface Temperature layer, same click-to-expand
-  picture-in-picture shape as AEMET Lightning Activity and AEMET Fire Risk,
-  behind a new `/api/aemet/sea-surface-temp` proxy: AEMET's daily
-  EUMETSAT-sourced sea-surface-temperature composite for Iberia, the
-  Mediterranean, and NW Africa.
-
-- Add an AEMET Beach Forecast layer: real points for all 160 beaches AEMET
-  forecasts for nationwide, colored by water temperature, behind a new
-  `/api/aemet/beaches` proxy. Refreshes as a slow paced background sweep
-  (real per-beach forecasts, no bulk endpoint exists) that respects AEMET's
-  own live rate-limit signal rather than a fixed guess.
-
-- Add an AEMET Environmental Networks layer: ozone and solar-radiation
-  station readings behind a new `/api/aemet/environmental` proxy, joined to
-  the existing weather-station coordinates. A network-type chip switches
-  which metric colors the points; both are always shown on click.
-
-- Wire voice/analyst-query support for every AEMET layer: "turn on beach
-  forecast," "any storm warnings," "which beaches are above 24 degrees,"
-  and similar now resolve. Also fixes a bug found while wiring it — the
-  beach layer's queryable fields were nested where the query engine
-  couldn't reach them, so a filter on water temperature would have silently
-  matched nothing.
+- Add nine AEMET layers for Spain: weather stations (temperature-colored,
+  click for a full reading plus a "next hours" forecast), weather warnings
+  (avisos), lightning activity, forest-fire risk, UV index, sea-surface
+  temperature, beach forecasts, and an ozone/radiation network. Each toggles
+  independently and responds to voice and analyst-query commands ("turn on
+  beach forecast", "which beaches are above 24 degrees"). Requires a free
+  `AEMET_API_KEY`, offered in the POWER UP panel with an expiry countdown for
+  its 3-month key cycle.
 
 - Separate terrain, traffic, FIRMS and GBFS middleware into focused provider
   modules, preserving local configuration, routes and cache/error behavior.

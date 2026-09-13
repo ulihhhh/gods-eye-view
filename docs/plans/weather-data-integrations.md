@@ -7,7 +7,8 @@ genuinely don't fit). Phase A0 (Weather Stations), Phase A1 (Weather
 Warnings), Phase A2 (forecast tooltip), Phase A4 (lightning activity),
 Phase A5 (fire risk), Phase A7 (beach forecast), Phase A8 (UV index),
 Phase A9 (sea-surface temperature), Phase A10 (environmental networks —
-ozone + radiation), and Phase A14 (voice-tool wiring) are **shipped** on
+ozone + radiation), Phase A14 (voice-tool wiring), and Phase A15 (station
+card accent color) are **shipped** on
 `feat/weather-layers` — see
 [Phase A0](#phase-a0--station-layer--shipped-2026-09-12),
 [Phase A1](#phase-a1--warnings-overlay-avisos--shipped-2026-09-12),
@@ -18,7 +19,8 @@ ozone + radiation), and Phase A14 (voice-tool wiring) are **shipped** on
 [Phase A8](#phase-a8--uv-index--shipped-2026-09-12),
 [Phase A9](#phase-a9--sea-surface-temperature--shipped-2026-09-12),
 [Phase A10](#phase-a10--environmental-networks-ozone-pollution-radiation--shipped-2026-09-13-ozone--radiation),
-and [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set--shipped-2026-09-13).
+[Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set--shipped-2026-09-13),
+and [Phase A15](#phase-a15--station-selection-card-accent-color--shipped-2026-09-13).
 **Phase A3 (radar), Phase A6 (maritime forecast), and Phase A12 (regional
 forecast) are blocked**, not skipped — radar on AEMET's own broken cached
 endpoint, maritime on a genuinely unresolved zone-geometry source, regional
@@ -31,8 +33,14 @@ originally proposed a poor fit — see their sections below. **Phase A13
 (climatological values) has its endpoint confirmed live but its UI
 deliberately not designed this pass** — a genuinely different kind of work
 (a comparison chart bolted onto an existing click card) than every other
-phase here. Open-Meteo's map layer and NASA GIBS — this plan's original
-other two providers — are **out of this PR's scope** and relegated to
+phase here. **Phase A16 (ambient-thumbnail stacking stability) has its root
+cause confirmed but the fix is a real product call, not yet built** — see
+its own section for the options. **Phase A17 (radar/satellite coverage
+review across AEMET, EUMETSAT, and GIBS) is reviewed with no new build this
+pass** — nothing new found beyond what A3/A9 and the Deferred GIBS section
+already establish, now with GIBS live-confirmed working. Open-Meteo's map
+layer and NASA GIBS — this plan's original other two providers — are **out
+of this PR's scope** and relegated to
 [Deferred — non-AEMET work](#deferred--non-aemet-work-tracked-not-in-this-pr)
 at the end: tracked so the earlier design work isn't lost, revisited only
 after the AEMET set is complete. This file stays the design record for work
@@ -1322,6 +1330,154 @@ consults automatically:
   `ANALYST_LAYERS` entries (1 test covering all 3 newly-queryable layers
   through the real engine), the beaches flattening fix (existing beach
   layer test updated to assert the flat shape).
+
+### Phase A15 — station selection-card accent color — **shipped 2026-09-13**
+
+Owner feedback: `aemet-stations`' click-to-inspect card always showed the
+same fixed yellow accent (`#ffe23b`), unlike `aemet-uv-index`/
+`aemet-beaches`/`aemet-warnings`/`aemet-environmental`, whose cards all
+derive `accent` from the same value that colors the point/polygon itself
+(`uvIndexColorRgb`, `waterTempColorRgb`, `LEVEL_COLOR_RGB`,
+the active-chip's color stops, respectively) — confirmed by grepping every
+AEMET layer's `accent:` usage. `aemet-stations` was the one outlier: a
+32°C desert reading and a 2°C mountain reading opened visually identical
+cards despite the point itself already being colored correctly by
+`temperatureColorRgb`.
+
+- Fixed in `createAemetStationSelectedOverlayEntry`
+  (`src/data/aemetStations.js`): `accent` is now
+  `temperatureColorRgb(station?.temperatureC)` converted to hex (falling
+  back to the same neutral `COLOR_UNKNOWN_RGB` the point itself uses for a
+  missing reading), matching every other data-driven AEMET card's own
+  pattern exactly rather than inventing a new one.
+- `aemet-lightning`/`aemet-fire-risk`/`aemet-sea-surface-temp` correctly
+  keep a fixed `ACCENT` — they're single ambient images with no per-entity
+  value to derive a color from, not an oversight to fix here.
+- One new test (`aemetStations.test.mjs`) pins a hot reading and a cold
+  reading to two different accents (matching `temperatureColorRgb`'s own
+  output) and confirms an unknown/NaN reading still falls back to the
+  neutral gray, so this can't silently regress back to a fixed color.
+- No proxy/registry change — this is a pure frontend card-copy fix, same
+  scope as A2's tooltip addition.
+
+### Phase A16 — ambient-thumbnail stability when stacked (lightning, fire
+risk, sea-surface-temp) — **root cause confirmed 2026-09-13, fix not yet
+built, options below not decided unilaterally**
+
+Owner report: enabling `aemet-lightning`, `aemet-fire-risk`, and
+`aemet-sea-surface-temp` together is visibly flaky — sometimes one image
+shows, sometimes a different one, sometimes none — worse than any of the
+three alone. This matches, and goes further than, the "pre-existing
+interaction, not a regression" note already on record under
+[Phase A9](#phase-a9--sea-surface-temperature--shipped-2026-09-12): all
+three independently register an ambient overlay entry at the **identical**
+anchor (`ANCHOR_LON = -3.7, ANCHOR_LAT = 40.0`, confirmed by grepping all
+three files), in the same `collisionGroup: 'ambient-card'`, on the same
+`paintLane: 'thumbnail'`, at the **identical** un-expanded `priority:
+500_000`. Three sources fighting over one visual slot with a tied priority
+is exactly the shape of bug that produces "sometimes A, sometimes B,
+sometimes neither" — whichever entry's `update()` call lands last in
+`worldOverlay.js`'s internal ordering for that frame wins the slot, and that
+ordering isn't guaranteed stable across which layers are enabled/refreshed
+in what sequence, so it reads as random from the outside. This was not
+caught during A4/A5/A9's own live verification because each was tested
+enabled largely on its own or pairwise-briefly, not all three simultaneously
+under repeated toggling — worth remembering for the next multi-layer-same-
+anchor design, not just this one.
+
+Two real forward paths, genuinely different trade-offs, **not picked here**:
+
+1. **Merge into one layer with a chip selector** — the owner's own
+   suggestion, and it has a direct precedent already shipped:
+   [Phase A10](#phase-a10--environmental-networks-ozone-pollution-radiation--shipped-2026-09-13-ozone--radiation)'s
+   `aemet-environmental` already does exactly this (`getRowControls()`/
+   `setParams()` switching which of two datasets is active on one layer).
+   A single `aemet-storm-imagery`-style layer with a 3-way chip
+   (LIGHTNING/FIRE RISK/SST) would need: one new registry entry, three
+   existing proxies left untouched (each already independent and correctly
+   cached), a frontend module that owns one ambient thumbnail entry and
+   swaps which image/title/accent it shows on chip click, and — the real
+   cost — **retiring three existing registered layer ids** (`aemet-
+   lightning` token `p`, `aemet-fire-risk` token `v`, `aemet-sea-surface-
+   temp` token `y`), which breaks any already-shared link encoding one of
+   those three tokens. Whether that share-link breakage is acceptable (this
+   app has broken/reassigned tokens before per the table's own footnotes)
+   is a real product call, not a technical unknown.
+2. **Give each layer its own distinct anchor point** — far smaller change
+   (move 3 constants, no registry/share-link impact, no merge), but a real
+   trade-off: it turns "one picture-in-picture window over Spain" into
+   three separate small windows scattered across the map, which may look
+   busier/less "clean dashboard" than a single slot — and doesn't fully
+   remove the *general* lesson (two future ambient layers sharing an
+   anchor would reintroduce the identical bug) unless paired with a
+   guardrail (e.g. a dev-mode assertion that no two enabled ambient sources
+   ever share both an anchor point and a collision group).
+3. **A hybrid worth naming, not fully designed**: keep three separate
+   toggles (no share-link breakage) but have each layer negotiate a
+   distinct offset anchor *only when siblings are also enabled* — most
+   flexible for the user, but real added statefulness (each layer would
+   need to know about the others' enabled state, breaking this plan's own
+   "stack, don't couple" principle stated at the top of this document) —
+   flagged so it isn't picked by default just because it sounds flexible.
+
+**Recommendation, not a decision**: option 1 (merge, chip-selected) fits
+this app's existing conventions best and is the owner's own instinct, but
+touches share-link compatibility for three tokens — worth a explicit go-
+ahead before building, the same discipline A6/A12 already apply to their own
+real scope calls. Option 2 is the lowest-risk stopgap if a quick fix is
+wanted before committing to the merge.
+
+### Phase A17 — radar and satellite coverage from AEMET, EUMETSAT, or GIBS
+— **reviewed 2026-09-13, no new build this pass**
+
+Owner asked to review whether more radar/satellite coverage is available
+across all three sources this plan already touches. Re-checked against the
+real cached AEMET OpenAPI spec (`aemet_spec.json`, this session's own
+research artifact) rather than re-guessing:
+
+- **AEMET radar**: no new information — still
+  [blocked exactly as Phase A3 found it](#phase-a3--weather-radar-composite--blocked-live-verification-incomplete-2026-09-12):
+  `red/radar/raster/{nacional,regional}` resolve to a stuck, broken cached
+  short-link, corroborated independently by a third-party radar site's own
+  "AEMET Legacy GIF fallback" telemetry. Not re-tested this pass — A3's own
+  block was confirmed via 7 attempts over 15+ minutes and a same-day
+  follow-up hours later returning the identical broken hash; nothing about
+  that upstream problem is likely to have changed in the interim, and
+  re-probing a known-broken endpoint repeatedly isn't a good use of AEMET's
+  rate-limit budget.
+- **AEMET satellite**: confirmed, re-checking the spec directly rather than
+  from memory, that AEMET's entire public `satelites/producto/*` family is
+  exactly **two** endpoints — `nvdi` (vegetation index, already reviewed and
+  [deliberately excluded](#deliberately-excluded-aemet-side) as non-weather)
+  and `sst` (already shipped as
+  [Phase A9](#phase-a9--sea-surface-temperature--shipped-2026-09-12)).
+  There is no AEMET-hosted cloud-cover/visible/infrared satellite product
+  beyond what's already shipped or excluded — this is a real, confirmed
+  negative result, not an unchecked assumption.
+- **EUMETSAT direct**: unchanged from this plan's existing
+  [Deferred — NASA GIBS](#nasa-gibs) reasoning — deliberately excluded
+  there as the heaviest-lift option (hourly OAuth token refresh, raw
+  NetCDF/HRIT decoding, no map-ready output), not re-litigated here since
+  nothing about that trade-off is AEMET-specific or has changed. Worth
+  noting `aemet-sea-surface-temp` already *is* a EUMETSAT product (OSI SAF)
+  — just redistributed through AEMET's own API rather than fetched from
+  EUMETSAT directly, which is the easy way to get EUMETSAT-sourced imagery
+  without touching EUMETSAT's own heavier access path.
+- **NASA GIBS — freshly live-verified this pass, not just cited from the
+  existing design section**: a real keyless WMTS tile request
+  (`MODIS_Terra_CorrectedReflectance_TrueColor`, zoom 3, a recent date)
+  returned `HTTP 200`, a genuine 512×512 JPEG, confirming the
+  [existing GIBS design](#nasa-gibs) is not just plausible but already
+  workable exactly as documented — no new blocker found, no design change
+  needed. It remains **out of scope for this AEMET-only PR** by the
+  2026-09-12 owner scoping decision recorded at the top of this document,
+  not because anything about it turned out to be broken.
+
+**Net finding**: nothing changed for radar (still genuinely blocked
+upstream) or AEMET-hosted satellite imagery (confirmed complete — nothing
+missing to add); GIBS remains the one real, ready-to-build option for
+broader satellite coverage, now live-confirmed rather than merely designed,
+whenever the owner decides to lift the AEMET-only scope restriction.
 
 ### Deliberately excluded (AEMET side)
 

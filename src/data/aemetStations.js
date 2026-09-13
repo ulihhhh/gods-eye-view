@@ -244,7 +244,9 @@ export function createAemetStationSelectedOverlayEntry(id, position, station, fo
     priority: Number.MAX_SAFE_INTEGER,
     title,
     details: forecastLine ? [...details, forecastLine] : details,
-    accent: '#ffe23b',
+    accent: `#${(temperatureColorRgb(station?.temperatureC) ?? COLOR_UNKNOWN_RGB)
+      .map((c) => c.toString(16).padStart(2, '0'))
+      .join('')}`,
     interactive: false,
     anchorRadiusPx: 9,
     minAnchorGapPx: 11,
