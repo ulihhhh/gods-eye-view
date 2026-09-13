@@ -13,14 +13,20 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
 
 ## [Unreleased]
 
-- Add nine AEMET layers for Spain: weather stations (temperature-colored,
+- Add seven AEMET layers for Spain: weather stations (temperature-colored,
   click for a full reading plus a "next hours" forecast), weather warnings
-  (avisos), lightning activity, forest-fire risk, UV index, sea-surface
-  temperature, beach forecasts, and an ozone/radiation network. Each toggles
-  independently and responds to voice and analyst-query commands ("turn on
-  beach forecast", "which beaches are above 24 degrees"). Requires a free
-  `AEMET_API_KEY`, offered in the POWER UP panel with an expiry countdown for
-  its 3-month key cycle.
+  (avisos), weather imagery (lightning/fire-risk/sea-surface-temp, switched
+  with three pills), UV index, beach forecasts, and an ozone/radiation
+  network. Each toggles independently and responds to voice and
+  analyst-query commands ("turn on beach forecast", "which beaches are
+  above 24 degrees"). Requires a free `AEMET_API_KEY`, offered in the POWER
+  UP panel with an expiry countdown for its 3-month key cycle.
+
+- Merge the AEMET lightning, fire-risk, and sea-surface-temperature layers
+  into one "AEMET Weather Imagery" layer with a three-pill switcher.
+  Enabling any two of the three used to be unreliable — they shared one
+  on-screen slot and only one would render, unpredictably; now there is
+  only one slot to begin with.
 
 - Separate terrain, traffic, FIRMS and GBFS middleware into focused provider
   modules, preserving local configuration, routes and cache/error behavior.

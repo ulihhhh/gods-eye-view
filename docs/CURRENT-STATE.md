@@ -261,19 +261,26 @@ CAP files are UTF-8, the opposite of the stations feed's ISO-8859-15.
 Clicking a zone lists every currently active phenomenon (event, probability,
 in-effect vs. upcoming).
 
-## AEMET Lightning, Fire Risk, and Sea Surface Temperature (2026-09-12/13)
+## AEMET Weather Imagery (2026-09-12/13, merged 2026-09-13)
 
-`aemet-lightning` (token `p`), `aemet-fire-risk` (token `v`), and
-`aemet-sea-surface-temp` (token `y`) are ambient "picture-in-picture"
-thumbnails, not entity layers — each AEMET endpoint returns a single
-pre-rendered image (a lightning-strike composite, a fire-risk map, a
-EUMETSAT sea-surface-temperature composite) with no coordinates or bounding
-box to plot against. Each floats over a fixed reference point near central
-Spain and expands to a larger, still-legible size on click. Fire risk falls
-back to tomorrow's forecast when today's map isn't published yet. Because
-all three anchor at the same point, only one paints at a time when more than
-one is enabled simultaneously — flagged as a stability issue to address, see
-`docs/plans/weather-data-integrations.md`.
+`aemet-weather-imagery` (token `l`, `enabled-only`) is one ambient
+"picture-in-picture" thumbnail shared between three AEMET composites —
+lightning activity, forest-fire meteorological risk, and a EUMETSAT
+sea-surface-temperature composite — each a single pre-rendered image with
+no coordinates or bounding box to plot against, floating over a fixed
+reference point near central Spain. A three-pill chip row
+(`getRowControls()`/`setParams({activeMap})`) switches which one is shown;
+all three keep polling and caching independently in the background, so
+switching pills is instant once each has loaded at least once. Fire risk
+falls back to tomorrow's forecast when today's map isn't published yet.
+Expanding the card (click) persists across a pill switch, resized for
+whichever map is now active. This replaces the original three separate
+layers (`aemet-lightning` token `p`, `aemet-fire-risk` token `v`,
+`aemet-sea-surface-temp` token `y`, retired — not reassigned), which used to
+collide: all three anchored at the identical point in the identical
+collision group, so only one painted at a time, unpredictably, whenever more
+than one was enabled. Merging into one layer with a single published entry
+removes the collision structurally rather than tuning around it.
 
 ## AEMET UV Index (2026-09-12)
 
@@ -308,10 +315,13 @@ feed in this app. Chip selection is not persisted to share-links.
 separate allow-lists that don't auto-discover new layers: `LAYER_ALIASES`
 (`src/voice/gevActions.js`, e.g. "turn on beach forecast") and
 `ANALYST_LAYERS` (`src/data/analystEngine.js`, e.g. "which beaches are above
-24 degrees"). All 8 AEMET layers have alias entries; the 3 real point layers
-(`aemet-uv-index`, `aemet-beaches`, `aemet-environmental`) are queryable. The
-ambient-thumbnail layers (lightning, fire-risk, sea-surface-temp) have no
-queryable entities.
+24 degrees"). All 6 registered AEMET layers have alias entries (the merged
+`aemet-weather-imagery` keeps every one of its three original spoken names —
+"lightning", "fire risk", "sea surface temperature", etc. — pointing at the
+one merged id; voice can turn it on/off but not yet pick which pill is
+active); the 3 real point layers (`aemet-uv-index`, `aemet-beaches`,
+`aemet-environmental`) are queryable. `aemet-weather-imagery` has no
+queryable entities, same as before the merge.
 
 ## Installations and map-source guidance
 

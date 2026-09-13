@@ -6,10 +6,11 @@ GEV layer (or record a deliberate, reasoned exception for the handful that
 genuinely don't fit). Phase A0 (Weather Stations), Phase A1 (Weather
 Warnings), Phase A2 (forecast tooltip), Phase A4 (lightning activity),
 Phase A5 (fire risk), Phase A7 (beach forecast), Phase A8 (UV index),
-Phase A9 (sea-surface temperature), Phase A10 (environmental networks —
-ozone + radiation), Phase A14 (voice-tool wiring), and Phase A15 (station
-card accent color) are **shipped** on
-`feat/weather-layers` — see
+Phase A9 (sea-surface temperature, later merged — see A16), Phase A10
+(environmental networks — ozone + radiation), Phase A14 (voice-tool
+wiring), Phase A15 (station card accent color), and Phase A16
+(lightning/fire-risk/sea-surface-temp merged into one layer) are **shipped**
+on `feat/weather-layers` — see
 [Phase A0](#phase-a0--station-layer--shipped-2026-09-12),
 [Phase A1](#phase-a1--warnings-overlay-avisos--shipped-2026-09-12),
 [Phase A2](#phase-a2--forecast-tooltip--shipped-2026-09-12),
@@ -20,25 +21,29 @@ card accent color) are **shipped** on
 [Phase A9](#phase-a9--sea-surface-temperature--shipped-2026-09-12),
 [Phase A10](#phase-a10--environmental-networks-ozone-pollution-radiation--shipped-2026-09-13-ozone--radiation),
 [Phase A14](#phase-a14--voice-tool-wiring-for-the-whole-aemet-set--shipped-2026-09-13),
-and [Phase A15](#phase-a15--station-selection-card-accent-color--shipped-2026-09-13).
-**Phase A3 (radar), Phase A6 (maritime forecast), and Phase A12 (regional
-forecast) are blocked**, not skipped — radar on AEMET's own broken cached
-endpoint, maritime on a genuinely unresolved zone-geometry source, regional
-forecast on the same *kind* of missing-geometry problem (this app's bundled
-Natural Earth data turned out to be physical geography, not administrative
-boundaries, on inspection); **Phase A11 (Antarctic stations) is deferred**
-for a different, real reason — a live-confirmed seasonal gap (no current
-reading April-October) that makes folding it into `aemet-stations` as
-originally proposed a poor fit — see their sections below. **Phase A13
-(climatological values) has its endpoint confirmed live but its UI
-deliberately not designed this pass** — a genuinely different kind of work
-(a comparison chart bolted onto an existing click card) than every other
-phase here. **Phase A16 (ambient-thumbnail stacking stability) has its root
-cause confirmed but the fix is a real product call, not yet built** — see
-its own section for the options. **Phase A17 (radar/satellite coverage
-review across AEMET, EUMETSAT, and GIBS) is reviewed with no new build this
-pass** — nothing new found beyond what A3/A9 and the Deferred GIBS section
-already establish, now with GIBS live-confirmed working. Open-Meteo's map
+[Phase A15](#phase-a15--station-selection-card-accent-color--shipped-2026-09-13),
+and [Phase A16](#phase-a16--ambient-thumbnail-stability-when-stacked-lightning-fire-risk-sea-surface-temp--shipped-2026-09-13-merged-into-one-layer-with-a-three-pill-chip).
+**A4, A5, and A9's own layers (`aemet-lightning`/`aemet-fire-risk`/
+`aemet-sea-surface-temp`) no longer exist standalone** — A16 merged all
+three into `aemet-weather-imagery`; their sections below stay as the design
+record for the original per-map work (sizing, live-verification, the
+placement-failure story), not because the layers themselves are still
+separate. **Phase A3 (radar), Phase A6 (maritime forecast), and Phase A12
+(regional forecast) are blocked**, not skipped — radar on AEMET's own broken
+cached endpoint, maritime on a genuinely unresolved zone-geometry source,
+regional forecast on the same *kind* of missing-geometry problem (this
+app's bundled Natural Earth data turned out to be physical geography, not
+administrative boundaries, on inspection); **Phase A11 (Antarctic stations)
+is deferred** for a different, real reason — a live-confirmed seasonal gap
+(no current reading April-October) that makes folding it into
+`aemet-stations` as originally proposed a poor fit — see their sections
+below. **Phase A13 (climatological values) has its endpoint confirmed live
+but its UI deliberately not designed this pass** — a genuinely different
+kind of work (a comparison chart bolted onto an existing click card) than
+every other phase here. **Phase A17 (radar/satellite coverage review across
+AEMET, EUMETSAT, and GIBS) is reviewed with no new build this pass** —
+nothing new found beyond what A3/A9 and the Deferred GIBS section already
+establish, now with GIBS live-confirmed working. Open-Meteo's map
 layer and NASA GIBS — this plan's original other two providers — are **out
 of this PR's scope** and relegated to
 [Deferred — non-AEMET work](#deferred--non-aemet-work-tracked-not-in-this-pr)
@@ -75,9 +80,9 @@ phase:
   `LAYER_STATE_REGISTRY` entry, its own `DataLayerManager` registration, and
   — for imagery-shaped ones — its own `Cesium.ImageryLayer` instance. None
   of them may reach into another layer's module to render (an
-  `aemet-sea-surface-temp` overlay must work identically whether
+  `aemet-weather-imagery` overlay must work identically whether
   `ais-live-vessels` is on, off, or doesn't exist). The concrete test: a
-  user enables `ais-live-vessels` and `aemet-sea-surface-temp` together,
+  user enables `ais-live-vessels` and `aemet-weather-imagery` together,
   sees both, and can turn either off independently without the other
   reacting. This is *stacking* (independent, simultaneous, layered), not
   *building onto* (one layer's code depending on another's).
@@ -101,12 +106,24 @@ phase:
     `aemet-radar` layer with a coverage-area chip instead of two toggles,
     revisit once A3 ships and the real tile behavior is known.
   - `indices-incendios` estimado (today) vs. previsto (forecast day) — a
-    time-horizon chip inside `aemet-fire-risk` rather than two layers.
-  - Everything else (`aemet-radar` vs `aemet-lightning` vs `aemet-maritime`
-    vs `aemet-beaches` vs `aemet-uv-index` vs `aemet-sea-surface-temp` vs
-    `aemet-stations` vs `aemet-warnings`) differs enough in subject matter
-    that a user should be able to toggle each on/off independently — these
-    stay separate layers, not future chip candidates.
+    time-horizon chip inside `aemet-weather-imagery`'s own FIRE RISK pill
+    rather than a second toggle. Not built this pass, same reasoning A5
+    originally gave for deferring it.
+  - **`aemet-lightning`/`aemet-fire-risk`/`aemet-sea-surface-temp` were
+    originally listed here as three layers that should stay separate** —
+    that call was revised by [Phase A16](#phase-a16--ambient-thumbnail-stability-when-stacked-lightning-fire-risk-sea-surface-temp--shipped-2026-09-13-merged-into-one-layer-with-a-three-pill-chip)
+    once stacking them exposed a real collision bug, not a hypothetical one:
+    unlike A10's grouping (a day-one design choice), this one was forced by
+    a stability problem discovered after all three already shipped
+    independently — worth remembering that "differs enough in subject
+    matter to stay separate" isn't the only test; sharing one fixed
+    on-screen anchor is a technical reason to group regardless of subject
+    matter.
+  - Everything else (`aemet-radar` vs `aemet-maritime` vs `aemet-beaches` vs
+    `aemet-uv-index` vs `aemet-stations` vs `aemet-warnings`) differs enough
+    in subject matter, AND doesn't share a fixed on-screen anchor, that a
+    user should be able to toggle each on/off independently — these stay
+    separate layers, not future chip candidates.
 
 ## What's already there (don't re-build this)
 
@@ -127,8 +144,8 @@ phase:
   current "layer" in `layerState.js`'s `LAYER_STATE_REGISTRY` is Cesium
   entities (points/polylines/labels/polygons). `mapStackController.js` owns
   exactly **one** exclusive base `Cesium.ImageryLayer` (swapped, never
-  stacked). Several AEMET phases below (`aemet-radar`, `aemet-fire-risk`,
-  `aemet-uv-index`, `aemet-sea-surface-temp`) are the **first** translucent
+  stacked). Several AEMET phases below (`aemet-radar`, `aemet-weather-imagery`,
+  `aemet-uv-index`) are the **first** translucent
   overlay imagery layers in this app, stacked *above* the base map — a new
   capability this PR introduces, not a variation on an existing one. Cesium
   supports multiple simultaneously stacked imagery layers natively; this
@@ -150,12 +167,10 @@ twice — see A0's own note below).
 | `aemet-warnings` | Zone polygons tinted by avisos level, phenomena on click | polygons | A1 | `j` | **shipped** |
 | `aemet-forecast` | Next-hours forecast on an existing station/municipio click | click-to-query, no new entities | A2 | *(none — extends A0's click, no new registry row)* | **shipped** |
 | `aemet-radar` | National/regional precipitation radar composite | imagery overlay | A3 | `o` | **blocked** — AEMET's own endpoint is currently returning a broken cached link, see phase notes |
-| `aemet-lightning` | Nationwide lightning-composite snapshot (ambient thumbnail, not entities) | pre-rendered image, no coordinates | A4 | `p` | **shipped** |
-| `aemet-fire-risk` | Meteorological forest-fire risk forecast (ambient click-to-expand thumbnail) | pre-rendered image, no coordinates | A5 | `v` | **shipped** |
+| `aemet-weather-imagery` | Lightning / fire-risk / sea-surface-temp, one ambient thumbnail, three-pill chip switches which is shown | pre-rendered image, no coordinates | A4, A5, A9, merged A16 | `l` | **shipped** — replaces the original three separate layers (`aemet-lightning` `p`, `aemet-fire-risk` `v`, `aemet-sea-surface-temp` `y`, all retired), which used to collide when stacked, see A16 |
 | `aemet-maritime` | High-seas + coastal forecast zones | zone polygons + click text | A6 | `k` | **blocked** — endpoint confirmed live, but no geometry source found for its ~30 subzones |
 | `aemet-beaches` | Per-beach forecast (UV, sea temp, waves, wind) | points | A7 | `n` | **shipped** — took `n`, not this table's original tentative `z`: several existing tests hardcode `z` as their canonical "token not in the registry" fixture, so claiming it would have broken them |
 | `aemet-uv-index` | UV index per provincial-capital city (real points) | points, joined to `maestro/municipios` | A8 | `0` | **shipped** |
-| `aemet-sea-surface-temp` | Sea-surface temperature (ambient click-to-expand thumbnail) | pre-rendered image, no coordinates | A9 | `y` | **shipped** — took `y` (this table's original tentative token, `1`, was left unused; `aemet-maritime`'s own tentative token reassigned to `k` here since it's still unimplemented) |
 | `aemet-environmental` | Ozone / solar radiation, chip-selected (background pollution deferred, see phase notes) | points, with a network-type chip | A10 | `k` | **shipped** — ozone + radiation only |
 | *(folds into `aemet-stations`)* | Spain's two Antarctic bases | points | A11 | *(none — extends A0)* | **deferred** — real seasonal-dormancy finding (no current reading April-October), see phase notes |
 | `aemet-regional-forecast` | CCAA/provincia forecast text on region click | zone polygons (Natural Earth boundaries) + text | A12 | `3` | **blocked** — the app's bundled Natural Earth data is physical geography, not admin boundaries; no polygon source in hand, see phase notes |
@@ -187,18 +202,23 @@ uses — nothing new to build for basic on/off:
 
 - **`aemet-stations` + `aemet-warnings`**: the existing default pairing —
   warnings explain *why* a cluster of stations reads extreme.
-- **`aemet-radar` + `aemet-lightning` + `aemet-warnings`**: the "storm cell"
-  demo — reflectivity, strikes, and the `TO` (tormentas) warning polygon
-  all visible together. Motivates building A4 right after A3.
-- **`aemet-sea-surface-temp` + `aemet-maritime` + `ais-live-vessels`**: the
-  "everything about the water" demo — ship traffic, sea-state/wind
-  warnings, and sea temperature for the water those ships are actually in.
-  A9 shipped ahead of A6 (still blocked on zone geometry); the pairing
-  completes once A6 unblocks.
-- **`aemet-fire-risk` + `local-firms`**: deliberately shown as *distinct*
-  layers with distinct legends (risk-level palette vs. detection markers) —
-  a demo of "here's where risk is elevated" next to "here's what's actually
-  burning," not a merge of the two.
+- **`aemet-radar` + `aemet-weather-imagery` (LIGHTNING pill) +
+  `aemet-warnings`**: the "storm cell" demo — reflectivity, strikes, and the
+  `TO` (tormentas) warning polygon all visible together. Motivates building
+  A4 right after A3. Since [Phase A16](#phase-a16--ambient-thumbnail-stability-when-stacked-lightning-fire-risk-sea-surface-temp--shipped-2026-09-13-merged-into-one-layer-with-a-three-pill-chip)'s
+  merge, this demo and the water one below are mutually exclusive at the
+  `aemet-weather-imagery` layer's own pill — a real trade-off the merge
+  accepted in exchange for removing the stacking collision, not something
+  to paper over.
+- **`aemet-weather-imagery` (SEA TEMP pill) + `aemet-maritime` +
+  `ais-live-vessels`**: the "everything about the water" demo — ship
+  traffic, sea-state/wind warnings, and sea temperature for the water those
+  ships are actually in. A9 shipped ahead of A6 (still blocked on zone
+  geometry); the pairing completes once A6 unblocks.
+- **`aemet-weather-imagery` (FIRE RISK pill) + `local-firms`**: deliberately
+  shown as *distinct* layers with distinct legends (risk-level palette vs.
+  detection markers) — a demo of "here's where risk is elevated" next to
+  "here's what's actually burning," not a merge of the two.
 - Every pairing above is two or three independently-toggleable layers, per
   the stacking principle above — none of them share rendering code or
   depend on each other being enabled.
@@ -1360,75 +1380,93 @@ cards despite the point itself already being colored correctly by
 - No proxy/registry change — this is a pure frontend card-copy fix, same
   scope as A2's tooltip addition.
 
-### Phase A16 — ambient-thumbnail stability when stacked (lightning, fire
-risk, sea-surface-temp) — **root cause confirmed 2026-09-13, fix not yet
-built, options below not decided unilaterally**
+### Phase A16 — ambient-thumbnail stability when stacked (lightning, fire risk, sea-surface-temp) — **shipped 2026-09-13: merged into one layer with a three-pill chip**
 
 Owner report: enabling `aemet-lightning`, `aemet-fire-risk`, and
-`aemet-sea-surface-temp` together is visibly flaky — sometimes one image
-shows, sometimes a different one, sometimes none — worse than any of the
-three alone. This matches, and goes further than, the "pre-existing
+`aemet-sea-surface-temp` together was visibly flaky — sometimes one image
+showed, sometimes a different one, sometimes none — worse than any of the
+three alone. This matched, and went further than, the "pre-existing
 interaction, not a regression" note already on record under
 [Phase A9](#phase-a9--sea-surface-temperature--shipped-2026-09-12): all
-three independently register an ambient overlay entry at the **identical**
+three independently registered an ambient overlay entry at the **identical**
 anchor (`ANCHOR_LON = -3.7, ANCHOR_LAT = 40.0`, confirmed by grepping all
 three files), in the same `collisionGroup: 'ambient-card'`, on the same
 `paintLane: 'thumbnail'`, at the **identical** un-expanded `priority:
 500_000`. Three sources fighting over one visual slot with a tied priority
 is exactly the shape of bug that produces "sometimes A, sometimes B,
-sometimes neither" — whichever entry's `update()` call lands last in
-`worldOverlay.js`'s internal ordering for that frame wins the slot, and that
-ordering isn't guaranteed stable across which layers are enabled/refreshed
-in what sequence, so it reads as random from the outside. This was not
-caught during A4/A5/A9's own live verification because each was tested
+sometimes neither" — confirmed live via `worldOverlay.js`'s own
+`getDiagnostics()`: with fire-risk and sea-surface-temp both enabled and
+both on-screen (`projectedCount: 2`), only one ever painted
+(`paintedCount: 1`, `paintedBySource: {"aemet-fire-risk": 1}`) — this was
+not caught during A4/A5/A9's own live verification because each was tested
 enabled largely on its own or pairwise-briefly, not all three simultaneously
-under repeated toggling — worth remembering for the next multi-layer-same-
-anchor design, not just this one.
+under repeated toggling.
 
-Two real forward paths, genuinely different trade-offs, **not picked here**:
+Of the two forward paths this section originally weighed without deciding —
+merge into one chip-selected layer, or give each its own anchor — the owner
+chose the merge explicitly, with a preference for genuinely distinct pills
+over one cycling button if the panel could support it:
 
-1. **Merge into one layer with a chip selector** — the owner's own
-   suggestion, and it has a direct precedent already shipped:
-   [Phase A10](#phase-a10--environmental-networks-ozone-pollution-radiation--shipped-2026-09-13-ozone--radiation)'s
-   `aemet-environmental` already does exactly this (`getRowControls()`/
-   `setParams()` switching which of two datasets is active on one layer).
-   A single `aemet-storm-imagery`-style layer with a 3-way chip
-   (LIGHTNING/FIRE RISK/SST) would need: one new registry entry, three
-   existing proxies left untouched (each already independent and correctly
-   cached), a frontend module that owns one ambient thumbnail entry and
-   swaps which image/title/accent it shows on chip click, and — the real
-   cost — **retiring three existing registered layer ids** (`aemet-
-   lightning` token `p`, `aemet-fire-risk` token `v`, `aemet-sea-surface-
-   temp` token `y`), which breaks any already-shared link encoding one of
-   those three tokens. Whether that share-link breakage is acceptable (this
-   app has broken/reassigned tokens before per the table's own footnotes)
-   is a real product call, not a technical unknown.
-2. **Give each layer its own distinct anchor point** — far smaller change
-   (move 3 constants, no registry/share-link impact, no merge), but a real
-   trade-off: it turns "one picture-in-picture window over Spain" into
-   three separate small windows scattered across the map, which may look
-   busier/less "clean dashboard" than a single slot — and doesn't fully
-   remove the *general* lesson (two future ambient layers sharing an
-   anchor would reintroduce the identical bug) unless paired with a
-   guardrail (e.g. a dev-mode assertion that no two enabled ambient sources
-   ever share both an anchor point and a collision group).
-3. **A hybrid worth naming, not fully designed**: keep three separate
-   toggles (no share-link breakage) but have each layer negotiate a
-   distinct offset anchor *only when siblings are also enabled* — most
-   flexible for the user, but real added statefulness (each layer would
-   need to know about the others' enabled state, breaking this plan's own
-   "stack, don't couple" principle stated at the top of this document) —
-   flagged so it isn't picked by default just because it sounds flexible.
+- **`manager.js`'s row-chip mechanism already supports an arbitrary number
+  of simultaneous chips**, not just a single 2-way toggle — `_syncRowControls`
+  iterates a real `chips: Array<object>` and renders one `<button>` per
+  entry, reconciled by each chip's own `id`. Neither of this plan's two
+  existing chip layers (`aemet-environmental`'s OZONE/RADIATION,
+  `satellites.js`'s DENSE) happened to use more than one simultaneous chip,
+  but the mechanism needed zero new panel code to support three — confirmed
+  by reading `_syncRowControls`/its click delegate before building anything,
+  not assumed.
+- Shipped `src/data/aemetWeatherImagery.js` (`aemet-weather-imagery`, token
+  `l`, `enabled-only`), replacing `aemet-lightning` (`p`), `aemet-fire-risk`
+  (`v`), and `aemet-sea-surface-temp` (`y`) outright — those three tokens
+  are retired, not reassigned, so an old share link naming one of them now
+  decodes as an unknown token rather than silently enabling the wrong thing
+  (this app has retired/reassigned tokens before, e.g. A9's own token
+  history). All three of the original server-side proxies
+  (`aemetLightningProxy`/`aemetFireRiskProxy`/`aemetSeaSurfaceTempProxy`)
+  are untouched — the merge is purely a frontend consolidation; the layer
+  fetches all three `/api/aemet/*` routes independently in the background on
+  its own `update()` tick, and only ever publishes ONE overlay entry (for
+  whichever map is currently active) under one overlay source id. There is
+  no anchor-sharing bug left to have, structurally, not just tuned around:
+  a second ambient entry never exists to collide with the first.
+- Three chips (`getRowControls()`), one per map, each with its OWN chip
+  `id` (`lightning`/`fireRisk`/`sst` — not sharing one id, which would have
+  made the panel's click-delegate always resolve to whichever chip appears
+  first in the array via `Array.prototype.find`). Switching pills
+  (`setParams({ activeMap })`) is instant when that map has already loaded
+  at least once, since all three keep polling underneath the active choice,
+  the same "keep every option warm" pattern A10's network-type chip already
+  established. An unknown `activeMap` value is rejected (`setParams` returns
+  `false`), matching this app's `setParams` contract.
+- Per-map sizing, accent, and (fire-risk only) the estimado/previsto "TODAY"/
+  "TOMORROW" title suffix all carry over unchanged from the three original
+  layers — each was tuned via real live debugging (see A9's own placement-
+  failure story) and none of that had to be rediscovered.
+- The click-to-expand state is shared, not per-map: expanding while
+  lightning is active and then switching to fire-risk keeps the card
+  expanded, resized for fire-risk's own dimensions — a deliberate design
+  call (expand/collapse is a UI mode, not a per-map memory) rather than an
+  oversight.
+- Which pill is active persists across a disable/enable cycle (matching
+  `aemet-environmental`'s own `_networkType` convention) but resets to
+  `lightning` on a fresh `init()` — i.e. a full page load, not a mere layer
+  toggle.
+- Voice: `LAYER_ALIASES` updated so every original spoken name ("lightning
+  activity", "fire risk", "sea surface temperature", etc.) still resolves —
+  now to the one merged id. Voice can turn the merged layer on/off under any
+  of those names but **cannot yet pick which pill is active** — that would
+  need a params-aware voice tool this pass didn't build, tracked here rather
+  than silently left out.
+- 16 new tests in `aemetWeatherImagery.test.mjs` covering: per-map
+  sizing/accent, the three-chip descriptor and its unique ids, `setParams`
+  accept/reject, all three maps loading independently while only one
+  publishes, instant pill-switching with no re-fetch, per-map failure
+  isolation (one map's 500 doesn't block the other two), the shared expand
+  state surviving a pill switch, and disable/destroy cleanup.
+- `REGISTERED_LAYER_IDS` count: 24 → 22 (three retired, one added).
 
-**Recommendation, not a decision**: option 1 (merge, chip-selected) fits
-this app's existing conventions best and is the owner's own instinct, but
-touches share-link compatibility for three tokens — worth a explicit go-
-ahead before building, the same discipline A6/A12 already apply to their own
-real scope calls. Option 2 is the lowest-risk stopgap if a quick fix is
-wanted before committing to the merge.
-
-### Phase A17 — radar and satellite coverage from AEMET, EUMETSAT, or GIBS
-— **reviewed 2026-09-13, no new build this pass**
+### Phase A17 — radar and satellite coverage from AEMET, EUMETSAT, or GIBS — **reviewed 2026-09-13, no new build this pass**
 
 Owner asked to review whether more radar/satellite coverage is available
 across all three sources this plan already touches. Re-checked against the

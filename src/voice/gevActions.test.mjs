@@ -1118,20 +1118,16 @@ test('generic voice visibility maps every AEMET alias to its registered layer id
   const aemetLayerIds = [
     'aemet-stations',
     'aemet-warnings',
-    'aemet-lightning',
-    'aemet-fire-risk',
+    'aemet-weather-imagery',
     'aemet-uv-index',
-    'aemet-sea-surface-temp',
     'aemet-beaches',
     'aemet-environmental',
   ];
   const spokenPhraseByLayerId = {
     'aemet-stations': 'weather stations',
     'aemet-warnings': 'storm warnings',
-    'aemet-lightning': 'lightning activity',
-    'aemet-fire-risk': 'fire risk',
+    'aemet-weather-imagery': 'lightning activity',
     'aemet-uv-index': 'uv index',
-    'aemet-sea-surface-temp': 'sea surface temperature',
     'aemet-beaches': 'beach forecast',
     'aemet-environmental': 'environmental networks',
   };
@@ -1151,6 +1147,38 @@ test('generic voice visibility maps every AEMET alias to its registered layer id
     const result = await runner('set_layer_visibility', { layerId: spokenPhraseByLayerId[layerId], enabled: true });
     assert.equal(result.ok, true, `"${spokenPhraseByLayerId[layerId]}" should resolve and enable ${layerId}`);
     assert.equal(calls[0]?.[0], layerId, `"${spokenPhraseByLayerId[layerId]}" must resolve to ${layerId}, not a raw unmatched string`);
+  }
+});
+
+test('lightning, fire-risk, and sea-surface-temp aliases all resolve to the merged aemet-weather-imagery layer (Phase A16)', async () => {
+  globalThis.window = globalThis.window || { clearTimeout, setTimeout, requestIdleCallback: null };
+  const viewer = {
+    clock: { onTick: { addEventListener: () => () => {} } },
+    scene: { canvas: { addEventListener() {}, removeEventListener() {} } },
+    camera: { moveEnd: { addEventListener() {} } },
+  };
+  const phrases = [
+    'lightning', 'lightning activity', 'lightning strikes',
+    'fire risk', 'wildfire risk', 'forest fire risk',
+    'sea surface temperature', 'sea temperature', 'ocean temperature', 'water temperature',
+    'weather imagery',
+  ];
+  for (const phrase of phrases) {
+    const calls = [];
+    const dataManager = {
+      layers: new Map([['aemet-weather-imagery', { module: {} }]]),
+      getAll: () => [{ id: 'aemet-weather-imagery', name: 'aemet-weather-imagery' }],
+      getLayerLifecycleState: () => ({ enabled: true, lifecycleState: 'enabled', uncertain: false }),
+      async setEnabled(...args) { calls.push(args); return true; },
+    };
+    const runner = createGevActionRunner({
+      viewer,
+      styleManager: { async _waitForContextLayerSettlement() {} },
+      dataManager,
+    });
+    const result = await runner('set_layer_visibility', { layerId: phrase, enabled: true });
+    assert.equal(result.ok, true, `"${phrase}" should resolve and enable aemet-weather-imagery`);
+    assert.equal(calls[0]?.[0], 'aemet-weather-imagery', `"${phrase}" must resolve to the merged layer id`);
   }
 });
 

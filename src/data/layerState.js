@@ -277,12 +277,17 @@ export const SHARE_TRACKING_RESTORE_POLICIES = Object.freeze({
 export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'aemet-beaches', token: 'n', disposition: 'enabled-only' }),
   Object.freeze({ id: 'aemet-environmental', token: 'k', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'aemet-fire-risk', token: 'v', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'aemet-lightning', token: 'p', disposition: 'enabled-only' }),
-  Object.freeze({ id: 'aemet-sea-surface-temp', token: 'y', disposition: 'enabled-only' }),
   Object.freeze({ id: 'aemet-stations', token: 'h', disposition: 'enabled-only' }),
   Object.freeze({ id: 'aemet-uv-index', token: '0', disposition: 'enabled-only' }),
   Object.freeze({ id: 'aemet-warnings', token: 'j', disposition: 'enabled-only' }),
+  // Replaces the three separate `aemet-lightning` (`p`), `aemet-fire-risk`
+  // (`v`), and `aemet-sea-surface-temp` (`y`) entries (Phase A16) — merged
+  // into one layer with a three-pill chip selecting which ambient composite
+  // is shown, since all three shared one fixed anchor and used to collide
+  // when enabled together. `p`/`v`/`y` are retired, not reassigned — an
+  // old share link naming one of them now decodes as an unknown token
+  // rather than silently turning on the wrong layer.
+  Object.freeze({ id: 'aemet-weather-imagery', token: 'l', disposition: 'enabled-only' }),
   Object.freeze({ id: 'ais-live-vessels', token: 'a', disposition: 'enabled-only' }),
   Object.freeze({ id: 'bikeshare', token: 'b', disposition: 'enabled-only' }),
   Object.freeze({ id: 'cctv', token: 'c', disposition: 'enabled+options', optionOwner: 'cctv' }),

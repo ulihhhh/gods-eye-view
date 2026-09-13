@@ -264,7 +264,7 @@ Twenty-eight tools, four jobs — the commands below come straight from the prod
 
 ## 🛰️ What's on the Globe
 
-Twenty-one layers and map sources. **Eleven have a keyless path.** Some offer additional capabilities with a provider key. (🟢 no key · 🟡 free key · 🔴 metered.)
+Nineteen layers and map sources. **Eleven have a keyless path.** Some offer additional capabilities with a provider key. (🟢 no key · 🟡 free key · 🔴 metered.)
 
 | Layer | What you get | Source | Auth |
 |-------|--------------|--------|------|
@@ -276,10 +276,8 @@ Twenty-one layers and map sources. **Eleven have a keyless path.** Some offer ad
 | 🌍 **Earthquakes** | Global seismic activity, last 24h | USGS | 🟢 |
 | 🌡️ **AEMET Weather Stations** | ~850 live Spanish weather stations, colored by current temperature; click for a reading plus a "next hours" forecast | AEMET OpenData | 🟡 |
 | ⚠️ **AEMET Weather Warnings** | Live avisos zone polygons (amarillo/naranja/rojo) with phenomenon, description, and validity window on click | AEMET OpenData | 🟡 |
-| ⚡ **AEMET Lightning Activity** | Nationwide lightning-composite snapshot, refreshed roughly every 6 hours; click to expand | AEMET OpenData | 🟡 |
-| 🔥 **AEMET Fire Risk** | Meteorological forest-fire risk forecast (Península); click to expand | AEMET OpenData | 🟡 |
+| 🛰️ **AEMET Weather Imagery** | One picture-in-picture thumbnail, three pills to switch between: nationwide lightning composite (~every 6h), forest-fire meteorological risk (Península), and a daily EUMETSAT sea-surface-temperature composite for Iberia/the Mediterranean/NW Africa; click to expand | AEMET OpenData / EUMETSAT OSI SAF | 🟡 |
 | ☀️ **AEMET UV Index** | Live UV index for 59 Spanish provincial-capital cities, colored by risk level | AEMET OpenData | 🟡 |
-| 🌊 **AEMET Sea Surface Temperature** | Daily EUMETSAT-sourced sea-surface-temperature composite for Iberia, the Mediterranean, and NW Africa; click to expand | AEMET OpenData / EUMETSAT OSI SAF | 🟡 |
 | 🏖️ **AEMET Beach Forecast** | Real points for all 160 AEMET-forecasted beaches nationwide, colored by water temperature | AEMET OpenData | 🟡 |
 | 🧪 **AEMET Environmental Networks** | Ozone and solar-radiation station readings with a network-type chip | AEMET OpenData | 🟡 |
 | 🚗 **Traffic** | Simulated vehicles on OSM roads. With TomTom, live flow speeds drive the simulation and congestion colors below ~8 km; individual vehicle positions are not live observations | TomTom + OSM | 🟢 simulation · 🟡 live flow speeds |
