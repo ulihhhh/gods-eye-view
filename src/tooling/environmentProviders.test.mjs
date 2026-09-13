@@ -6,9 +6,12 @@ import { tomtomProxy } from 'gods-eye-view/server/providers/traffic';
 import { firmsProxy } from 'gods-eye-view/server/providers/firms';
 import { gbfsProxy } from 'gods-eye-view/server/providers/gbfs';
 import {
+  aemetFireRiskProxy,
   aemetForecastProxy,
   aemetLightningProxy,
+  aemetSeaSurfaceTempProxy,
   aemetStationsProxy,
+  aemetUvIndexProxy,
   aemetWarningsProxy,
 } from '../../server/providers/weather.js';
 import { localProviderPlugins } from '../../server/providers/local.js';
@@ -73,6 +76,9 @@ test('standalone composition mounts every extracted provider exactly once withou
     aemetWarningsProxy,
     aemetForecastProxy,
     aemetLightningProxy,
+    aemetFireRiskProxy,
+    aemetUvIndexProxy,
+    aemetSeaSurfaceTempProxy,
   ])
     assert.equal(plugins.filter((p) => p.name === factory().name).length, 1);
 });
@@ -526,6 +532,177 @@ test('AEMET lightning passes the binary GIF through unmodified, TTLs at 6h, and 
   assert.equal(stale.status, 200, 'stale cache beats an error');
   assert.ok(Buffer.from(stale.body).equals(gifFixture));
   assert.equal(json(await request('/status')).stale, true);
+});
+
+test('AEMET sea-surface-temperature passes the binary GIF through unmodified, TTLs at 6h, and caches memory-only', async (t) => {
+  isolate(t, { AEMET_API_KEY: '' });
+  let now = Date.UTC(2026, 8, 12, 12);
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+  // A real GIF87a header (magic bytes) — enough to prove the proxy never
+  // touches or reinterprets the bytes, just forwards them.
+  const gifFixture = Buffer.from('47494638376180028001', 'hex');
+  t.mock.method(globalThis, 'fetch', async (raw) => {
+    calls++;
+    const url = new URL(raw);
+    assert.equal(url.hostname, 'opendata.aemet.es');
+    if (url.pathname.endsWith('/sea-surface-temp-datos-fixture')) {
+      return new Response(gifFixture, { headers: { 'content-type': 'image/gif;charset=ISO-8859-15' } });
+    }
+    assert.equal(url.searchParams.get('api_key'), 'fixture-key');
+    return Response.json({
+      descripcion: 'exito',
+      estado: 200,
+      datos: 'https://opendata.aemet.es/sea-surface-temp-datos-fixture',
+    });
+  });
+  const request = install(aemetSeaSurfaceTempProxy());
+  assert.equal((await request()).status, 503, 'keyless');
+  assert.equal(json(await request('/status')).hasKey, false);
+  assert.equal(calls, 0);
+  process.env.AEMET_API_KEY = 'fixture-key';
+
+  const first = await request();
+  assert.equal(first.status, 200);
+  assert.equal(first.headers['Content-Type'], 'image/gif', 'charset param stripped, bytes untouched');
+  assert.ok(Buffer.from(first.body).equals(gifFixture), 'the GIF bytes pass through byte-for-byte');
+  assert.equal(calls, 2, 'one envelope fetch + one datos fetch');
+
+  const second = await request();
+  assert.equal(calls, 2, 'within the 6h TTL: served from memory cache, no new upstream calls');
+  assert.ok(Buffer.from(second.body).equals(gifFixture));
+
+  const status = json(await request('/status'));
+  assert.equal(status.hasKey, true);
+  assert.equal(status.contentType, 'image/gif');
+  assert.equal(status.stale, false);
+
+  now += 6 * 3600_000 + 60_000; // past the 6-hour TTL
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('upstream down');
+  });
+  const stale = await request();
+  assert.equal(stale.status, 200, 'stale cache beats an error');
+  assert.ok(Buffer.from(stale.body).equals(gifFixture));
+  assert.equal(json(await request('/status')).stale, true);
+});
+
+test('AEMET fire-risk falls back from estimado to previsto day 1 when "today" has no published map, and caches memory-only at 3h', async (t) => {
+  isolate(t, { AEMET_API_KEY: '' });
+  let now = Date.UTC(2026, 8, 12, 12);
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+  // A real PNG header — enough to prove the proxy never touches or
+  // reinterprets the bytes, just forwards them.
+  const pngFixture = Buffer.from('89504e470d0a1a0a', 'hex');
+  let estimadoAvailable = false;
+  t.mock.method(globalThis, 'fetch', async (raw) => {
+    calls++;
+    const url = new URL(raw);
+    assert.equal(url.hostname, 'opendata.aemet.es');
+    if (url.pathname.endsWith('/fire-risk-datos-fixture')) {
+      return new Response(pngFixture, { headers: { 'content-type': 'image/png' } });
+    }
+    assert.equal(url.searchParams.get('api_key'), 'fixture-key');
+    if (url.pathname.includes('/mapasriesgo/estimado/area/p')) {
+      // Confirmed live: "today" can genuinely have no published product yet.
+      if (!estimadoAvailable) return Response.json({ estado: 404, descripcion: 'No hay datos que satisfagan esos criterios' });
+      return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/fire-risk-datos-fixture' });
+    }
+    assert.ok(url.pathname.includes('/mapasriesgo/previsto/dia/1/area/p'), `unexpected path ${url.pathname}`);
+    return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/fire-risk-datos-fixture' });
+  });
+  const request = install(aemetFireRiskProxy());
+  assert.equal((await request()).status, 503, 'keyless');
+  assert.equal(json(await request('/status')).hasKey, false);
+  assert.equal(calls, 0);
+  process.env.AEMET_API_KEY = 'fixture-key';
+
+  const first = await request();
+  assert.equal(first.status, 200);
+  assert.equal(first.headers['Content-Type'], 'image/png');
+  assert.ok(Buffer.from(first.body).equals(pngFixture));
+  assert.equal(calls, 3, 'estimado envelope (404) + previsto envelope + previsto datos');
+  assert.equal(json(await request('/status')).source, 'previsto-1');
+
+  const callsAfterFirst = calls;
+  await request();
+  assert.equal(calls, callsAfterFirst, 'within the 3h TTL: served from memory cache, no new upstream calls');
+
+  now += 3 * 3600_000 + 60_000; // past the 3-hour TTL
+  estimadoAvailable = true; // AEMET has since published today's map
+  const refreshed = await request();
+  assert.equal(refreshed.status, 200);
+  assert.equal(json(await request('/status')).source, 'estimado', 'picks up estimado again once it exists, not stuck on the fallback');
+
+  now += 3 * 3600_000 + 60_000;
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('upstream down');
+  });
+  const stale = await request();
+  assert.equal(stale.status, 200, 'stale cache beats an error');
+  assert.equal(json(await request('/status')).stale, true);
+});
+
+test('AEMET UV-index joins each city to its municipio coordinates, drops unmatched cities, and caches memory-only at 3h', async (t) => {
+  isolate(t, { AEMET_API_KEY: '' });
+  let now = Date.UTC(2026, 8, 12, 12);
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+  const municipiosRaw = [
+    { id: 'id28079', nombre: 'Madrid', capital: 'Madrid', latitud_dec: '40.4168', longitud_dec: '-3.7038', altitud: '667', num_hab: '3223334' },
+  ];
+  const uviRaw = {
+    FECHA_ELABORACION: '2026-09-12T03:52:02',
+    FECHA_VALIDEZ: '2026-09-12T12:00:00',
+    CIUDAD: [
+      { id: '28079', valor: 'Madrid', uv: '8', canarias: '0' },
+      // No matching municipio for this one — must be dropped, not fabricated a position.
+      { id: '99999', valor: 'Nowhere', uv: '3', canarias: '0' },
+    ],
+  };
+  t.mock.method(globalThis, 'fetch', async (raw) => {
+    calls++;
+    const url = new URL(raw);
+    assert.equal(url.hostname, 'opendata.aemet.es');
+    if (url.pathname.endsWith('/municipios-datos-fixture')) {
+      return new Response(Buffer.from(JSON.stringify(municipiosRaw), 'latin1'), { headers: { 'content-type': 'text/plain;charset=ISO-8859-15' } });
+    }
+    if (url.pathname.endsWith('/uvi-datos-fixture')) {
+      return new Response(Buffer.from(JSON.stringify(uviRaw), 'latin1'), { headers: { 'content-type': 'text/plain;charset=ISO-8859-15' } });
+    }
+    assert.equal(url.searchParams.get('api_key'), 'fixture-key');
+    if (url.pathname.includes('/maestro/municipios')) {
+      return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/municipios-datos-fixture' });
+    }
+    assert.ok(url.pathname.endsWith('/uvi/0'), `unexpected path ${url.pathname}`);
+    return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/uvi-datos-fixture' });
+  });
+  const request = install(aemetUvIndexProxy());
+  assert.equal((await request()).status, 503, 'keyless');
+  assert.equal(json(await request('/status')).hasKey, false);
+  assert.equal(calls, 0);
+  process.env.AEMET_API_KEY = 'fixture-key';
+
+  const first = json(await request());
+  assert.equal(first.count, 1, 'the unmatched city is dropped, not fabricated a position');
+  assert.equal(first.cities[0].municipioId, '28079');
+  assert.equal(first.cities[0].uvIndex, 8);
+  assert.equal(first.cities[0].lat, 40.4168);
+  assert.equal(first.cities[0].lon, -3.7038);
+  assert.equal(first.elaborated, '2026-09-12T03:52:02');
+  assert.equal(calls, 4, 'municipios envelope + datos, uvi envelope + datos');
+
+  assert.equal(json(await request()).count, 1);
+  assert.equal(calls, 4, 'within the 3h TTL: served from memory cache, no new upstream calls');
+
+  now += 3 * 3600_000 + 60_000; // past the 3-hour TTL
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('upstream down');
+  });
+  const stale = json(await request());
+  assert.equal(stale.stale, true);
+  assert.equal(stale.count, 1, 'stale cache beats an empty layer');
 });
 
 test('GBFS keeps host/path/method guards, response caps and distinct information/status cache headers', async (t) => {

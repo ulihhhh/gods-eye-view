@@ -264,7 +264,7 @@ Twenty-eight tools, four jobs — the commands below come straight from the prod
 
 ## 🛰️ What's on the Globe
 
-Sixteen layers and map sources. **Eleven have a keyless path.** Some offer additional capabilities with a provider key. (🟢 no key · 🟡 free key · 🔴 metered.)
+Nineteen layers and map sources. **Eleven have a keyless path.** Some offer additional capabilities with a provider key. (🟢 no key · 🟡 free key · 🔴 metered.)
 
 | Layer | What you get | Source | Auth |
 |-------|--------------|--------|------|
@@ -277,6 +277,9 @@ Sixteen layers and map sources. **Eleven have a keyless path.** Some offer addit
 | 🌡️ **AEMET Weather Stations** | ~850 live Spanish weather stations, colored by current temperature; click for a reading plus a "next hours" forecast | AEMET OpenData | 🟡 |
 | ⚠️ **AEMET Weather Warnings** | Live avisos zone polygons (amarillo/naranja/rojo) with phenomenon, description, and validity window on click | AEMET OpenData | 🟡 |
 | ⚡ **AEMET Lightning Activity** | Nationwide lightning-composite snapshot, refreshed roughly every 6 hours; click to expand | AEMET OpenData | 🟡 |
+| 🔥 **AEMET Fire Risk** | Meteorological forest-fire risk forecast (Península); click to expand | AEMET OpenData | 🟡 |
+| ☀️ **AEMET UV Index** | Live UV index for 59 Spanish provincial-capital cities, colored by risk level | AEMET OpenData | 🟡 |
+| 🌊 **AEMET Sea Surface Temperature** | Daily EUMETSAT-sourced sea-surface-temperature composite for Iberia, the Mediterranean, and NW Africa; click to expand | AEMET OpenData / EUMETSAT OSI SAF | 🟡 |
 | 🚗 **Traffic** | Simulated vehicles on OSM roads. With TomTom, live flow speeds drive the simulation and congestion colors below ~8 km; individual vehicle positions are not live observations | TomTom + OSM | 🟢 simulation · 🟡 live flow speeds |
 | 📹 **CCTV Mesh** | ~800 public cameras projected *into* the 3D space — Austin · California (Caltrans) · London (TfL). Positions are published; poses are estimated priors **you calibrate by dragging a gizmo on the camera itself** | City APIs | 🟢 |
 | 📻 **Radio** | Geolocated world radio with an **analog tuner** — drag the needle across up to 750 stations and the globe flies to each broadcaster | Radio Browser / broadcasters | 🟢 |

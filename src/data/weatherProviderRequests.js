@@ -652,6 +652,117 @@ export function aemetLightningEnvelopeUrl(apiKey) {
   return `${AEMET_LIGHTNING_ENVELOPE_URL}?api_key=${encodeURIComponent(apiKey)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Forest-fire risk (Phase A5) — a fifth AEMET feed, same two-step envelope,
+// same "opaque legend-annotated raster, nothing to parse" shape as lightning.
+// Confirmed live: a 1525×1017 `image/png` per area (`p` Península, `b`
+// Baleares, `c` Canarias) with AEMET's own header/legend/logo baked into the
+// pixels (6-level risk scale: muy bajo/bajo/moderado/alto/muy alto/extremo) —
+// no bounding box anywhere in the response, same as lightning. NOT a FIRMS
+// duplicate: this is a predictive meteorological risk index, not detected
+// fires.
+//
+// `estimado` (today) returned 404 "No hay datos que satisfagan esos
+// criterios" at the time this was verified — not every area/day always has
+// a published product — while `previsto/dia/1` (tomorrow) succeeded
+// immediately after. The proxy tries `estimado` first and falls back to
+// `previsto` day 1 rather than assuming "today" is always available.
+// ---------------------------------------------------------------------------
+
+/** Today's estimated risk-map envelope for one area (`p`/`b`/`c`). */
+export function aemetFireRiskEstimadoEnvelopeUrl(apiKey, area) {
+  return `https://opendata.aemet.es/opendata/api/incendios/mapasriesgo/estimado/area/${encodeURIComponent(area)}?api_key=${encodeURIComponent(apiKey)}`;
+}
+
+/** Forecast risk-map envelope for one area and day (`1`/`2`/`3` — mañana/pasado mañana/dentro de 3 días). */
+export function aemetFireRiskPrevistoEnvelopeUrl(apiKey, area, dia) {
+  return `https://opendata.aemet.es/opendata/api/incendios/mapasriesgo/previsto/dia/${encodeURIComponent(dia)}/area/${encodeURIComponent(area)}?api_key=${encodeURIComponent(apiKey)}`;
+}
+
+// ---------------------------------------------------------------------------
+// UV index (Phase A8) — a sixth AEMET feed, same two-step envelope, but
+// GENUINELY the friendliest shape encountered in this whole plan: confirmed
+// live, `prediccion/especifica/uvi/{dia}` returns real structured JSON — a
+// flat list of 59 provincial-capital cities, each with a 5-digit INE
+// municipio code (the exact same code `maestro/municipios` already keys on
+// for Phase A2's forecast tooltip — `id: "02003"` here is the same value as
+// `normalizeAemetMunicipioRecord`'s `id` after stripping the `"id"` prefix)
+// and a plain numeric UV index value. No image, no legend to decode, no
+// missing-geometry problem the way A6/A7 have — the proxy joins each city to
+// its lat/lon via the already-proven municipios lookup and this ships as a
+// real point layer, not an ambient thumbnail.
+// ---------------------------------------------------------------------------
+
+/** UV-index forecast envelope for one day-offset (`0` = today, confirmed live). */
+export function aemetUvIndexEnvelopeUrl(apiKey, dia) {
+  return `https://opendata.aemet.es/opendata/api/prediccion/especifica/uvi/${encodeURIComponent(dia)}?api_key=${encodeURIComponent(apiKey)}`;
+}
+
+/**
+ * Normalize one raw `CIUDAD` entry from the UV-index payload. Returns `null`
+ * for a record with no usable municipio id or UV value — matching every
+ * other normalize function's "unusable record → null" contract.
+ * @param {object} raw
+ * @returns {{municipioId: string, name: string, uvIndex: number, isCanaryIslands: boolean}|null}
+ */
+export function normalizeAemetUvIndexRecord(raw) {
+  const municipioId = String(raw?.id ?? '').trim();
+  const uvIndex = finiteOrNull(raw?.uv);
+  if (!/^\d+$/.test(municipioId) || uvIndex === null) return null;
+  const name = typeof raw?.valor === 'string' && raw.valor.trim() ? raw.valor.trim() : null;
+  if (!name) return null;
+  return {
+    municipioId,
+    name,
+    uvIndex,
+    isCanaryIslands: raw?.canarias === '1' || raw?.canarias === 1,
+  };
+}
+
+/**
+ * @param {object} payload The `datos` JSON object (`{FECHA_ELABORACION,
+ *   FECHA_VALIDEZ, CIUDAD: [...]}`).
+ * @returns {{elaborated: string|null, validAt: string|null,
+ *   cities: Array<ReturnType<typeof normalizeAemetUvIndexRecord>>}|null}
+ */
+export function normalizeAemetUvIndexSnapshot(payload) {
+  if (!Array.isArray(payload?.CIUDAD)) return null;
+  const cities = [];
+  for (const raw of payload.CIUDAD) {
+    const record = normalizeAemetUvIndexRecord(raw);
+    if (record) cities.push(record);
+  }
+  return {
+    elaborated: typeof payload.FECHA_ELABORACION === 'string' ? payload.FECHA_ELABORACION : null,
+    validAt: typeof payload.FECHA_VALIDEZ === 'string' ? payload.FECHA_VALIDEZ : null,
+    cities,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sea-surface temperature (Phase A9) — a seventh AEMET feed, same two-step
+// envelope, same "opaque legend-annotated raster, nothing to parse" shape
+// as lightning/fire-risk. Confirmed live: `satelites/producto/sst` returns
+// a real `image/gif`, 1000×773, showing actual EUMETSAT OSI SAF sea-surface
+// temperature data (credited "AEMET / EUMETSAT OSI SAF" on the image
+// itself — AEMET is redistributing a EUMETSAT satellite product here, not
+// an AEMET-original observation) for the wider Iberia/Mediterranean/NW
+// Africa region — a real color-coded temperature map (0–35°C legend), not
+// just Spain. No bounding box anywhere in the response, same as every
+// other opaque-image AEMET feed — ships as the same ambient click-to-expand
+// world-overlay thumbnail Phase A4 established. `periodicidad: "1 vez al
+// día"` per the live metadatos pull.
+// ---------------------------------------------------------------------------
+
+/** Sea-surface-temperature composite envelope. */
+export const AEMET_SEA_SURFACE_TEMP_ENVELOPE_URL =
+  'https://opendata.aemet.es/opendata/api/satelites/producto/sst';
+
+/** Build the envelope request URL for a given key. Never logged — embeds the key. */
+export function aemetSeaSurfaceTempEnvelopeUrl(apiKey) {
+  return `${AEMET_SEA_SURFACE_TEMP_ENVELOPE_URL}?api_key=${encodeURIComponent(apiKey)}`;
+}
+
 export function filterActiveAemetWarnings(zones, now = Date.now()) {
   if (!Array.isArray(zones)) return [];
   const result = [];

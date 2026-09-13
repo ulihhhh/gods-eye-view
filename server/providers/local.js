@@ -4,9 +4,12 @@ import { firmsProxy } from './firms.js';
 import { gbfsProxy } from './gbfs.js';
 import { celestrakProxy, rocketLaunchesProxy } from './space.js';
 import {
+  aemetFireRiskProxy,
   aemetForecastProxy,
   aemetLightningProxy,
+  aemetSeaSurfaceTempProxy,
   aemetStationsProxy,
+  aemetUvIndexProxy,
   aemetWarningsProxy,
 } from './weather.js';
 export { LL2_CACHE_TTL_MS, launchLibraryRequestHeaders } from './space.js';
@@ -4698,6 +4701,9 @@ export function localProviderPlugins() {
       aemetWarningsProxy(),
       aemetForecastProxy(),
       aemetLightningProxy(),
+      aemetFireRiskProxy(),
+      aemetUvIndexProxy(),
+      aemetSeaSurfaceTempProxy(),
       rocketLaunchesProxy(),
       terrainHeightsProxy(),
       adsbdbProxy(),

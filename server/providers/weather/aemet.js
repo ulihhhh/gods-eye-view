@@ -2,10 +2,14 @@ import path from 'node:path';
 import { promises as fsp } from 'node:fs';
 
 import {
+  aemetFireRiskEstimadoEnvelopeUrl,
+  aemetFireRiskPrevistoEnvelopeUrl,
   aemetLightningEnvelopeUrl,
   aemetMunicipioForecastEnvelopeUrl,
   aemetMunicipiosEnvelopeUrl,
+  aemetSeaSurfaceTempEnvelopeUrl,
   aemetStationsEnvelopeUrl,
+  aemetUvIndexEnvelopeUrl,
   aemetWarningsEnvelopeUrl,
   filterActiveAemetWarnings,
   filterFreshAemetStations,
@@ -15,6 +19,7 @@ import {
   normalizeAemetHourlyForecast,
   normalizeAemetMunicipiosSnapshot,
   normalizeAemetStationsSnapshot,
+  normalizeAemetUvIndexSnapshot,
   normalizeAemetWarningsSnapshot,
   parseAemetCapAlert,
   parseAemetCapTar,
@@ -709,6 +714,460 @@ export function aemetLightningProxy() {
         } catch (err) {
           console.warn('[aemet-lightning-proxy] error:', err?.message || err);
           sendJson(500, { error: 'aemet lightning proxy error' });
+        }
+      });
+    },
+  };
+}
+
+/**
+ * AEMET OpenData forest-fire meteorological risk-map proxy (Phase A5).
+ * Upstream: `incendios/mapasriesgo/estimado/area/{area}` (today), falling
+ * back to `incendios/mapasriesgo/previsto/dia/1/area/{area}` (tomorrow)
+ * when "today" has no published product yet — confirmed live: `estimado`
+ * returned 404 "No hay datos que satisfagan esos criterios" while
+ * `previsto/dia/1` succeeded immediately after, so a real deployment can't
+ * assume "today" is always available.
+ *
+ * Same "opaque legend-annotated raster, nothing to parse" shape as
+ * `aemetLightningProxy()`: a real pull returned a 1525×1017 `image/png`
+ * with AEMET's own header/legend/logo baked in (confirmed live), no
+ * bounding box anywhere in the response. v1 fixes `area` to `p` (Península)
+ * — Baleares/Canarias are a future per-layer chip, not built here.
+ *
+ * `periodicidad: diario` per the live metadatos pull — a 3h TTL (well
+ * inside that cadence) and a memory-only cache, same reasoning as lightning
+ * (an image this infrequently updated has no "survive a restart" story
+ * worth disk persistence).
+ *
+ * Routes:
+ *   GET /api/aemet/fire-risk        → raw image bytes, `Content-Type` from
+ *     upstream (confirmed `image/png`)
+ *   GET /api/aemet/fire-risk/status → {hasKey, lastFetch, stale, ttlMs,
+ *     contentType, source: 'estimado'|'previsto-1'}
+ *
+ * Keyless (no AEMET_API_KEY): /api/aemet/fire-risk → 503 {error:'no_key'};
+ * status → {hasKey:false}. Upstream is never touched without a key.
+ *
+ * @returns {import('vite').Plugin}
+ */
+export function aemetFireRiskProxy() {
+  const TTL_MS = 3 * 3600_000;
+  const AREA = 'p';
+
+  /** @type {?{at: number, buffer: Buffer, contentType: string, source: string}} */
+  let mem = null;
+  /** @type {?Promise<?{at: number, buffer: Buffer, contentType: string, source: string}>} single-flight refresh */
+  let inflight = null;
+
+  const apiKey = () => String(process.env.AEMET_API_KEY || '').trim();
+
+  /** One envelope+datos fetch. Throws on any failure — the caller decides what to try next. */
+  async function fetchOne(envelopeUrl, timeoutMs = 20_000) {
+    const envelopeRes = await fetch(envelopeUrl, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!envelopeRes.ok) throw new Error(`HTTP ${envelopeRes.status}`);
+    const envelope = await envelopeRes.json();
+    if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
+      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+    }
+    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
+    const buffer = Buffer.from(await dataRes.arrayBuffer());
+    const contentType = (dataRes.headers.get('content-type') || 'image/png').split(';')[0].trim();
+    return { buffer, contentType };
+  }
+
+  /**
+   * `estimado` first, `previsto` day 1 on ANY failure of the first — not
+   * just a 404, since a transient envelope/datos error on "today" should
+   * fall back the same way a genuine "not published yet" does, rather than
+   * surfacing an error when tomorrow's map is perfectly servable.
+   */
+  async function fetchUpstream(key) {
+    try {
+      const result = await fetchOne(aemetFireRiskEstimadoEnvelopeUrl(key, AREA));
+      return { at: Date.now(), source: 'estimado', ...result };
+    } catch (estimadoErr) {
+      try {
+        const result = await fetchOne(aemetFireRiskPrevistoEnvelopeUrl(key, AREA, '1'));
+        return { at: Date.now(), source: 'previsto-1', ...result };
+      } catch (previstoErr) {
+        throw new Error(`estimado: ${estimadoErr?.message || estimadoErr}; previsto-1: ${previstoErr?.message || previstoErr}`);
+      }
+    }
+  }
+
+  return {
+    name: 'aemet-fire-risk-proxy',
+    configureServer(server) {
+      server.middlewares.use('/api/aemet/fire-risk', async (req, res) => {
+        const sendJson = (status, obj) => {
+          if (res.headersSent) return;
+          res.writeHead(status, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+          });
+          res.end(JSON.stringify(obj));
+        };
+        try {
+          const subPath = String(req.url || '').split('?')[0];
+          const key = apiKey();
+
+          if (subPath === '/status') {
+            sendJson(200, {
+              hasKey: Boolean(key),
+              lastFetch: mem ? mem.at : null,
+              stale: mem ? Date.now() - mem.at >= TTL_MS : false,
+              ttlMs: TTL_MS,
+              contentType: mem ? mem.contentType : null,
+              source: mem ? mem.source : null,
+            });
+            return;
+          }
+
+          if (!key) {
+            sendJson(503, { error: 'no_key' });
+            return;
+          }
+
+          const entry = mem;
+          if (entry && Date.now() - entry.at < TTL_MS) {
+            res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' });
+            res.end(entry.buffer);
+            return;
+          }
+          if (!inflight) {
+            inflight = fetchUpstream(key)
+              .then((fresh) => {
+                mem = fresh;
+                return fresh;
+              })
+              .catch((err) => {
+                console.warn(
+                  `[aemet-fire-risk-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
+                );
+                return null;
+              })
+              .finally(() => {
+                inflight = null;
+              });
+          }
+          const pending = inflight;
+          const fresh = await pending;
+          if (fresh) {
+            res.writeHead(200, { 'Content-Type': fresh.contentType, 'Cache-Control': 'no-store' });
+            res.end(fresh.buffer);
+          } else if (entry) {
+            res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' }); // upstream down — stale beats empty
+            res.end(entry.buffer);
+          } else {
+            sendJson(502, { error: 'aemet fire-risk fetch failed and no cache available' });
+          }
+        } catch (err) {
+          console.warn('[aemet-fire-risk-proxy] error:', err?.message || err);
+          sendJson(500, { error: 'aemet fire-risk proxy error' });
+        }
+      });
+    },
+  };
+}
+
+/**
+ * AEMET OpenData UV-index proxy (Phase A8). Upstream:
+ * `prediccion/especifica/uvi/0` (today, confirmed live) — the friendliest
+ * shape found in this whole plan: real structured JSON, 59 provincial-
+ * capital cities, each keyed by the SAME 5-digit INE municipio code
+ * `maestro/municipios` already uses for Phase A2's forecast tooltip. No
+ * image, no legend, no missing-geometry problem — this proxy joins each
+ * city to its lat/lon via the same municipios lookup `aemetForecastProxy()`
+ * already established (re-fetched/cached independently here rather than
+ * sharing state across proxy closures, matching this file's existing
+ * convention of self-contained proxies — a second 24h-cached fetch of an
+ * ~8k-row table once a day is trivial against AEMET's ~50 req/min cap).
+ *
+ * TTL 3h (same reasoning as fire-risk: well inside the daily cadence
+ * `FECHA_ELABORACION`/`FECHA_VALIDEZ` imply), memory-only cache for both
+ * the municipios table and the UV snapshot itself.
+ *
+ * Routes:
+ *   GET /api/aemet/uv-index        → {fetchedAt, stale, ttlMs, count,
+ *     elaborated, validAt, cities: [{municipioId, name, uvIndex,
+ *     isCanaryIslands, lat, lon}]}
+ *   GET /api/aemet/uv-index/status → {hasKey, lastFetch, count, stale, ttlMs}
+ *
+ * Keyless (no AEMET_API_KEY): /api/aemet/uv-index → 503 {error:'no_key'};
+ * status → {hasKey:false}. Upstream is never touched without a key.
+ *
+ * @returns {import('vite').Plugin}
+ */
+export function aemetUvIndexProxy() {
+  const MUNICIPIOS_TTL_MS = 24 * 3600_000;
+  const UV_TTL_MS = 3 * 3600_000;
+  const DIA = '0'; // today — confirmed live; forecast day offsets are a future extension, not built here
+
+  /** @type {?{at: number, municipios: Array<object>}} */
+  let municipiosMem = null;
+  /** @type {?Promise<Array<object>>} single-flight municipios refresh */
+  let municipiosInflight = null;
+  /** @type {?{at: number, cities: Array<object>}} */
+  let mem = null;
+  /** @type {?Promise<?{at: number, cities: Array<object>}>} single-flight refresh */
+  let inflight = null;
+
+  const apiKey = () => String(process.env.AEMET_API_KEY || '').trim();
+
+  async function fetchEnvelope(url, timeoutMs = 20_000) {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const envelope = await res.json();
+    if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
+      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+    }
+    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
+    // Same ISO-8859-15-despite-being-JSON gotcha as stations/forecast —
+    // decode as latin1, never trust res.json() to guess right.
+    const buffer = Buffer.from(await dataRes.arrayBuffer());
+    return JSON.parse(buffer.toString('latin1'));
+  }
+
+  async function ensureMunicipios(key) {
+    if (municipiosMem && Date.now() - municipiosMem.at < MUNICIPIOS_TTL_MS) return municipiosMem.municipios;
+    if (!municipiosInflight) {
+      municipiosInflight = fetchEnvelope(aemetMunicipiosEnvelopeUrl(key), 30_000)
+        .then((raw) => {
+          const municipios = normalizeAemetMunicipiosSnapshot(raw);
+          municipiosMem = { at: Date.now(), municipios };
+          return municipios;
+        })
+        .finally(() => {
+          municipiosInflight = null;
+        });
+    }
+    const fresh = await municipiosInflight.catch(() => null);
+    if (fresh) return fresh;
+    if (municipiosMem) return municipiosMem.municipios; // upstream down — stale beats empty
+    throw new Error('municipio lookup table unavailable');
+  }
+
+  async function fetchUpstream(key) {
+    const [raw, municipios] = await Promise.all([
+      fetchEnvelope(aemetUvIndexEnvelopeUrl(key, DIA), 20_000),
+      ensureMunicipios(key),
+    ]);
+    const snapshot = normalizeAemetUvIndexSnapshot(raw);
+    if (!snapshot) throw new Error('malformed UV-index response');
+    const municipioById = new Map(municipios.map((m) => [m.id, m]));
+    const cities = [];
+    for (const city of snapshot.cities) {
+      const municipio = municipioById.get(city.municipioId);
+      if (!municipio) continue; // no coordinates to plot this one — drop it, don't fabricate a position
+      cities.push({ ...city, lat: municipio.lat, lon: municipio.lon });
+    }
+    return { at: Date.now(), elaborated: snapshot.elaborated, validAt: snapshot.validAt, cities };
+  }
+
+  return {
+    name: 'aemet-uv-index-proxy',
+    configureServer(server) {
+      server.middlewares.use('/api/aemet/uv-index', async (req, res) => {
+        const sendJson = (status, obj) => {
+          if (res.headersSent) return;
+          res.writeHead(status, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+          });
+          res.end(JSON.stringify(obj));
+        };
+        try {
+          const subPath = String(req.url || '').split('?')[0];
+          const key = apiKey();
+
+          if (subPath === '/status') {
+            sendJson(200, {
+              hasKey: Boolean(key),
+              lastFetch: mem ? mem.at : null,
+              count: mem ? mem.cities.length : null,
+              stale: mem ? Date.now() - mem.at >= UV_TTL_MS : false,
+              ttlMs: UV_TTL_MS,
+            });
+            return;
+          }
+
+          if (!key) {
+            sendJson(503, { error: 'no_key' });
+            return;
+          }
+
+          const entry = mem;
+          if (entry && Date.now() - entry.at < UV_TTL_MS) {
+            sendJson(200, {
+              fetchedAt: entry.at, stale: false, ttlMs: UV_TTL_MS,
+              count: entry.cities.length, elaborated: entry.elaborated, validAt: entry.validAt, cities: entry.cities,
+            });
+            return;
+          }
+          if (!inflight) {
+            inflight = fetchUpstream(key)
+              .then((fresh) => {
+                mem = fresh;
+                return fresh;
+              })
+              .catch((err) => {
+                console.warn(
+                  `[aemet-uv-index-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
+                );
+                return null;
+              })
+              .finally(() => {
+                inflight = null;
+              });
+          }
+          const pending = inflight;
+          const fresh = await pending;
+          const payload = fresh || entry;
+          if (payload) {
+            sendJson(200, {
+              fetchedAt: payload.at, stale: !fresh, ttlMs: UV_TTL_MS,
+              count: payload.cities.length, elaborated: payload.elaborated, validAt: payload.validAt, cities: payload.cities,
+            });
+          } else {
+            sendJson(502, { error: 'aemet uv-index fetch failed and no cache available' });
+          }
+        } catch (err) {
+          console.warn('[aemet-uv-index-proxy] error:', err?.message || err);
+          sendJson(500, { error: 'aemet uv-index proxy error' });
+        }
+      });
+    },
+  };
+}
+
+/**
+ * AEMET OpenData sea-surface-temperature composite proxy (Phase A9).
+ * Upstream: https://opendata.aemet.es/opendata/api/satelites/producto/sst
+ *
+ * Same "opaque legend-annotated raster, nothing to parse" shape as
+ * `aemetLightningProxy()`/`aemetFireRiskProxy()`: a real pull returned a
+ * 1000×773 `image/gif` — an actual EUMETSAT OSI SAF sea-surface-temperature
+ * satellite product AEMET redistributes (credited "AEMET / EUMETSAT OSI
+ * SAF" on the image itself), covering the wider Iberia/Mediterranean/NW
+ * Africa region, not just Spain — with a 0–35°C color legend and AEMET/
+ * EUMETSAT logos baked into the pixels. No bounding box anywhere in the
+ * response, same as every other opaque-image AEMET feed.
+ *
+ * `periodicidad: "1 vez al día"` per the live metadatos pull — a 6-hour TTL
+ * (generous headroom inside that daily cadence, matching lightning's own
+ * TTL) and a memory-only cache, same reasoning as every other opaque-image
+ * proxy in this file (an image this infrequently updated has no "survive a
+ * restart" story worth disk persistence).
+ *
+ * Routes:
+ *   GET /api/aemet/sea-surface-temp        → raw image bytes, `Content-Type`
+ *     from upstream (confirmed `image/gif`)
+ *   GET /api/aemet/sea-surface-temp/status → {hasKey, lastFetch, stale,
+ *     ttlMs, contentType}
+ *
+ * Keyless (no AEMET_API_KEY): /api/aemet/sea-surface-temp → 503
+ * {error:'no_key'}; status → {hasKey:false}. Upstream is never touched
+ * without a key.
+ *
+ * @returns {import('vite').Plugin}
+ */
+export function aemetSeaSurfaceTempProxy() {
+  const TTL_MS = 6 * 3600_000;
+
+  /** @type {?{at: number, buffer: Buffer, contentType: string}} */
+  let mem = null;
+  /** @type {?Promise<?{at: number, buffer: Buffer, contentType: string}>} single-flight refresh */
+  let inflight = null;
+
+  const apiKey = () => String(process.env.AEMET_API_KEY || '').trim();
+
+  async function fetchUpstream(key) {
+    const envelopeRes = await fetch(aemetSeaSurfaceTempEnvelopeUrl(key), {
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!envelopeRes.ok) throw new Error(`HTTP ${envelopeRes.status}`);
+    const envelope = await envelopeRes.json();
+    if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
+      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+    }
+    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(20_000) });
+    if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
+    const buffer = Buffer.from(await dataRes.arrayBuffer());
+    const contentType = (dataRes.headers.get('content-type') || 'image/gif').split(';')[0].trim();
+    return { at: Date.now(), buffer, contentType };
+  }
+
+  return {
+    name: 'aemet-sea-surface-temp-proxy',
+    configureServer(server) {
+      server.middlewares.use('/api/aemet/sea-surface-temp', async (req, res) => {
+        const sendJson = (status, obj) => {
+          if (res.headersSent) return;
+          res.writeHead(status, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+          });
+          res.end(JSON.stringify(obj));
+        };
+        try {
+          const subPath = String(req.url || '').split('?')[0];
+          const key = apiKey();
+
+          if (subPath === '/status') {
+            sendJson(200, {
+              hasKey: Boolean(key),
+              lastFetch: mem ? mem.at : null,
+              stale: mem ? Date.now() - mem.at >= TTL_MS : false,
+              ttlMs: TTL_MS,
+              contentType: mem ? mem.contentType : null,
+            });
+            return;
+          }
+
+          if (!key) {
+            sendJson(503, { error: 'no_key' });
+            return;
+          }
+
+          const entry = mem;
+          if (entry && Date.now() - entry.at < TTL_MS) {
+            res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' });
+            res.end(entry.buffer);
+            return;
+          }
+          if (!inflight) {
+            inflight = fetchUpstream(key)
+              .then((fresh) => {
+                mem = fresh;
+                return fresh;
+              })
+              .catch((err) => {
+                console.warn(
+                  `[aemet-sea-surface-temp-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
+                );
+                return null;
+              })
+              .finally(() => {
+                inflight = null;
+              });
+          }
+          const pending = inflight;
+          const fresh = await pending;
+          if (fresh) {
+            res.writeHead(200, { 'Content-Type': fresh.contentType, 'Cache-Control': 'no-store' });
+            res.end(fresh.buffer);
+          } else if (entry) {
+            res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' }); // upstream down — stale beats empty
+            res.end(entry.buffer);
+          } else {
+            sendJson(502, { error: 'aemet sea-surface-temp fetch failed and no cache available' });
+          }
+        } catch (err) {
+          console.warn('[aemet-sea-surface-temp-proxy] error:', err?.message || err);
+          sendJson(500, { error: 'aemet sea-surface-temp proxy error' });
         }
       });
     },

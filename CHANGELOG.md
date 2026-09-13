@@ -60,6 +60,24 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   thumbnail expands it to a much larger, still-crisp size so its baked-in
   legend and labels are actually readable; clicking again collapses it.
 
+- Add an AEMET Fire Risk layer, same click-to-expand picture-in-picture
+  shape as AEMET Lightning Activity, behind a new `/api/aemet/fire-risk`
+  proxy: AEMET's meteorological forest-fire risk forecast for the
+  Peninsula, automatically falling back to tomorrow's forecast when
+  today's map isn't published yet. Not a duplicate of the existing FIRMS
+  fire layer — this is a predictive risk index, not detected fires.
+
+- Add an AEMET UV Index layer: real UV-index points for 59 Spanish
+  provincial-capital cities, colored on a continuous Low-to-Extreme scale,
+  behind a new `/api/aemet/uv-index` proxy. Click a city for its exact
+  value and risk category.
+
+- Add an AEMET Sea Surface Temperature layer, same click-to-expand
+  picture-in-picture shape as AEMET Lightning Activity and AEMET Fire Risk,
+  behind a new `/api/aemet/sea-surface-temp` proxy: AEMET's daily
+  EUMETSAT-sourced sea-surface-temperature composite for Iberia, the
+  Mediterranean, and NW Africa.
+
 - Separate terrain, traffic, FIRMS and GBFS middleware into focused provider
   modules, preserving local configuration, routes and cache/error behavior.
 

@@ -2,12 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AEMET_LIGHTNING_ENVELOPE_URL,
+  AEMET_SEA_SURFACE_TEMP_ENVELOPE_URL,
   AEMET_STATIONS_ENVELOPE_URL,
   AEMET_STATION_STALE_MS,
   AEMET_WARNINGS_ENVELOPE_URL,
   AEMET_WARNING_LEVEL_RANK,
+  aemetFireRiskEstimadoEnvelopeUrl,
+  aemetFireRiskPrevistoEnvelopeUrl,
   aemetLightningEnvelopeUrl,
   aemetMunicipioForecastEnvelopeUrl,
+  aemetSeaSurfaceTempEnvelopeUrl,
+  aemetUvIndexEnvelopeUrl,
   aemetMunicipiosEnvelopeUrl,
   aemetStationsEnvelopeUrl,
   aemetWarningsEnvelopeUrl,
@@ -22,6 +27,8 @@ import {
   normalizeAemetMunicipiosSnapshot,
   normalizeAemetStationRecord,
   normalizeAemetStationsSnapshot,
+  normalizeAemetUvIndexRecord,
+  normalizeAemetUvIndexSnapshot,
   normalizeAemetWarningsSnapshot,
   parseAemetCapAlert,
   parseAemetCapTar,
@@ -664,4 +671,70 @@ test('the lightning envelope URL embeds the key as a query param, matching every
     `${AEMET_LIGHTNING_ENVELOPE_URL}?api_key=K`,
   );
   assert.ok(!aemetLightningEnvelopeUrl('K').includes('K/'), 'the key is never a path segment');
+});
+
+test('fire-risk envelope URLs place area/dia as path segments and the key as a query param', () => {
+  const estimado = aemetFireRiskEstimadoEnvelopeUrl('K', 'p');
+  assert.ok(estimado.includes('/mapasriesgo/estimado/area/p?'));
+  assert.ok(estimado.endsWith('api_key=K'));
+
+  const previsto = aemetFireRiskPrevistoEnvelopeUrl('K', 'b', '2');
+  assert.ok(previsto.includes('/mapasriesgo/previsto/dia/2/area/b?'));
+  assert.ok(previsto.endsWith('api_key=K'));
+});
+
+test('the UV-index envelope URL places the day offset as a path segment and the key as a query param', () => {
+  const url = aemetUvIndexEnvelopeUrl('K', '0');
+  assert.ok(url.includes('/prediccion/especifica/uvi/0?'));
+  assert.ok(url.endsWith('api_key=K'));
+});
+
+test('the sea-surface-temperature envelope URL embeds the key as a query param, matching every other AEMET envelope', () => {
+  assert.equal(
+    aemetSeaSurfaceTempEnvelopeUrl('K'),
+    `${AEMET_SEA_SURFACE_TEMP_ENVELOPE_URL}?api_key=K`,
+  );
+  assert.ok(!aemetSeaSurfaceTempEnvelopeUrl('K').includes('K/'), 'the key is never a path segment');
+});
+
+/** Two real entries from a live `prediccion/especifica/uvi/0` pull (Madrid mainland + a Canary Islands city). */
+const REAL_UVI_PAYLOAD = Object.freeze({
+  FECHA_ELABORACION: '2026-09-12T03:52:02',
+  FECHA_MOD: '2026-09-11T12:00:00',
+  FECHA_VALIDEZ: '2026-09-12T12:00:00',
+  CIUDAD: [
+    { id: '28079', valor: 'Madrid', uv: '8', canarias: '0' },
+    { id: '35016', valor: 'Palmas de Gran Canaria, Las', uv: '8', canarias: '1' },
+  ],
+});
+
+test('normalizeAemetUvIndexRecord extracts the same municipio id shape maestro/municipios already uses', () => {
+  const madrid = normalizeAemetUvIndexRecord(REAL_UVI_PAYLOAD.CIUDAD[0]);
+  assert.deepEqual(madrid, { municipioId: '28079', name: 'Madrid', uvIndex: 8, isCanaryIslands: false });
+  const canary = normalizeAemetUvIndexRecord(REAL_UVI_PAYLOAD.CIUDAD[1]);
+  assert.equal(canary.isCanaryIslands, true);
+});
+
+test('normalizeAemetUvIndexRecord rejects a record with no usable id, UV value, or name', () => {
+  assert.equal(normalizeAemetUvIndexRecord({ id: 'not-numeric', valor: 'X', uv: '5' }), null);
+  assert.equal(normalizeAemetUvIndexRecord({ id: '28079', valor: 'X', uv: null }), null);
+  assert.equal(normalizeAemetUvIndexRecord({ id: '28079', valor: '', uv: '5' }), null);
+  assert.equal(normalizeAemetUvIndexRecord(null), null);
+});
+
+test('normalizeAemetUvIndexSnapshot parses the elaboration/validity timestamps and every city', () => {
+  const snapshot = normalizeAemetUvIndexSnapshot(REAL_UVI_PAYLOAD);
+  assert.equal(snapshot.elaborated, '2026-09-12T03:52:02');
+  assert.equal(snapshot.validAt, '2026-09-12T12:00:00');
+  assert.equal(snapshot.cities.length, 2);
+});
+
+test('normalizeAemetUvIndexSnapshot drops invalid rows without dropping the batch, and rejects a malformed payload', () => {
+  const snapshot = normalizeAemetUvIndexSnapshot({
+    FECHA_ELABORACION: 'x', FECHA_VALIDEZ: 'y',
+    CIUDAD: [REAL_UVI_PAYLOAD.CIUDAD[0], { id: 'garbage' }],
+  });
+  assert.equal(snapshot.cities.length, 1);
+  assert.equal(normalizeAemetUvIndexSnapshot({}), null);
+  assert.equal(normalizeAemetUvIndexSnapshot(null), null);
 });

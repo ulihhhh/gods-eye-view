@@ -4,15 +4,20 @@ Status (2026-09-12): **Scope narrowed to AEMET-only, by owner direction.**
 This plan now tracks one PR: connect **every** AEMET OpenData dataset to a
 GEV layer (or record a deliberate, reasoned exception for the handful that
 genuinely don't fit). Phase A0 (Weather Stations), Phase A1 (Weather
-Warnings), Phase A2 (forecast tooltip), and Phase A4 (lightning activity)
-are **shipped** on `feat/weather-layers` — see
+Warnings), Phase A2 (forecast tooltip), Phase A4 (lightning activity),
+Phase A5 (fire risk), Phase A8 (UV index), and Phase A9 (sea-surface
+temperature) are **shipped** on `feat/weather-layers` — see
 [Phase A0](#phase-a0--station-layer--shipped-2026-09-12),
 [Phase A1](#phase-a1--warnings-overlay-avisos--shipped-2026-09-12),
-[Phase A2](#phase-a2--forecast-tooltip--shipped-2026-09-12), and
-[Phase A4](#phase-a4--lightning-activity--shipped-2026-09-12). **Phase A3
-(radar) is blocked**, not skipped — AEMET's own radar endpoint is currently
-returning a broken cached link server-side; see its section below. Phases
-A5 through A14 (below) are the complete, concrete criteria for the rest of
+[Phase A2](#phase-a2--forecast-tooltip--shipped-2026-09-12),
+[Phase A4](#phase-a4--lightning-activity--shipped-2026-09-12),
+[Phase A5](#phase-a5--forest-fire-risk-forecast--shipped-2026-09-12),
+[Phase A8](#phase-a8--uv-index--shipped-2026-09-12), and
+[Phase A9](#phase-a9--sea-surface-temperature--shipped-2026-09-12). **Phase
+A3 (radar) and Phase A6 (maritime forecast) are blocked**, not skipped —
+radar on AEMET's own broken cached endpoint, maritime on a genuinely
+unresolved zone-geometry source; see their sections below. Phases A7, A10
+through A14 (below) are the complete, concrete criteria for the rest of
 this PR — nothing in that list is optional to *decide*, though build order
 and effort vary. Open-Meteo's map layer and NASA GIBS — this plan's original
 other two providers — are **out of this PR's scope** and relegated to
@@ -89,7 +94,7 @@ phase:
   (memory + disk cache, `FIRMS_MAP_KEY`), `src/data/firmsCsv.js`,
   `firmsHeatmap.js`, `firmsLabels.js`, `firmsAdapt.js`, registered in
   `layerState.js` as `local-firms` (token `w`). AEMET's own fire-risk
-  *forecast* ([Phase A5](#phase-a5--forest-fire-risk-forecast)) is a
+  *forecast* ([Phase A5](#phase-a5--forest-fire-risk-forecast--shipped-2026-09-12)) is a
   different signal (predictive index vs. satellite-detected fire) and does
   **not** duplicate this — see A5 for the distinction to keep clear in UI
   copy.
@@ -126,12 +131,12 @@ twice — see A0's own note below).
 | `aemet-forecast` | Next-hours forecast on an existing station/municipio click | click-to-query, no new entities | A2 | *(none — extends A0's click, no new registry row)* | **shipped** |
 | `aemet-radar` | National/regional precipitation radar composite | imagery overlay | A3 | `o` | **blocked** — AEMET's own endpoint is currently returning a broken cached link, see phase notes |
 | `aemet-lightning` | Nationwide lightning-composite snapshot (ambient thumbnail, not entities) | pre-rendered image, no coordinates | A4 | `p` | **shipped** |
-| `aemet-fire-risk` | Meteorological forest-fire risk index | imagery overlay or zone polygons (shape TBD) | A5 | `v` | not started |
-| `aemet-maritime` | High-seas + coastal forecast zones | zone polygons + click text | A6 | `y` | not started |
+| `aemet-fire-risk` | Meteorological forest-fire risk forecast (ambient click-to-expand thumbnail) | pre-rendered image, no coordinates | A5 | `v` | **shipped** |
+| `aemet-maritime` | High-seas + coastal forecast zones | zone polygons + click text | A6 | `k` | **blocked** — endpoint confirmed live, but no geometry source found for its ~30 subzones |
 | `aemet-beaches` | Per-beach forecast (UV, sea temp, waves, wind) | points | A7 | `z` | not started |
-| `aemet-uv-index` | National UV index | imagery overlay or zone set (shape TBD) | A8 | `0` | not started |
-| `aemet-sea-surface-temp` | Sea-surface temperature | imagery overlay | A9 | `1` | not started |
-| `aemet-environmental` | Ozone / background pollution / solar radiation, chip-selected | points, with a network-type chip | A10 | `2` | not started |
+| `aemet-uv-index` | UV index per provincial-capital city (real points) | points, joined to `maestro/municipios` | A8 | `0` | **shipped** |
+| `aemet-sea-surface-temp` | Sea-surface temperature (ambient click-to-expand thumbnail) | pre-rendered image, no coordinates | A9 | `y` | **shipped** — took `y` (this table's original tentative token, `1`, was left unused; `aemet-maritime`'s own tentative token reassigned to `k` here since it's still unimplemented) |
+| `aemet-environmental` | Ozone / background pollution / solar radiation, chip-selected | points, with a network-type chip | A10 | `1` | not started |
 | *(folds into `aemet-stations`)* | Spain's two Antarctic bases | points | A11 | *(none — extends A0)* | not started |
 | `aemet-regional-forecast` | CCAA/provincia forecast text on region click | zone polygons (Natural Earth boundaries) + text | A12 | `3` | not started |
 
@@ -165,7 +170,8 @@ uses — nothing new to build for basic on/off:
 - **`aemet-sea-surface-temp` + `aemet-maritime` + `ais-live-vessels`**: the
   "everything about the water" demo — ship traffic, sea-state/wind
   warnings, and sea temperature for the water those ships are actually in.
-  Motivates building A9 so it's ready once A6 exists.
+  A9 shipped ahead of A6 (still blocked on zone geometry); the pairing
+  completes once A6 unblocks.
 - **`aemet-fire-risk` + `local-firms`**: deliberately shown as *distinct*
   layers with distinct legends (risk-level palette vs. detection markers) —
   a demo of "here's where risk is elevated" next to "here's what's actually
@@ -838,39 +844,90 @@ once A3 unblocks.
   collapse back to the small card on a second click.
 - Voice-tool wiring deferred to Phase A14, same as every other phase.
 
-### Phase A5 — forest-fire risk forecast
+### Phase A5 — forest-fire risk forecast — **shipped 2026-09-12**
 
-- **Endpoints**: `indices-incendios/mapasriesgo/estimado` (today),
-  `.../mapasriesgo/previsto/dia/{dia}` (forecast day), `.../riesgo/raster`
-  (confirmed raster).
-- **Shape**: imagery overlay (raster confirmed) or zone polygons — confirm
-  live which `mapasriesgo` vs. `riesgo/raster` actually returns before
-  committing.
+- **Endpoint confirmed live**: `incendios/mapasriesgo/estimado/area/{area}`
+  and `.../previsto/dia/{dia}/area/{area}` (`area`: p/b/c — Península/
+  Baleares/Canarias; `dia`: 1/2/3). `riesgo/raster` (the third endpoint
+  originally listed here) was rate-limited on every attempt during this
+  pass and remains **unconfirmed** — not used by the shipped implementation.
+- **Shape resolved the same way as lightning**: a real pull returned a
+  1525×1017 `image/png` with AEMET's own header, **6-level** risk legend
+  baked in (muy bajo/bajo/moderado/alto/muy alto/extremo — one more level
+  than this plan originally guessed), and logo — no bounding box anywhere in
+  the response. Shipped as the same ambient click-to-expand world-overlay
+  thumbnail Phase A4 established, not an imagery layer or zone polygons.
+- **A real "today vs. tomorrow" gap, found and handled**: `estimado`
+  (today) returned `404 "No hay datos que satisfagan esos criterios"` at
+  verification time — AEMET doesn't always have "today" published — while
+  `previsto/dia/1` (tomorrow) succeeded immediately. The proxy tries
+  `estimado` first and falls back to `previsto` day 1 on any failure, and
+  reports which one it served so the UI title can say "TODAY" or
+  "TOMORROW" rather than silently showing the wrong day as if it were
+  current.
 - **Not a FIRMS duplicate**: FIRMS (`local-firms`) shows satellite-
   *detected* fires already burning; this is AEMET's *predictive*
-  meteorological risk index, before anything ignites. Keep UI copy explicit
-  about the distinction (see [What's already there](#whats-already-there-dont-re-build-this)).
-- **Legend**: AEMET's own risk vocabulary (bajo/moderado/alto/extremo, to
-  confirm live), not the warnings layer's amarillo/naranja/rojo scale — a
-  different classification, needs its own palette.
-- **Future chip candidate**: estimado (today) vs. previsto (forecast day)
-  as a time-horizon chip within this one layer, once it ships and the
-  choice is proven worth exposing — not built now.
+  meteorological risk index, before anything ignites — kept as an explicit
+  UI distinction, not merged (see [What's already there](#whats-already-there-dont-re-build-this)).
+- Shipped: `aemetFireRiskEstimadoEnvelopeUrl`/`aemetFireRiskPrevistoEnvelopeUrl`
+  in `weatherProviderRequests.js` (1 test), `aemetFireRiskProxy()` in
+  `server/providers/weather/aemet.js` (1 behavioral test covering the
+  estimado→previsto fallback and the reverse recovery once estimado exists
+  again), `src/data/aemetFireRisk.js` (15 tests) — a deliberate near-copy of
+  `aemetLightning.js` (mirrored, not shared, matching this codebase's
+  existing convention of per-layer variations on a proven pattern) with its
+  own accent color, sizing, and the added `source` ('estimado'/'previsto-1')
+  tracked alongside `lastFetch` so a source flip alone (not just a new
+  timestamp) correctly triggers a reload.
+- **Verified live against the real API**: the actual risk map (color-coded
+  Spain, correct legend, AEMET logo, validity date) rendered as the small
+  ambient card and, on click, the full 640×427 expanded card with fully
+  legible legend and header. **One viewport-dependent placement note, not a
+  bug**: at a narrow ~800px browser width the expanded card can fail to
+  find a placement and silently doesn't paint that frame (confirmed via
+  `worldOverlay.js`'s `getWorldOverlayDiagnostics()`/`getOverlayPaintRect()`
+  returning `null` for it); re-verified correct at a realistic 1440×900
+  desktop width. Not fixed by shrinking the card — that would defeat the
+  point — recorded as a known narrow-viewport constraint.
+- v1 fixes `area` to `p` (Península) only.
+- **Future chip candidates, not built now**: Baleares/Canarias as an
+  area-choice chip, and estimado vs. previsto-N as a time-horizon chip —
+  both per this plan's own "chip grouping only where it clearly makes
+  sense" principle.
+- Voice-tool wiring deferred to Phase A14, same as every other phase.
 
-### Phase A6 — maritime forecast
+### Phase A6 — maritime forecast — **blocked on zone geometry (2026-09-12)**
 
-- **Endpoints**: `prediccion-maritima/altamar/area/{area}` (high seas),
-  `.../costera/costa/{costa}` (coastal).
-- **Shape**: zone polygons + click-to-inspect text, same rendering pattern
-  as `aemet-warnings`.
-- **The one real open question in this whole roadmap**: unlike
-  `avisos_cap`, these bulletins are **text only** — no inline geometry.
-  A zone-boundary source (`area`/`costa` code → polygon) has to be found
-  before this phase can render anything; AEMET's own public maritime-zone
-  map isn't obviously machine-readable via this API. This needs its own
-  research pass, equivalent to what A1 did for warnings zones, **before**
-  implementation starts — don't assume this is a quick reuse of the
-  warnings-zone code just because the rendering shape matches.
+- **Endpoints confirmed live**: `prediccion-maritima/altamar/area/{area}`
+  (`area` only accepts `0`, `1`, `2` — the error message itself reveals the
+  valid set) and `.../costera/costa/{costa}` (`costa` only accepts `40`
+  through `47`, same discovery method). Both return real structured JSON
+  (`{origen, aviso, situacion, prediccion: {zona: [{id, nombre, subzona:
+  [{id, nombre, texto}]}]}}`), not the coarse regional groupings the
+  8-region public names (Costa de Galicia, etc.) might suggest — the
+  ACTUAL granularity is ~30 nationwide named subzones like "Aguas costeras
+  de Lugo" (numeric id `8112710`), each with its own forecast text.
+- **The one real open question in this whole roadmap, now confirmed
+  unresolved after an actual search, not just assumed**: these ~30 subzones
+  carry no inline geometry anywhere in the API response — confirmed text-
+  only, matching this plan's original suspicion. A search for a public
+  geometry source came up short: AEMET's own PDF
+  (`divulgacion/maritima/informacion_para_zonas_costeras.pdf`) only shows
+  the 8 COARSE regional groupings on a province-boundary map — not the
+  actual ~30 subzones the API operates at — and no GeoJSON/shapefile for
+  the real subzone boundaries was found. Hand-digitizing zone boundaries
+  from a map was deliberately NOT attempted — that would be guessing
+  geometry, not verifying it, the opposite of this plan's whole discipline.
+- **Not abandoned, genuinely paused**: this phase needs either (a) a real
+  geometry source found in a future, more thorough search (e.g. contacting
+  AEMET directly, or checking Spain's national geographic institute IGN for
+  an official maritime-zone layer), or (b) a deliberate scope-down to a
+  text-only click target (e.g. a fixed reference point per zone, similar to
+  how A4/A5's thumbnails handle "no geometry" — but a zone-per-point
+  approximation is a real design compromise, not a default, and shouldn't
+  be chosen without discussing the trade-off first). Skipped ahead to
+  [Phase A8](#phase-a8--uv-index--shipped-2026-09-12) rather than guessing
+  through this one.
 - **Pairs with**: `ais-live-vessels` and (once built) A9's sea-surface
   temperature — see [stacking demos](#which-layers-pair-well-stacking-demos).
 
@@ -883,21 +940,103 @@ once A3 unblocks.
   needs an external source before the per-beach endpoint is queryable at
   all. Smaller version of A6's problem (points, not polygons), but real.
 
-### Phase A8 — UV index
+### Phase A8 — UV index — **shipped 2026-09-12**
 
-- **Endpoint**: `predicciones-especificas/uvi/{dia}`.
-- **Shape**: unconfirmed — a national raster/map, or per-zone numeric data.
-  Smallest phase by data volume (one value/map per day); the only blocker
-  is confirming this shape live.
+Built after A6 was paused on its geometry problem — the friendliest shape
+found anywhere in this whole plan.
 
-### Phase A9 — sea-surface temperature
+- **Endpoint confirmed live**: `prediccion/especifica/uvi/0` (today) returns
+  real structured JSON — 59 provincial-capital cities, each keyed by the
+  **same 5-digit INE municipio code** `maestro/municipios` already uses for
+  Phase A2's forecast tooltip, with a plain numeric UV value. **No image, no
+  legend, no missing-geometry problem** — genuinely the cleanest endpoint in
+  this entire roadmap.
+- **Shape resolved as a real point layer**, not an ambient thumbnail or
+  imagery overlay: the proxy (`aemetUvIndexProxy()`) joins each city to its
+  lat/lon via the same municipios lookup `aemetForecastProxy()` established,
+  and the frontend (`src/data/aemetUvIndex.js`) mirrors `aemetStations.js`'s
+  point-layer shape directly — colored points (a continuous WHO-scale
+  gradient, Low→Moderate→High→Very High→Extreme, same "gradient not
+  stepped bands" lesson as `TEMPERATURE_COLOR_STOPS`) with click-to-inspect,
+  applying Phase A0's `RELATIVE_TO_GROUND` + no-`disableDepthTestDistance`
+  lessons from the start instead of re-discovering them.
+- Shipped: `aemetUvIndexEnvelopeUrl`/`normalizeAemetUvIndexRecord`/
+  `normalizeAemetUvIndexSnapshot` in `weatherProviderRequests.js` (6 tests,
+  using a real captured two-city fixture — a mainland city and a Canary
+  Islands one, confirmed live to share the same `id`/`valor`/`uv`/`canarias`
+  shape), `aemetUvIndexProxy()` (1 behavioral test covering the municipio
+  join and dropping an unmatched city rather than fabricating its
+  position), `src/data/aemetUvIndex.js` (13 tests).
+- **Verified live against the real API**: 59 real points rendered across
+  Spain (today's real values clustering in the orange "High" band);
+  clicking Madrid's point showed "UV index 6 · High" with the matching
+  accent color; clean click/clear cycle, no console errors.
+- TTL 3h, memory-only cache (same reasoning as A5/A4 — cheap, small, no
+  "survive a restart" story worth building for a once-daily product).
+- v1 fixes the day offset to `0` (today) — other forecast days are a future
+  extension, not built now.
+- Voice-tool wiring deferred to Phase A14, same as every other phase.
 
-- **Endpoint**: `informacion-satelite/producto/sst`.
-- **Shape**: imagery overlay, no blockers beyond the standard live-
-  verification step every phase here follows.
-- **Pairs with**: `ais-live-vessels` and A6's maritime forecast — see
-  [stacking demos](#which-layers-pair-well-stacking-demos). Build after A6
-  so both are ready together.
+### Phase A9 — sea-surface temperature — **shipped 2026-09-12**
+
+- **Endpoint confirmed live**: `satelites/producto/sst` (not
+  `informacion-satelite/producto/sst` as originally guessed in this plan —
+  the real path lives under `satelites/`). Takes no path parameters. Returns
+  the standard two-step envelope; `datos` resolves to a real `image/gif`,
+  1000×773, confirmed live via the actual bytes — a EUMETSAT-sourced
+  sea-surface-temperature composite credited "AEMET / EUMETSAT OSI SAF"
+  (AEMET is redistributing a EUMETSAT product here, not publishing an
+  AEMET-original observation), covering Iberia, the Mediterranean and NW
+  Africa — wider than just Spain — with a baked-in 0–35°C legend strip.
+  `metadatos` confirms `periodicidad: "1 vez al día"`. No bounding box
+  anywhere in the response, same as Phases A4/A5 — the contingency about a
+  possibly-broken `informacion-satelite/*` endpoint never came up, since the
+  real, working endpoint lives at a different path than this plan guessed.
+- **Shape resolved as the same ambient click-to-expand thumbnail as A4/A5**,
+  not a geo-referenced imagery overlay — there's no bounding box to drape it
+  with. `src/data/aemetSeaSurfaceTemp.js` is a direct copy of
+  `aemetLightning.js`'s thumbnail mechanism, applying both bugs that phase
+  already found (thumbnail entries must hard-code `selected: false`
+  regardless of expand state, and the ambient source's
+  `collisionCapacity` must be a real non-zero value, not `0` copied from a
+  *selected* card's options) so neither had to be rediscovered.
+- **A third sizing bug found and fixed here**: the source image's aspect
+  ratio (1000:773 ≈ 1.29:1) is taller relative to width than fire-risk's
+  source image (~1525:1017 ≈ 1.5:1), so an expanded card sized to
+  fire-risk's own 640px width (640×495) reliably failed to render at all —
+  clicking to expand made the card disappear instead of growing. Confirmed
+  via a temporary debug dump of `placementVariants()`'s rejected rects
+  (`src/overlays/worldOverlay.js`) that at that size, every one of the four
+  candidate placements (above/below/left/right of the anchor) overlapped a
+  persistent bottom-control-panel occlusion rect from this particular
+  anchor's on-screen position — and confirmed, by reproducing the identical
+  failure on fire-risk's own already-shipped expand at a similarly
+  cluttered anchor position, that this is a general "large expanded card
+  vs. persistent UI chrome" constraint of the shared overlay mechanism, not
+  a defect specific to this layer. Fixed by shrinking to 560×433 (same
+  aspect ratio, matching lightning's footprint instead of fire-risk's
+  wider one) — confirmed live afterward at a clear anchor position.
+- Shipped: `AEMET_SEA_SURFACE_TEMP_ENVELOPE_URL`/
+  `aemetSeaSurfaceTempEnvelopeUrl` in `weatherProviderRequests.js` (1 test),
+  `aemetSeaSurfaceTempProxy()` (1 behavioral test, mirroring the lightning
+  proxy test with a real GIF-magic-bytes fixture), `src/data/
+  aemetSeaSurfaceTemp.js` (14 tests, mirroring `aemetLightning.test.mjs`'s
+  coverage: entry sizing/protected/never-selected, click-to-expand toggle,
+  disable-resets-expanded, stale-load-dropped, etc.).
+- **Verified live against the real API**: the real EUMETSAT SST composite
+  renders as the ambient thumbnail; click-to-expand shows the full legible
+  map with legend and AEMET/EUMETSAT OSI SAF branding; click-to-collapse
+  returns to the small card; no console errors.
+- **Pre-existing interaction, not a regression**: lightning, fire-risk, and
+  sea-surface-temp all anchor at the identical fixed reference point over
+  central Spain, so only one is ever painted at a time when more than one
+  is enabled simultaneously — each remains independently viewable by
+  toggling the others off. This collision was already implicit in A4/A5's
+  shared anchor design; A9 just makes it a three-way collision instead of
+  a two-way one.
+- TTL 6h, memory-only cache (same reasoning as A4 — cheap, small, no
+  "survive a restart" story worth building for a once-daily product).
+- Voice-tool wiring deferred to Phase A14, same as every other phase.
 
 ### Phase A10 — environmental networks (ozone, pollution, radiation)
 

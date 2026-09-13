@@ -275,8 +275,11 @@ export const SHARE_TRACKING_RESTORE_POLICIES = Object.freeze({
  * owns stable URL ordering.
  */
 export const LAYER_STATE_REGISTRY = Object.freeze([
+  Object.freeze({ id: 'aemet-fire-risk', token: 'v', disposition: 'enabled-only' }),
   Object.freeze({ id: 'aemet-lightning', token: 'p', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'aemet-sea-surface-temp', token: 'y', disposition: 'enabled-only' }),
   Object.freeze({ id: 'aemet-stations', token: 'h', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'aemet-uv-index', token: '0', disposition: 'enabled-only' }),
   Object.freeze({ id: 'aemet-warnings', token: 'j', disposition: 'enabled-only' }),
   Object.freeze({ id: 'ais-live-vessels', token: 'a', disposition: 'enabled-only' }),
   Object.freeze({ id: 'bikeshare', token: 'b', disposition: 'enabled-only' }),

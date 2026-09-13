@@ -500,6 +500,169 @@ radar/lightning viewer) and AEMET's own official API client repo
   different host/access mechanism not yet researched. Not started; noted
   here so it isn't lost.
 
+## AEMET Fire Risk (2026-09-12)
+
+`aemet-fire-risk` (token `v`, `enabled-only`) mirrors `aemet-lightning`'s
+architecture exactly: a single ambient click-to-expand world-overlay
+thumbnail, not a polled entity/imagery layer, for the same reason —
+AEMET's `incendios/mapasriesgo/*` exposes no risk-grid data, only a
+pre-rendered PNG (confirmed live: 1525×1017) with AEMET's own header,
+6-level risk legend (muy bajo/bajo/moderado/alto/muy alto/extremo), and
+logo baked into the pixels, no bounding box anywhere in the response.
+**Not** a `local-firms` (NASA FIRMS) duplicate: FIRMS shows satellite-
+*detected* fires already burning; this is AEMET's *predictive*
+meteorological risk index, before anything ignites.
+
+**Real "today vs. tomorrow" gap found and handled**: `mapasriesgo/estimado`
+(today's map) returned `404 "No hay datos que satisfagan esos criterios"`
+at verification time — AEMET doesn't always have "today" published yet —
+while `mapasriesgo/previsto/dia/1` (tomorrow's forecast) succeeded
+immediately. The proxy (`aemetFireRiskProxy()`) tries `estimado` first and
+falls back to `previsto` day 1 on ANY failure, not just a 404, and reports
+which one it actually served via `/status`'s `source` field
+(`'estimado'`/`'previsto-1'`); the frontend's title reflects that
+("TODAY"/"TOMORROW") so a user is never misled about which day's map
+they're looking at. `v1` fixes `area` to `p` (Península) — Baleares/
+Canarias are a future per-layer chip, not built yet. TTL 3h (well inside
+AEMET's own `periodicidad: diario`), memory-only cache — same reasoning as
+lightning (an image this infrequently updated has no "survive a restart"
+story worth disk persistence). The frontend reloads the image when either
+`lastFetch` moves OR `source` flips (e.g. today's real estimate replaces
+yesterday's `previsto-1` fallback with the same-ish timestamp but genuinely
+different bytes) — checking `lastFetch` alone would have missed that case.
+
+Click-to-expand reuses `aemet-lightning`'s exact mechanism (built the same
+day, immediately applied here) — 168×112 ambient card (matching the
+source's own ~1525:1017 aspect ratio) to 640×427 expanded, `protected: true`
++ max priority, deliberately never `selected: true` (see `aemet-lightning`'s
+notes on why that breaks `variant: 'thumbnail'` sizing). **One live-
+verification note, not a bug**: in a genuinely narrow browser viewport
+(~800px wide, panel included), the 640px-wide expanded card can fail to
+find a placement and silently doesn't paint that frame — confirmed via
+`worldOverlay.js`'s `getWorldOverlayDiagnostics()` (entry present,
+`isExpanded: true`, but `paintedBySource` empty for it) and via
+`getOverlayPaintRect()` returning `null`. Re-verified at a realistic
+desktop width (1440×900): renders correctly, full legend and header
+legible. Not addressed by shrinking the card — that would undermine the
+whole point of expanding it — noted here as a known constraint of very
+narrow viewports rather than silently ignored.
+
+Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
+Phase A14).
+
+## AEMET Maritime Forecast — blocked (2026-09-12)
+
+`prediccion-maritima/altamar/area/{area}` and `.../costera/costa/{costa}`
+are both confirmed live and return real structured JSON (the valid `area`/
+`costa` values — `0`/`1`/`2` and `40`–`47` respectively — were revealed by
+the API's own error messages when queried with an invalid value). The
+actual granularity is ~30 nationwide named subzones (e.g. "Aguas costeras
+de Lugo", numeric id `8112710`), each with its own forecast text — finer
+than the 8 coarse regional names ("Costa de Galicia" etc.) AEMET's public
+site groups them under.
+
+**Genuinely blocked, not attempted with a guess**: these subzones carry no
+geometry anywhere in the API response. A search for a public boundary
+source came up short — AEMET's own PDF on coastal zones only shows the 8
+coarse regional groupings on a province map, not the actual ~30 API-level
+subzones, and no GeoJSON/shapefile for the real boundaries was found.
+Hand-digitizing approximate boundaries from a map was deliberately not
+attempted, since that would be guessing geometry rather than verifying it.
+Not built; see the plan doc's Phase A6 for the options considered for
+resuming this (a more thorough geometry search, or a deliberate scope-down
+to fixed-point zone markers instead of true polygons).
+
+## AEMET UV Index (2026-09-12)
+
+`aemet-uv-index` (token `0`, `enabled-only`) is a real point layer — unlike
+Phases A4/A5's ambient thumbnails, `prediccion/especifica/uvi/0` returns
+genuine structured JSON with no image or missing-geometry problem: 59
+provincial-capital cities, each keyed by the same 5-digit INE municipio
+code `maestro/municipios` already uses for the Phase A2 forecast tooltip,
+with a plain numeric UV value. The proxy (`aemetUvIndexProxy()`) joins each
+city to its lat/lon via that same municipios lookup (re-fetched and cached
+independently of `aemetForecastProxy()`'s own copy — this file's existing
+convention of self-contained proxies rather than shared cross-proxy state;
+a second daily-cached fetch of the ~8k-row table is trivial), dropping any
+city whose municipio isn't found rather than fabricating a position.
+
+The frontend (`src/data/aemetUvIndex.js`) mirrors `aemetStations.js`'s
+point-layer shape directly: colored points on a continuous WHO-scale
+gradient (Low/Moderate/High/Very High/Extreme — the same "gradient, not
+stepped bands" lesson `TEMPERATURE_COLOR_STOPS` already established) with
+click-to-inspect, applying Phase A0's `RELATIVE_TO_GROUND` +
+no-`disableDepthTestDistance` treatment from the start rather than
+re-discovering those bugs. TTL 3h, memory-only cache for both the UV
+snapshot and the municipios table (same "cheap, small, no restart story
+worth building" reasoning as A4/A5). v1 fixes the day offset to `0`
+(today).
+
+**Verified live against the real API**: 59 real points across Spain
+(today's values clustering in the "High" orange band); clicking Madrid's
+point showed "UV index 6 · High" with the matching accent color; clean
+click/clear cycle, no console errors.
+
+Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
+Phase A14).
+
+## AEMET Sea Surface Temperature (2026-09-12)
+
+`aemet-sea-surface-temp` (token `y`, `enabled-only`) is the same ambient
+"picture-in-picture" thumbnail mechanism as Phase A4 (lightning) and Phase
+A5 (fire risk) — `satelites/producto/sst` returns another opaque
+legend-annotated raster with no bounding box: a 1000×773 `image/gif`
+credited "AEMET / EUMETSAT OSI SAF" (AEMET redistributing a EUMETSAT
+satellite product, not an AEMET-original observation), covering Iberia,
+the Mediterranean and NW Africa — wider than just Spain — with a baked-in
+0–35°C legend strip. `periodicidad` is confirmed `"1 vez al día"`; the
+proxy (`aemetSeaSurfaceTempProxy()`) caches memory-only at 6h TTL, same
+shape as the lightning proxy (envelope → datos → binary passthrough,
+single-flight refresh, stale-serves-on-failure, `/status` route).
+
+The frontend (`src/data/aemetSeaSurfaceTemp.js`) is a direct copy of
+`aemetLightning.js`'s click-to-expand thumbnail, applying both bugs that
+phase already found so neither had to be rediscovered: `selected: false`
+is hard-coded regardless of expand state (a thumbnail entry with
+`selected: true` silently breaks `measureOverlayEntry`'s sizing branch),
+and `collisionCapacity: 1` on the ambient source options (a `0` copied from
+a *selected* card's options — valid only because that entry is separately
+`protected: true` — silently drops an ordinary ambient entry before
+painting).
+
+**A third sizing bug surfaced and was fixed during this phase**: the first
+expanded-card size (640×495, matching the real image's 1000:773 aspect
+ratio at a fire-risk-like 640 width) reliably failed to render — clicking
+to expand made the card vanish instead of growing. A temporary debug dump
+of `placementVariants()`'s rejected rects against `_uiOcclusionRects`
+(`src/overlays/worldOverlay.js`) showed why: at 640×495 the card's own
+height is large enough that, from this anchor's on-screen position, all
+four candidate placements (above/below/left/right) overlapped one of the
+persistent bottom-left/bottom-right control-panel "hard" occlusion rects —
+a placement veto that composites-under-the-host chrome triggers regardless
+of corner. Fire-risk's own 640×427 expanded card doesn't trip this because
+its source image's wider ~1525:1017 aspect ratio keeps it shorter at the
+same width. Fixed by shrinking to 560×433 (same aspect ratio, scaled down
+to a lightning-like footprint instead of matching fire-risk's width) —
+confirmed live afterward, including at a camera framing where fire-risk's
+own expand was independently confirmed to hit the exact same placement
+failure at 640×495-scale sizing near a similarly cluttered anchor position,
+showing this is a general "expanded card vs. persistent UI chrome"
+constraint of the shared overlay mechanism rather than a defect specific to
+this layer.
+
+**Verified live against the real API**: real EUMETSAT SST composite
+rendering as the ambient thumbnail; click-to-expand shows the full legible
+map with legend and AEMET/EUMETSAT OSI SAF branding; click-to-collapse
+returns to the small card; no console errors. Since lightning, fire-risk,
+and sea-surface-temp all anchor at the identical fixed reference point,
+only one is ever painted at a time when more than one is enabled
+simultaneously (a pre-existing collision-avoidance interaction, confirmed
+not a regression — each is independently viewable by toggling the others
+off).
+
+Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
+Phase A14).
+
 ## Installations and map-source guidance
 
 - On an uncached Overpass failure, mapped installations keep their existing
