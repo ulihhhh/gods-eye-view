@@ -276,6 +276,7 @@ export const SHARE_TRACKING_RESTORE_POLICIES = Object.freeze({
  */
 export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'aemet-beaches', token: 'n', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'aemet-environmental', token: 'k', disposition: 'enabled-only' }),
   Object.freeze({ id: 'aemet-fire-risk', token: 'v', disposition: 'enabled-only' }),
   Object.freeze({ id: 'aemet-lightning', token: 'p', disposition: 'enabled-only' }),
   Object.freeze({ id: 'aemet-sea-surface-temp', token: 'y', disposition: 'enabled-only' }),

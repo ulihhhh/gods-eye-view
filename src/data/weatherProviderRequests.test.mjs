@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   AEMET_BEACHES_NOMENCLATOR_URL,
   AEMET_LIGHTNING_ENVELOPE_URL,
+  AEMET_OZONE_ENVELOPE_URL,
+  AEMET_RADIATION_ENVELOPE_URL,
   AEMET_SEA_SURFACE_TEMP_ENVELOPE_URL,
   AEMET_STATIONS_ENVELOPE_URL,
   AEMET_STATION_STALE_MS,
@@ -13,6 +15,8 @@ import {
   aemetFireRiskPrevistoEnvelopeUrl,
   aemetLightningEnvelopeUrl,
   aemetMunicipioForecastEnvelopeUrl,
+  aemetOzoneEnvelopeUrl,
+  aemetRadiationEnvelopeUrl,
   aemetSeaSurfaceTempEnvelopeUrl,
   aemetUvIndexEnvelopeUrl,
   aemetMunicipiosEnvelopeUrl,
@@ -30,6 +34,8 @@ import {
   normalizeAemetHourlyForecast,
   normalizeAemetMunicipioRecord,
   normalizeAemetMunicipiosSnapshot,
+  normalizeAemetOzoneSnapshot,
+  normalizeAemetRadiationSnapshot,
   normalizeAemetStationRecord,
   normalizeAemetStationsSnapshot,
   normalizeAemetUvIndexRecord,
@@ -839,4 +845,57 @@ test('normalizeAemetUvIndexSnapshot drops invalid rows without dropping the batc
   assert.equal(snapshot.cities.length, 1);
   assert.equal(normalizeAemetUvIndexSnapshot({}), null);
   assert.equal(normalizeAemetUvIndexSnapshot(null), null);
+});
+
+test('the ozone and radiation envelope URLs embed the key as a query param, matching every other AEMET envelope', () => {
+  assert.equal(aemetOzoneEnvelopeUrl('K'), `${AEMET_OZONE_ENVELOPE_URL}?api_key=K`);
+  assert.equal(aemetRadiationEnvelopeUrl('K'), `${AEMET_RADIATION_ENVELOPE_URL}?api_key=K`);
+});
+
+/** A real `datos` pull from `red/especial/ozono` — genuinely UTF-8, not the usual ISO-8859-15-declared-and-actual latin1. */
+const REAL_OZONE_CSV =
+  '"CAPA DE OZONO"\r\n' +
+  '"12-09-26"\r\n' +
+  '"Estación";"Indicativo";"OZONO"\r\n' +
+  '"A Coruña";"1387";"285"\r\n' +
+  '"Izaña";"C430E";"288"\r\n' +
+  '"Madrid, Ciudad Universitaria";"3194U";"301"\r\n';
+
+test('normalizeAemetOzoneSnapshot parses a real ozone CSV pull, skipping the title/date/header lines', () => {
+  const rows = normalizeAemetOzoneSnapshot(REAL_OZONE_CSV);
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows[0], { indicativo: '1387', name: 'A Coruña', ozoneDobson: 285 });
+  assert.equal(rows[1].name, 'Izaña');
+});
+
+test('normalizeAemetOzoneSnapshot returns [] for a non-string or malformed payload', () => {
+  assert.deepEqual(normalizeAemetOzoneSnapshot(null), []);
+  assert.deepEqual(normalizeAemetOzoneSnapshot(''), []);
+  assert.deepEqual(normalizeAemetOzoneSnapshot('"just one field"\n'), []);
+});
+
+/** A real `datos` pull from `red/especial/radiacion`, trimmed to 2 stations and 3 hourly columns per Tipo block for readability — the real response has up to 32 per block, but the parser only reads each block's own SUMA column regardless of width. */
+const REAL_RADIATION_CSV =
+  '"RADIACION SOLAR"\r\n' +
+  '"12-09-26"\r\n' +
+  '"Estación";"Indicativo";"Tipo";"5";"6";"SUMA";"Tipo";"5";"6";"SUMA";"Tipo";"5";"6";"SUMA";"Tipo";"5";"6";"SUMA";"Tipo";"5";"6";"SUMA"\r\n' +
+  '"A Coruña";"1387";"GL";"0";"2";"2205";"DF";"0";"1";"218";"DT";"0";"15";"3543";"UVB";"1";"1";"3446";"IR";"116";"115";"2840"\r\n' +
+  '"Albacete";"8178D";"GL";"1";"2";"2333";"DF";"0";"1";"306";"DT";"0";"0";"3204";"UVB";"";"";"";"IR";"119";"118";"2927"\r\n';
+
+test('normalizeAemetRadiationSnapshot pulls each Tipo block\'s own SUMA column from a real radiation CSV', () => {
+  const rows = normalizeAemetRadiationSnapshot(REAL_RADIATION_CSV);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows[0], {
+    indicativo: '1387', name: 'A Coruña',
+    globalRadiationSum: 2205, diffuseRadiationSum: 218, directRadiationSum: 3543,
+    uvErythemalSum: 3446, infraredSum: 2840,
+  });
+  assert.equal(rows[1].name, 'Albacete');
+  assert.equal(rows[1].uvErythemalSum, null, 'a blank UVB block (sensor offline) reads as null, not 0 or NaN');
+});
+
+test('normalizeAemetRadiationSnapshot returns [] for a non-string, empty, or header-only payload', () => {
+  assert.deepEqual(normalizeAemetRadiationSnapshot(null), []);
+  assert.deepEqual(normalizeAemetRadiationSnapshot(''), []);
+  assert.deepEqual(normalizeAemetRadiationSnapshot('"RADIACION SOLAR"\r\n"12-09-26"\r\n"Estación";"Indicativo"\r\n'), []);
 });

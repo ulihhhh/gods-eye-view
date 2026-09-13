@@ -1,6 +1,7 @@
 /** Weather-source middleware for Node development servers. */
 export {
   aemetBeachesProxy,
+  aemetEnvironmentalProxy,
   aemetFireRiskProxy,
   aemetForecastProxy,
   aemetLightningProxy,

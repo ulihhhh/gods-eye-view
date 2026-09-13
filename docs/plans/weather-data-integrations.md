@@ -5,21 +5,22 @@ This plan now tracks one PR: connect **every** AEMET OpenData dataset to a
 GEV layer (or record a deliberate, reasoned exception for the handful that
 genuinely don't fit). Phase A0 (Weather Stations), Phase A1 (Weather
 Warnings), Phase A2 (forecast tooltip), Phase A4 (lightning activity),
-Phase A5 (fire risk), Phase A7 (beach forecast), Phase A8 (UV index), and
-Phase A9 (sea-surface temperature) are **shipped** on `feat/weather-layers`
-— see
+Phase A5 (fire risk), Phase A7 (beach forecast), Phase A8 (UV index),
+Phase A9 (sea-surface temperature), and Phase A10 (environmental networks —
+ozone + radiation) are **shipped** on `feat/weather-layers` — see
 [Phase A0](#phase-a0--station-layer--shipped-2026-09-12),
 [Phase A1](#phase-a1--warnings-overlay-avisos--shipped-2026-09-12),
 [Phase A2](#phase-a2--forecast-tooltip--shipped-2026-09-12),
 [Phase A4](#phase-a4--lightning-activity--shipped-2026-09-12),
 [Phase A5](#phase-a5--forest-fire-risk-forecast--shipped-2026-09-12),
 [Phase A7](#phase-a7--beach-forecast--shipped-2026-09-13),
-[Phase A8](#phase-a8--uv-index--shipped-2026-09-12), and
-[Phase A9](#phase-a9--sea-surface-temperature--shipped-2026-09-12). **Phase
-A3 (radar) and Phase A6 (maritime forecast) are blocked**, not skipped —
-radar on AEMET's own broken cached endpoint, maritime on a genuinely
-unresolved zone-geometry source; see their sections below. Phases A10
-through A14 (below) are the complete, concrete criteria for the rest of
+[Phase A8](#phase-a8--uv-index--shipped-2026-09-12),
+[Phase A9](#phase-a9--sea-surface-temperature--shipped-2026-09-12), and
+[Phase A10](#phase-a10--environmental-networks-ozone-pollution-radiation--shipped-2026-09-13-ozone--radiation).
+**Phase A3 (radar) and Phase A6 (maritime forecast) are blocked**, not
+skipped — radar on AEMET's own broken cached endpoint, maritime on a
+genuinely unresolved zone-geometry source; see their sections below. Phases
+A11 through A14 (below) are the complete, concrete criteria for the rest of
 this PR — nothing in that list is optional to *decide*, though build order
 and effort vary. Open-Meteo's map layer and NASA GIBS — this plan's original
 other two providers — are **out of this PR's scope** and relegated to
@@ -76,7 +77,7 @@ phase:
   Candidates identified so far, **not built now**, listed here so the
   decision isn't lost:
   - `redes-especiales` (ozone / background pollution / solar radiation,
-    [Phase A10](#phase-a10--environmental-networks-ozone-pollution-radiation))
+    [Phase A10](#phase-a10--environmental-networks-ozone-pollution-radiation--shipped-2026-09-13-ozone--radiation))
     is the one exception where grouping from day one is proposed, not
     deferred — see A10 for why.
   - `red-radares` national vs. regional composite — plausibly one
@@ -138,7 +139,7 @@ twice — see A0's own note below).
 | `aemet-beaches` | Per-beach forecast (UV, sea temp, waves, wind) | points | A7 | `n` | **shipped** — took `n`, not this table's original tentative `z`: several existing tests hardcode `z` as their canonical "token not in the registry" fixture, so claiming it would have broken them |
 | `aemet-uv-index` | UV index per provincial-capital city (real points) | points, joined to `maestro/municipios` | A8 | `0` | **shipped** |
 | `aemet-sea-surface-temp` | Sea-surface temperature (ambient click-to-expand thumbnail) | pre-rendered image, no coordinates | A9 | `y` | **shipped** — took `y` (this table's original tentative token, `1`, was left unused; `aemet-maritime`'s own tentative token reassigned to `k` here since it's still unimplemented) |
-| `aemet-environmental` | Ozone / background pollution / solar radiation, chip-selected | points, with a network-type chip | A10 | `1` | not started |
+| `aemet-environmental` | Ozone / solar radiation, chip-selected (background pollution deferred, see phase notes) | points, with a network-type chip | A10 | `k` | **shipped** — ozone + radiation only |
 | *(folds into `aemet-stations`)* | Spain's two Antarctic bases | points | A11 | *(none — extends A0)* | not started |
 | `aemet-regional-forecast` | CCAA/provincia forecast text on region click | zone polygons (Natural Earth boundaries) + text | A12 | `3` | not started |
 
@@ -159,8 +160,11 @@ uses — nothing new to build for basic on/off:
   single batched pass across every AEMET layer once A0–A12 exist, instead of
   wiring the same pattern piecemeal ten separate times.
 - **`aemet-environmental` only**: gets a per-layer options chip (network
-  choice: ozone / pollution / radiation) via `getRowControls`, the same
-  mechanism `cctv.js`/`flights.js`/`satellites.js` already implement.
+  choice: ozone / radiation — pollution deferred, see Phase A10) via
+  `getRowControls`/`setParams`, the same mechanism `satellites.js`'s own
+  DENSE chip implements. Shipped **without** share-link persistence for the
+  chip's current selection — a deliberate v1 scoping choice, see the
+  phase's own notes.
 
 ## Which layers pair well (stacking demos)
 
@@ -1106,18 +1110,65 @@ found anywhere in this whole plan.
   "survive a restart" story worth building for a once-daily product).
 - Voice-tool wiring deferred to Phase A14, same as every other phase.
 
-### Phase A10 — environmental networks (ozone, pollution, radiation)
+### Phase A10 — environmental networks (ozone, pollution, radiation) — **shipped 2026-09-13 (ozone + radiation)**
 
-- **Endpoints**: `redes-especiales/ozono`, `.../contaminacionfondo/estacion/{nombre}`,
-  `.../radiacion`, `.../perfilozono/estacion/{estacion}`.
-- **Shape**: points — small dedicated station networks (a few dozen sites
-  each), much smaller footprint than AEMET's ~850 weather stations.
-- **The one deliberate exception to "one layer per dataset for now"**: these
-  three networks are proposed as a single `aemet-environmental` layer with
-  a network-type chip from the start, not three near-empty toggle-panel
-  rows. This is exactly the case the architecture principles above call out
-  as "grouping genuinely makes sense" — same shape (points), same provider,
-  each individually too sparse to be a compelling standalone toggle.
+- **Endpoints confirmed live**: `red/especial/ozono` and `red/especial/
+  radiacion` — not `redes-especiales/ozono`/`.../radiacion` as this plan
+  originally guessed (both 404'd; the real paths came from AEMET's own
+  published OpenAPI spec at
+  `https://opendata.aemet.es/AEMET_OpenData_specification.json`, linked from
+  the AEMET GitLab repo's own POSTMAN.md, not guessed a second time). Both
+  return **CSV, not JSON** — a shape no other AEMET feed in this app uses —
+  and are confirmed live to be **genuinely, correctly UTF-8-encoded**: the
+  first AEMET feed found where the usual "ISO-8859-15-declared, actually
+  ISO-8859-15, decode as latin1" habit would be the wrong move. Confirmed
+  the hard way — latin1-decoding a real pull mangled "Coruña" into
+  "CoruÃ±a" — before it shipped as a live bug.
+- **Shape resolved as a real point layer**, joined to `aemet-stations`'s own
+  station list by `idema` (ozono/radiacion's `Indicativo` field) — confirmed
+  live across all 7 ozone stations (6 of 7 matched a real stations pull
+  instantly; the 7th, Zaragoza, just wasn't in that particular snapshot).
+  Same "join to an existing id space" pattern as A2/A8; no new geometry
+  source needed.
+- **The one deliberate exception to "one layer per dataset for now"**,
+  built as originally proposed: `aemet-environmental` is one layer for both
+  networks with a network-type chip (`OZONE`/`RADIATION`, `getRowControls()`/
+  `setParams()` — the same mechanism `satellites.js`'s own DENSE chip uses)
+  switching which metric drives point color; the click-to-inspect card
+  always shows both metrics regardless of which is active.
+- **Two further networks this section originally proposed folding in here
+  are real but deliberately deferred out of v1**: `contaminacionfondo`
+  (EMEP background pollution) and `perfilozono` (vertical ozone profile).
+  Neither is geometry-blocked — their station enums are documented directly
+  in the OpenAPI spec's own parameter descriptions (`contaminacionfondo`:
+  13 named EMEP stations with numeric codes 01-17; `perfilozono`: exactly
+  `canarias`/`peninsula`) — the same kind of find that unblocked A7's
+  nomenclator. `contaminacionfondo`'s `datos` response is a proprietary
+  fixed-field text format ("FINN", confirmed live) with 144 ten-minute
+  readings per station per day, needing a dedicated parser this pass didn't
+  build; `perfilozono` returns an altitude-indexed vertical profile on a
+  weekly cadence — not a single current value, a fundamentally different
+  shape than "one point, one reading" this layer is built around.
+- **v1 scoping decision**: the network-type chip's selection is not
+  persisted into share-links — registered as `enabled-only` rather than
+  wiring the full option-codec system (`layerState.js`'s
+  `OPTION_GROUPS`/share-link encoding) satellites/flights/cctv/radio use.
+  Chosen deliberately rather than adding that integration to the same pass;
+  same spirit as A8 fixing its day offset to `0`.
+- Shipped: `AEMET_OZONE_ENVELOPE_URL`/`AEMET_RADIATION_ENVELOPE_URL`/
+  `aemetOzoneEnvelopeUrl`/`aemetRadiationEnvelopeUrl`/
+  `normalizeAemetOzoneSnapshot`/`normalizeAemetRadiationSnapshot` in
+  `weatherProviderRequests.js` (real captured fixtures, 7 tests),
+  `aemetEnvironmentalProxy()` (1 behavioral test covering the idema join,
+  dropping an unmatched row, and the UTF-8 decode specifically),
+  `src/data/aemetEnvironmental.js` (14 tests, including the chip's
+  `setParams`/`getRowControls` contract).
+- **Verified live against the real API**: 28 real stations rendered with
+  correct UTF-8 names ("A Coruña", "Izaña"); the network-type chip toggles
+  live in the panel between "OZONE" and "RADIATION"; no console errors.
+- TTL 3h, memory-only cache (same reasoning as A5/A8/A9 — cheap, small
+  networks, no "survive a restart" story worth building).
+- Voice-tool wiring deferred to Phase A14, same as every other phase.
 
 ### Phase A11 — Antarctic stations
 

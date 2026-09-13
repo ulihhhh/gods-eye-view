@@ -84,6 +84,11 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   (real per-beach forecasts, no bulk endpoint exists) that respects AEMET's
   own live rate-limit signal rather than a fixed guess.
 
+- Add an AEMET Environmental Networks layer: ozone and solar-radiation
+  station readings behind a new `/api/aemet/environmental` proxy, joined to
+  the existing weather-station coordinates. A network-type chip switches
+  which metric colors the points; both are always shown on click.
+
 - Separate terrain, traffic, FIRMS and GBFS middleware into focused provider
   modules, preserving local configuration, routes and cache/error behavior.
 

@@ -9,6 +9,8 @@ import {
   aemetLightningEnvelopeUrl,
   aemetMunicipioForecastEnvelopeUrl,
   aemetMunicipiosEnvelopeUrl,
+  aemetOzoneEnvelopeUrl,
+  aemetRadiationEnvelopeUrl,
   aemetSeaSurfaceTempEnvelopeUrl,
   aemetStationsEnvelopeUrl,
   aemetUvIndexEnvelopeUrl,
@@ -22,6 +24,8 @@ import {
   normalizeAemetBeachForecastRecord,
   normalizeAemetHourlyForecast,
   normalizeAemetMunicipiosSnapshot,
+  normalizeAemetOzoneSnapshot,
+  normalizeAemetRadiationSnapshot,
   normalizeAemetStationsSnapshot,
   normalizeAemetUvIndexSnapshot,
   normalizeAemetWarningsSnapshot,
@@ -1403,6 +1407,185 @@ export function aemetBeachesProxy({
         } catch (err) {
           console.warn('[aemet-beaches-proxy] error:', err?.message || err);
           sendJson(500, { error: 'aemet beaches proxy error' });
+        }
+      });
+    },
+  };
+}
+
+/**
+ * AEMET environmental-networks proxy (Phase A10) — ozone and solar
+ * radiation, joined to `observacion/convencional/todas`'s own station list
+ * by `idema` (the same id both networks' `Indicativo` field uses). See
+ * `weatherProviderRequests.js`'s own section comment for the two real finds
+ * this phase needed: the plan's guessed endpoint paths were wrong, and
+ * these two feeds are genuinely UTF-8 — decoded as such here, NOT latin1
+ * like every other AEMET proxy in this file.
+ *
+ * `contaminacionfondo` and `perfilozono` are deliberately not built here —
+ * see the same section comment for why (a proprietary non-JSON/CSV format,
+ * and a non-point vertical-profile shape, respectively).
+ */
+export function aemetEnvironmentalProxy() {
+  const STATIONS_TTL_MS = 24 * 3600_000;
+  const ENV_TTL_MS = 3 * 3600_000;
+
+  /** @type {?{at: number, stations: Array<object>}} */
+  let stationsMem = null;
+  /** @type {?Promise<Array<object>>} single-flight stations refresh */
+  let stationsInflight = null;
+  /** @type {?{at: number, rows: Array<object>}} */
+  let mem = null;
+  /** @type {?Promise<?{at: number, rows: Array<object>}>} single-flight refresh */
+  let inflight = null;
+
+  const apiKey = () => String(process.env.AEMET_API_KEY || '').trim();
+
+  async function fetchEnvelopeJson(url, timeoutMs = 20_000) {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const envelope = await res.json();
+    if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
+      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+    }
+    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
+    // Every other AEMET feed lies and declares ISO-8859-15 while genuinely
+    // being ISO-8859-15 (hence the codebase's usual latin1 decode). Ozone
+    // and radiacion are the opposite: confirmed live to be genuinely UTF-8.
+    const buffer = Buffer.from(await dataRes.arrayBuffer());
+    return buffer.toString('utf8');
+  }
+
+  async function ensureStations(key) {
+    if (stationsMem && Date.now() - stationsMem.at < STATIONS_TTL_MS) return stationsMem.stations;
+    if (!stationsInflight) {
+      stationsInflight = (async () => {
+        const envelopeRes = await fetch(aemetStationsEnvelopeUrl(key), { signal: AbortSignal.timeout(30_000) });
+        if (!envelopeRes.ok) throw new Error(`HTTP ${envelopeRes.status}`);
+        const envelope = await envelopeRes.json();
+        if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
+          throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+        }
+        const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(30_000) });
+        if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
+        const buffer = Buffer.from(await dataRes.arrayBuffer());
+        const stations = normalizeAemetStationsSnapshot(JSON.parse(buffer.toString('latin1')));
+        stationsMem = { at: Date.now(), stations };
+        return stations;
+      })().finally(() => {
+        stationsInflight = null;
+      });
+    }
+    const fresh = await stationsInflight.catch(() => null);
+    if (fresh) return fresh;
+    if (stationsMem) return stationsMem.stations; // upstream down — stale beats empty
+    throw new Error('station lookup table unavailable');
+  }
+
+  async function fetchUpstream(key) {
+    const [ozoneCsv, radiationCsv, stations] = await Promise.all([
+      fetchEnvelopeJson(aemetOzoneEnvelopeUrl(key)),
+      fetchEnvelopeJson(aemetRadiationEnvelopeUrl(key)),
+      ensureStations(key),
+    ]);
+    const stationById = new Map(stations.map((s) => [s.id, s]));
+    const rowByIndicativo = new Map();
+    for (const row of normalizeAemetOzoneSnapshot(ozoneCsv)) {
+      const station = stationById.get(row.indicativo);
+      if (!station) continue; // no coordinates to plot this one — drop it, don't fabricate a position
+      rowByIndicativo.set(row.indicativo, {
+        indicativo: row.indicativo, name: row.name, lat: station.lat, lon: station.lon,
+        ozoneDobson: row.ozoneDobson,
+        globalRadiationSum: null, diffuseRadiationSum: null, directRadiationSum: null,
+        uvErythemalSum: null, infraredSum: null,
+      });
+    }
+    for (const row of normalizeAemetRadiationSnapshot(radiationCsv)) {
+      const station = stationById.get(row.indicativo);
+      if (!station) continue;
+      const existing = rowByIndicativo.get(row.indicativo);
+      if (existing) {
+        existing.globalRadiationSum = row.globalRadiationSum;
+        existing.diffuseRadiationSum = row.diffuseRadiationSum;
+        existing.directRadiationSum = row.directRadiationSum;
+        existing.uvErythemalSum = row.uvErythemalSum;
+        existing.infraredSum = row.infraredSum;
+      } else {
+        rowByIndicativo.set(row.indicativo, {
+          indicativo: row.indicativo, name: row.name, lat: station.lat, lon: station.lon,
+          ozoneDobson: null,
+          globalRadiationSum: row.globalRadiationSum, diffuseRadiationSum: row.diffuseRadiationSum,
+          directRadiationSum: row.directRadiationSum, uvErythemalSum: row.uvErythemalSum,
+          infraredSum: row.infraredSum,
+        });
+      }
+    }
+    return { at: Date.now(), rows: [...rowByIndicativo.values()] };
+  }
+
+  return {
+    name: 'aemet-environmental-proxy',
+    configureServer(server) {
+      server.middlewares.use('/api/aemet/environmental', async (req, res) => {
+        const sendJson = (status, obj) => {
+          if (res.headersSent) return;
+          res.writeHead(status, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+          });
+          res.end(JSON.stringify(obj));
+        };
+        try {
+          const subPath = String(req.url || '').split('?')[0];
+          const key = apiKey();
+
+          if (subPath === '/status') {
+            sendJson(200, {
+              hasKey: Boolean(key),
+              lastFetch: mem ? mem.at : null,
+              count: mem ? mem.rows.length : null,
+              stale: mem ? Date.now() - mem.at >= ENV_TTL_MS : false,
+              ttlMs: ENV_TTL_MS,
+            });
+            return;
+          }
+
+          if (!key) {
+            sendJson(503, { error: 'no_key' });
+            return;
+          }
+
+          const entry = mem;
+          if (entry && Date.now() - entry.at < ENV_TTL_MS) {
+            sendJson(200, { fetchedAt: entry.at, stale: false, ttlMs: ENV_TTL_MS, count: entry.rows.length, stations: entry.rows });
+            return;
+          }
+          if (!inflight) {
+            inflight = fetchUpstream(key)
+              .then((fresh) => {
+                mem = fresh;
+                return fresh;
+              })
+              .catch((err) => {
+                console.warn(`[aemet-environmental-proxy] refresh failed (${err?.message || err}) — serving cache if any`);
+                return null;
+              })
+              .finally(() => {
+                inflight = null;
+              });
+          }
+          const pending = inflight;
+          const fresh = await pending;
+          const payload = fresh || entry;
+          if (payload) {
+            sendJson(200, { fetchedAt: payload.at, stale: !fresh, ttlMs: ENV_TTL_MS, count: payload.rows.length, stations: payload.rows });
+          } else {
+            sendJson(502, { error: 'aemet environmental fetch failed and no cache available' });
+          }
+        } catch (err) {
+          console.warn('[aemet-environmental-proxy] error:', err?.message || err);
+          sendJson(500, { error: 'aemet environmental proxy error' });
         }
       });
     },

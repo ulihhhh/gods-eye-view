@@ -860,6 +860,150 @@ export function normalizeAemetBeachForecastRecord(payload) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Environmental networks (Phase A10) — ozone and solar radiation. The plan's
+// guessed paths (`redes-especiales/ozono`, `redes-especiales/radiacion`)
+// don't exist; the real ones, found in AEMET's own published OpenAPI spec
+// (`https://opendata.aemet.es/AEMET_OpenData_specification.json`, linked
+// from the AEMET GitLab repo's own POSTMAN.md), are `red/especial/ozono` and
+// `red/especial/radiacion`. Both are confirmed live to return **CSV, not
+// JSON** (semicolon-delimited, quoted fields) — a shape no other AEMET feed
+// in this app uses. Their `datos` response is also the first genuinely,
+// correctly **UTF-8** AEMET payload confirmed in this app — every other
+// feed's ISO-8859-15-declared response is actually ISO-8859-15 too (hence
+// the codebase-wide "always decode as latin1" habit), but here the bytes
+// really are UTF-8 (confirmed live: latin1-decoding a real pull mangled
+// "Coruña" into "CoruÃ±a", proving the opposite mistake — copying the usual
+// latin1 habit onto these two would introduce the bug it exists to avoid).
+// The proxy decodes these two responses as UTF-8 specifically because of
+// this. Each row's `Indicativo` is the SAME
+// station code (`idema`) `aemetStations.js`'s `observacion/convencional/
+// todas` already returns — confirmed live by cross-referencing all 7 ozone
+// stations' codes against a real stations pull (6 of 7 matched instantly;
+// the 7th, Zaragoza, simply wasn't in that particular live snapshot — not a
+// scheme mismatch). No new geometry source needed, same "join to an
+// existing id space" pattern as A2/A8.
+//
+// A third network this plan proposed folding in here, `contaminacionfondo`
+// (background pollution, EMEP network), is real and its 13 station codes
+// are fully enumerated right in the OpenAPI spec's own parameter
+// description — but its `datos` response is neither JSON nor CSV: a
+// proprietary fixed-field text format ("FINN") with 10-minute-interval
+// readings (144 lines/day/station) AEMET's own docs name explicitly. A
+// fourth, `perfilozono` (vertical ozone profile, 2 fixed stations, weekly
+// cadence), returns an altitude-indexed profile, not a single current
+// value — a fundamentally different shape than "one point, one reading."
+// Both are real, live-verified, and NOT geometry-blocked the way A6/A7
+// were — deliberately deferred out of this phase's v1 rather than adding a
+// third bespoke parser and a non-point shape to the same PR; see the plan's
+// own Phase A10 section for the full reasoning.
+// ---------------------------------------------------------------------------
+
+/** Ozone-layer daily-average envelope (all stations, no path params). */
+export const AEMET_OZONE_ENVELOPE_URL =
+  'https://opendata.aemet.es/opendata/api/red/especial/ozono';
+
+/** Solar-radiation daily envelope (all stations, no path params). */
+export const AEMET_RADIATION_ENVELOPE_URL =
+  'https://opendata.aemet.es/opendata/api/red/especial/radiacion';
+
+export function aemetOzoneEnvelopeUrl(apiKey) {
+  return `${AEMET_OZONE_ENVELOPE_URL}?api_key=${encodeURIComponent(apiKey)}`;
+}
+
+export function aemetRadiationEnvelopeUrl(apiKey) {
+  return `${AEMET_RADIATION_ENVELOPE_URL}?api_key=${encodeURIComponent(apiKey)}`;
+}
+
+/**
+ * Split one semicolon-delimited CSV line, unquoting `"..."` fields. Good
+ * enough for AEMET's own ozono/radiacion export (no embedded semicolons or
+ * escaped quotes observed in a live pull) without pulling in a CSV library
+ * for two small, fixed-shape feeds.
+ * @param {string} line
+ * @returns {string[]}
+ */
+function splitAemetCsvLine(line) {
+  return line.split(';').map((field) => {
+    const trimmed = field.trim();
+    return trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
+  });
+}
+
+/**
+ * @param {string} csvText Raw ozono CSV (already UTF-8-decoded — see the section comment above for why UTF-8, not latin1, here).
+ * @returns {Array<{indicativo: string, name: string, ozoneDobson: number}>}
+ */
+export function normalizeAemetOzoneSnapshot(csvText) {
+  if (typeof csvText !== 'string') return [];
+  const lines = csvText.split(/\r?\n/).filter((l) => l.trim());
+  const rows = [];
+  // Lines 0-1 are a title and a date, not data — the header (line 2) is
+  // skipped implicitly since it fails the 3-column-with-numeric-ozone test.
+  for (const line of lines) {
+    const fields = splitAemetCsvLine(line);
+    if (fields.length < 3) continue;
+    const [name, indicativo, ozoneRaw] = fields;
+    const ozoneDobson = finiteOrNull(ozoneRaw);
+    if (!indicativo || !name || ozoneDobson === null) continue;
+    rows.push({ indicativo, name, ozoneDobson });
+  }
+  return rows;
+}
+
+/**
+ * Parse AEMET's radiacion CSV — 5 repeating `Tipo` blocks (GL/DF/DT/UVB/IR),
+ * each ending in a `SUMA` column; only each block's daily `SUMA` is kept for
+ * v1 (the 16-48 intermediate hourly columns per block are not surfaced as a
+ * map-layer value). Units are confirmed live from AEMET's own metadata:
+ * `10*kJ/m2` for GL/DF/DT/IR sums, and the UV-erythemal sum uses AEMET's own
+ * separate UV-index-equivalent scale — both passed through as-is, unlabeled
+ * beyond their AEMET field name, rather than guessing a conversion.
+ * @param {string} csvText Raw radiacion CSV (already UTF-8-decoded — see the section comment above for why UTF-8, not latin1, here).
+ * @returns {Array<{indicativo: string, name: string,
+ *   globalRadiationSum: number|null, diffuseRadiationSum: number|null,
+ *   directRadiationSum: number|null, uvErythemalSum: number|null,
+ *   infraredSum: number|null}>}
+ */
+export function normalizeAemetRadiationSnapshot(csvText) {
+  if (typeof csvText !== 'string') return [];
+  const lines = csvText.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 3) return [];
+  const rows = [];
+  for (let i = 3; i < lines.length; i++) {
+    const fields = splitAemetCsvLine(lines[i]);
+    if (fields.length < 2) continue;
+    const [name, indicativo] = fields;
+    if (!indicativo || !name) continue;
+    const sumByType = {};
+    for (let j = 2; j < fields.length; j++) {
+      if (fields[j] !== 'GL' && fields[j] !== 'DF' && fields[j] !== 'DT' && fields[j] !== 'UVB' && fields[j] !== 'IR') continue;
+      const type = fields[j];
+      // The SUMA column is the next occurrence of a value at the end of
+      // this block — found by scanning forward to the next Tipo marker (or
+      // the row's end) and taking the field immediately before it.
+      let end = fields.length;
+      for (let k = j + 1; k < fields.length; k++) {
+        if (fields[k] === 'GL' || fields[k] === 'DF' || fields[k] === 'DT' || fields[k] === 'UVB' || fields[k] === 'IR') {
+          end = k;
+          break;
+        }
+      }
+      sumByType[type] = finiteOrNull(fields[end - 1]);
+    }
+    rows.push({
+      indicativo,
+      name,
+      globalRadiationSum: sumByType.GL ?? null,
+      diffuseRadiationSum: sumByType.DF ?? null,
+      directRadiationSum: sumByType.DT ?? null,
+      uvErythemalSum: sumByType.UVB ?? null,
+      infraredSum: sumByType.IR ?? null,
+    });
+  }
+  return rows;
+}
+
 export function filterActiveAemetWarnings(zones, now = Date.now()) {
   if (!Array.isArray(zones)) return [];
   const result = [];

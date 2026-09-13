@@ -5,6 +5,7 @@ import { gbfsProxy } from './gbfs.js';
 import { celestrakProxy, rocketLaunchesProxy } from './space.js';
 import {
   aemetBeachesProxy,
+  aemetEnvironmentalProxy,
   aemetFireRiskProxy,
   aemetForecastProxy,
   aemetLightningProxy,
@@ -4706,6 +4707,7 @@ export function localProviderPlugins() {
       aemetUvIndexProxy(),
       aemetSeaSurfaceTempProxy(),
       aemetBeachesProxy(),
+      aemetEnvironmentalProxy(),
       rocketLaunchesProxy(),
       terrainHeightsProxy(),
       adsbdbProxy(),

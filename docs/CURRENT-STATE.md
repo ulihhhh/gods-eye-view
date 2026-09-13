@@ -726,6 +726,64 @@ false "DEGRADED" one during the ongoing background fill-in.
 Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
 Phase A14).
 
+## AEMET Environmental Networks (2026-09-13)
+
+`aemet-environmental` (token `k`, `enabled-only`) is the plan's one
+deliberate grouping exception: ozone and solar radiation, two small station
+networks (a few dozen sites each) folded into one layer with a network-type
+chip rather than two near-empty toggle rows. The plan's guessed endpoint
+paths (`redes-especiales/ozono`, `redes-especiales/radiacion`) don't exist —
+the real ones, found in AEMET's own published OpenAPI spec
+(`https://opendata.aemet.es/AEMET_OpenData_specification.json`, linked from
+the AEMET GitLab repo's own POSTMAN.md rather than guessed), are
+`red/especial/ozono` and `red/especial/radiacion`. Both are confirmed live
+to return **CSV, not JSON**, and — a genuine first for this app — are
+**correctly UTF-8-encoded**: every other AEMET feed's ISO-8859-15-declared
+response really is ISO-8859-15 (hence this codebase's blanket "always
+decode as latin1" habit), but these two are the opposite — confirmed live
+by latin1-decoding a real pull and getting "CoruÃ±a" instead of "Coruña".
+The proxy decodes these two specifically as UTF-8 because of this.
+
+Each row's `Indicativo` field is the same station id (`idema`)
+`aemet-stations` already uses — confirmed live by cross-referencing all 7
+ozone stations against a real stations pull (6 of 7 matched instantly; the
+7th, Zaragoza, simply wasn't in that particular live snapshot). No new
+geometry source needed, same "join to an existing id space" pattern as
+A2/A8; `aemetEnvironmentalProxy()` does its own independent stations fetch
+for this (mirroring `aemetUvIndexProxy()`'s own self-contained convention).
+
+Two further networks the plan proposed folding in here — `contaminacionfondo`
+(EMEP background pollution, 13 fixed stations) and `perfilozono` (vertical
+ozone profile, 2 fixed stations) — are real, live-verified, and **not**
+geometry-blocked (their station enums are documented directly in the
+OpenAPI spec's own parameter descriptions, the same kind of find that
+unblocked A7). Deliberately deferred out of v1 anyway:
+`contaminacionfondo`'s `datos` response is a proprietary fixed-field text
+format ("FINN", confirmed live) with 144 ten-minute readings per station per
+day, needing its own bespoke parser; `perfilozono` returns an
+altitude-indexed vertical profile on a weekly cadence, not a single current
+value — a fundamentally different shape than "one point, one reading."
+
+The frontend (`src/data/aemetEnvironmental.js`) is a real point layer
+mirroring `aemetUvIndex.js`, with one addition: a `networkType` chip
+(`getRowControls()`/`setParams()`, the same mechanism `satellites.js`'s
+DENSE chip uses) switches which metric drives point color — ozone
+(`OZONE_COLOR_STOPS`, 260–340 Dobson Units) or radiation
+(`RADIATION_COLOR_STOPS`, 500–3600 in `10·kJ/m²`) — while the click-to-inspect
+card always shows both metrics regardless of the active chip, labeling
+whichever one a given station doesn't report rather than omitting it. v1
+scoping note: the chip's selection is **not** persisted into share-links —
+registered as `enabled-only` rather than wiring a full option codec (the
+share-link encoding satellites/flights/cctv/radio use), a deliberate
+simplification the same way UV-index fixed its day offset to `0`.
+
+**Verified live against the real API**: 28 real stations rendered with
+correct UTF-8 names ("A Coruña", "Izaña"); the network-type chip toggles
+between "OZONE" and "RADIATION" live in the panel; no console errors.
+
+Voice-tool wiring deferred, same as every other AEMET layer (batched pass,
+Phase A14).
+
 ## Installations and map-source guidance
 
 - On an uncached Overpass failure, mapped installations keep their existing

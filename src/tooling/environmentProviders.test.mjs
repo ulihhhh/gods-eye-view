@@ -7,6 +7,7 @@ import { firmsProxy } from 'gods-eye-view/server/providers/firms';
 import { gbfsProxy } from 'gods-eye-view/server/providers/gbfs';
 import {
   aemetBeachesProxy,
+  aemetEnvironmentalProxy,
   aemetFireRiskProxy,
   aemetForecastProxy,
   aemetLightningProxy,
@@ -81,6 +82,7 @@ test('standalone composition mounts every extracted provider exactly once withou
     aemetUvIndexProxy,
     aemetSeaSurfaceTempProxy,
     aemetBeachesProxy,
+    aemetEnvironmentalProxy,
   ])
     assert.equal(plugins.filter((p) => p.name === factory().name).length, 1);
 });
@@ -872,6 +874,70 @@ test('AEMET beaches proxy cools down on an explicit 429 without corrupting cache
   await plugin._sweepPromiseForTest();
   const second = json(await request());
   assert.equal(second.count, 2, 'the previously rate-limited beach succeeds on the next sweep');
+});
+
+test('AEMET environmental proxy joins ozone/radiation rows to station coordinates by indicativo, decodes UTF-8 (not latin1), and caches memory-only at 3h', async (t) => {
+  isolate(t, { AEMET_API_KEY: '' });
+  let now = Date.UTC(2026, 8, 13, 12);
+  t.mock.method(Date, 'now', () => now);
+  let calls = 0;
+  const stationsRaw = [
+    { idema: '1387', ubi: 'A CORUÑA', lat: '43.365969', lon: '-8.421517', fint: '2026-09-13T12:00:00' },
+    { idema: '8178D', ubi: 'ALBACETE', lat: '38.9479', lon: '-1.8560', fint: '2026-09-13T12:00:00' },
+    // No station for this ozone indicativo — must be dropped, not fabricated a position.
+  ];
+  const ozoneCsv = '"CAPA DE OZONO"\r\n"12-09-26"\r\n"Estación";"Indicativo";"OZONO"\r\n"A Coruña";"1387";"285"\r\n"Nowhere";"99999X";"999"\r\n';
+  const radiationCsv = '"RADIACION SOLAR"\r\n"12-09-26"\r\n"Estación";"Indicativo";"Tipo";"5";"SUMA"\r\n"Albacete";"8178D";"GL";"1";"2333"\r\n';
+  t.mock.method(globalThis, 'fetch', async (raw) => {
+    calls++;
+    const url = new URL(raw);
+    assert.equal(url.hostname, 'opendata.aemet.es');
+    if (url.pathname.endsWith('/stations-datos-fixture')) {
+      return new Response(Buffer.from(JSON.stringify(stationsRaw), 'latin1'), { headers: { 'content-type': 'text/plain;charset=ISO-8859-15' } });
+    }
+    if (url.pathname.endsWith('/ozono-datos-fixture')) {
+      return new Response(Buffer.from(ozoneCsv, 'utf8'), { headers: { 'content-type': 'text/plain;charset=UTF-8' } });
+    }
+    if (url.pathname.endsWith('/radiacion-datos-fixture')) {
+      return new Response(Buffer.from(radiationCsv, 'utf8'), { headers: { 'content-type': 'text/plain;charset=UTF-8' } });
+    }
+    assert.equal(url.searchParams.get('api_key'), 'fixture-key');
+    if (url.pathname.includes('/observacion/convencional/todas')) {
+      return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/stations-datos-fixture' });
+    }
+    if (url.pathname.includes('/red/especial/ozono')) {
+      return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/ozono-datos-fixture' });
+    }
+    assert.ok(url.pathname.includes('/red/especial/radiacion'), `unexpected path ${url.pathname}`);
+    return Response.json({ descripcion: 'exito', estado: 200, datos: 'https://opendata.aemet.es/radiacion-datos-fixture' });
+  });
+  const request = install(aemetEnvironmentalProxy());
+  assert.equal((await request()).status, 503, 'keyless');
+  assert.equal(json(await request('/status')).hasKey, false);
+  assert.equal(calls, 0);
+  process.env.AEMET_API_KEY = 'fixture-key';
+
+  const first = json(await request());
+  assert.equal(first.count, 2, 'the unmatched ozone row (99999X) is dropped, not fabricated a position');
+  const byIndicativo = Object.fromEntries(first.stations.map((s) => [s.indicativo, s]));
+  assert.equal(byIndicativo['1387'].name, 'A Coruña', 'the genuinely-UTF-8 name decodes correctly, not as latin1 mojibake');
+  assert.equal(byIndicativo['1387'].lat, 43.365969);
+  assert.equal(byIndicativo['1387'].ozoneDobson, 285);
+  assert.equal(byIndicativo['1387'].globalRadiationSum, null, 'a station with only ozone data leaves radiation fields null');
+  assert.equal(byIndicativo['8178D'].globalRadiationSum, 2333);
+  assert.equal(byIndicativo['8178D'].ozoneDobson, null, 'a station with only radiation data leaves ozone null');
+  assert.equal(calls, 6, 'stations envelope+datos, ozone envelope+datos, radiation envelope+datos');
+
+  assert.equal(json(await request()).count, 2);
+  assert.equal(calls, 6, 'within the 3h TTL: served from memory cache, no new upstream calls');
+
+  now += 3 * 3600_000 + 60_000; // past the 3-hour TTL
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new Error('upstream down');
+  });
+  const stale = json(await request());
+  assert.equal(stale.stale, true);
+  assert.equal(stale.count, 2, 'stale cache beats an empty layer');
 });
 
 test('GBFS keeps host/path/method guards, response caps and distinct information/status cache headers', async (t) => {

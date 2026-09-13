@@ -3,6 +3,7 @@ import aemetFireRiskLayer from '../data/aemetFireRisk.js';
 import aemetUvIndexLayer from '../data/aemetUvIndex.js';
 import aemetSeaSurfaceTempLayer from '../data/aemetSeaSurfaceTemp.js';
 import aemetBeachesLayer from '../data/aemetBeaches.js';
+import aemetEnvironmentalLayer from '../data/aemetEnvironmental.js';
 import aemetLightningLayer from '../data/aemetLightning.js';
 import aemetStationsLayer from '../data/aemetStations.js';
 import aemetWarningsLayer from '../data/aemetWarnings.js';
@@ -46,6 +47,7 @@ export function createStandaloneData({
   dataManager.register(aemetUvIndexLayer);
   dataManager.register(aemetSeaSurfaceTempLayer);
   dataManager.register(aemetBeachesLayer);
+  dataManager.register(aemetEnvironmentalLayer);
   dataManager.register(flightsLayer);
   dataManager.register(militaryFlightsLayer);
   dataManager.register(earthquakesLayer);
