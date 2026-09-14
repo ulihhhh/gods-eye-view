@@ -176,6 +176,42 @@ const LAYER_ALIASES = new Map([
   ['firms', 'local-firms'],
   ['fires', 'local-firms'],
   ['active fires', 'local-firms'],
+  // AEMET (Phase A14 — batched voice wiring for the whole set at once,
+  // deliberately sequenced after every layer's own naming had settled
+  // rather than revising piecemeal per-phase aliases ten separate times).
+  ['weather stations', 'aemet-stations'],
+  ['weather', 'aemet-stations'],
+  ['aemet stations', 'aemet-stations'],
+  ['weather warnings', 'aemet-warnings'],
+  ['storm warnings', 'aemet-warnings'],
+  ['weather alerts', 'aemet-warnings'],
+  ['avisos', 'aemet-warnings'],
+  // Lightning/fire-risk/sea-surface-temp all merged into one
+  // `aemet-weather-imagery` layer (Phase A16) — voice can still turn the
+  // whole layer on/off under any of their old names, but not yet pick
+  // WHICH of the three pills is shown (that needs its own params-aware
+  // voice tool, not built this pass — see the plan doc's Phase A16 note).
+  ['lightning', 'aemet-weather-imagery'],
+  ['lightning activity', 'aemet-weather-imagery'],
+  ['lightning strikes', 'aemet-weather-imagery'],
+  ['fire risk', 'aemet-weather-imagery'],
+  ['wildfire risk', 'aemet-weather-imagery'],
+  ['forest fire risk', 'aemet-weather-imagery'],
+  ['uv index', 'aemet-uv-index'],
+  ['uv', 'aemet-uv-index'],
+  ['ultraviolet index', 'aemet-uv-index'],
+  ['sea surface temperature', 'aemet-weather-imagery'],
+  ['sea temperature', 'aemet-weather-imagery'],
+  ['ocean temperature', 'aemet-weather-imagery'],
+  ['water temperature', 'aemet-weather-imagery'],
+  ['weather imagery', 'aemet-weather-imagery'],
+  ['beach forecast', 'aemet-beaches'],
+  ['beaches', 'aemet-beaches'],
+  ['beach weather', 'aemet-beaches'],
+  ['environmental networks', 'aemet-environmental'],
+  ['ozone', 'aemet-environmental'],
+  ['solar radiation', 'aemet-environmental'],
+  ['radiation levels', 'aemet-environmental'],
 ]);
 
 const CITY_ALIASES = new Map([
@@ -3273,6 +3309,9 @@ function layerTitle(layerId) {
   if (layerId === 'local-dams') return 'Dam';
   if (layerId === 'telegeography-submarine-cables') return 'Submarine Cable';
   if (layerId === 'local-firms') return 'Active Fire';
+  if (layerId === 'aemet-uv-index') return 'UV Index City';
+  if (layerId === 'aemet-beaches') return 'Beach';
+  if (layerId === 'aemet-environmental') return 'Environmental Station';
   return layerId || 'Entity';
 }
 

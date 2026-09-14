@@ -195,6 +195,43 @@ test('analyst: route fields queryable from cached enrichment only', async () => 
   assert.deepEqual(r.items.map((i) => i.id), ['SWA1'], 'null route fields never match');
 });
 
+test('analyst: AEMET beaches/UV-index/environmental are queryable (Phase A14 registration)', async () => {
+  const BEACHES = [
+    { id: '2906707', lat: 36.72, lon: -4.41, name: 'La Malagueta', waterTempC: 23, maxTempC: 30, uvMax: 7, sky: 'despejado', wind: 'flojo', waves: 'débil' },
+    { id: '1101503', lat: 36.96, lon: -6.99, name: 'La Barrosa', waterTempC: 21, maxTempC: 27, uvMax: 6, sky: 'nuboso', wind: 'moderado', waves: 'moderado' },
+  ];
+  const UV_CITIES = [
+    { municipioId: '28079', lat: 40.42, lon: -3.7, name: 'Madrid', uvIndex: 8, isCanaryIslands: false },
+  ];
+  const ENV_STATIONS = [
+    { indicativo: '1387', lat: 43.37, lon: -8.42, name: 'A Coruña', ozoneDobson: 285, globalRadiationSum: 2205 },
+  ];
+  const engine = createAnalystEngine({
+    getRecords: (key) => ({
+      'aemet-beaches': BEACHES,
+      'aemet-uv-index': UV_CITIES,
+      'aemet-environmental': ENV_STATIONS,
+    }[key] || []),
+    resolveRegionRing: async () => null,
+    getViewContext: () => ({ lat: 40, lon: -4, viewRadiusKm: 2000 }),
+  });
+
+  const warm = await engine.query({
+    layers: ['aemet-beaches'], scope: { kind: 'anywhere' },
+    filters: [{ field: 'waterTempC', op: 'gt', value: 22 }],
+  });
+  assert.equal(warm.ok, true);
+  assert.deepEqual(warm.items.map((i) => i.id), ['2906707'], 'a flattened forecast field is filterable directly');
+
+  const uv = await engine.query({ layers: ['aemet-uv-index'], scope: { kind: 'anywhere' } });
+  assert.equal(uv.ok, true);
+  assert.equal(uv.items[0].uvIndex, 8);
+
+  const env = await engine.query({ layers: ['aemet-environmental'], scope: { kind: 'anywhere' } });
+  assert.equal(env.ok, true);
+  assert.equal(env.items[0].ozoneDobson, 285);
+});
+
 test('helpers: haversine sanity + scope radius', () => {
   const km = haversineKm(30.2672, -97.7431, 29.7604, -95.3698); // Austin→Houston
   assert.ok(km > 200 && km < 280, `Austin-Houston ~235km, got ${km}`);

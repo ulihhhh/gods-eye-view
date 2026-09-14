@@ -1,4 +1,10 @@
 import { DataLayerManager } from '../data/manager.js';
+import aemetUvIndexLayer from '../data/aemetUvIndex.js';
+import aemetWeatherImageryLayer from '../data/aemetWeatherImagery.js';
+import aemetBeachesLayer from '../data/aemetBeaches.js';
+import aemetEnvironmentalLayer from '../data/aemetEnvironmental.js';
+import aemetStationsLayer from '../data/aemetStations.js';
+import aemetWarningsLayer from '../data/aemetWarnings.js';
 import flightsLayer from '../data/flights.js';
 import militaryFlightsLayer from '../data/militaryFlights.js';
 import earthquakesLayer from '../data/earthquakes.js';
@@ -33,6 +39,12 @@ export function createStandaloneData({
         `Data layers could not be destroyed: ${[...dataManager.layers.keys()].join(', ')}`,
       );
   });
+  dataManager.register(aemetStationsLayer);
+  dataManager.register(aemetWarningsLayer);
+  dataManager.register(aemetWeatherImageryLayer);
+  dataManager.register(aemetUvIndexLayer);
+  dataManager.register(aemetBeachesLayer);
+  dataManager.register(aemetEnvironmentalLayer);
   dataManager.register(flightsLayer);
   dataManager.register(militaryFlightsLayer);
   dataManager.register(earthquakesLayer);

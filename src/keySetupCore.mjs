@@ -70,6 +70,21 @@ export const KEY_SETUP_KEYS = Object.freeze([
     tier: 'free',
   }),
   Object.freeze({
+    id: 'aemet',
+    title: 'AEMET OPENDATA',
+    unlocks: 'Spanish weather stations & warnings',
+    getUrl: 'https://opendata.aemet.es/centrodedescargas/altaUsuario',
+    envVars: Object.freeze(['AEMET_API_KEY']),
+    tier: 'free',
+    // AEMET issues keys with a fixed 3-month validity — unlike every other
+    // entry here, a correctly-configured value silently stops working with no
+    // provider-side notice. `keySetupStatus` surfaces a countdown/expired
+    // badge once it has a recorded issue date for this key (see
+    // `keySetupKeyExpiry` below); other entries omit this field entirely and
+    // get no such badge.
+    validityDays: 90,
+  }),
+  Object.freeze({
     id: 'tomtom',
     title: 'TOMTOM',
     unlocks: 'Real live traffic (keyless runs a simulation)',
@@ -296,16 +311,49 @@ export function isKeySetupExternallyManaged({
   return effective !== '' && (wasExternalAtBoot || effective !== stored);
 }
 
+/** A key with a known validity window is flagged this many days before it lapses. */
+export const KEY_SETUP_EXPIRY_WARNING_DAYS = 14;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Pure expiry math for one key that declares `validityDays` in the registry.
+ * Returns `null` when there is nothing to report — no validity window
+ * (most keys), or no recorded issue date (never saved through this panel, or
+ * saved before this feature existed).
+ * @param {{validityDays?: number, setAtMs?: number, now?: number}} input
+ * @returns {{setAtMs: number, expiresAtMs: number, daysRemaining: number, expired: boolean, warning: boolean}|null}
+ */
+export function keySetupKeyExpiry({ validityDays, setAtMs, now = Date.now() } = {}) {
+  if (!Number.isFinite(validityDays) || validityDays <= 0) return null;
+  if (!Number.isFinite(setAtMs) || setAtMs <= 0) return null;
+  const expiresAtMs = setAtMs + validityDays * DAY_MS;
+  const daysRemaining = Math.ceil((expiresAtMs - now) / DAY_MS);
+  const expired = daysRemaining <= 0;
+  return {
+    setAtMs,
+    expiresAtMs,
+    daysRemaining,
+    expired,
+    warning: !expired && daysRemaining <= KEY_SETUP_EXPIRY_WARNING_DAYS,
+  };
+}
+
 /**
  * Build the status payload the panel renders from: the registry, plus
  * per-entry `set` resolved against the given environment. It never includes
  * a value, suffix, or other credential material.
  * @param {Record<string, string|undefined>} env e.g. process.env
+ * @param {Record<string, {setAtMs: number}>} setAtByEnvVar When this panel
+ *   last saved a NON-null value for an env var, keyed by that var's name.
+ *   Absent entries (unset, externally-managed, or saved before this feature
+ *   existed) simply produce no `expiry` — never a guess.
  */
-export function keySetupStatus(env = {}) {
+export function keySetupStatus(env = {}, setAtByEnvVar = {}) {
   const keys = KEY_SETUP_KEYS.map((entry) => {
     const values = entry.envVars.map((name) => String(env[name] ?? '').trim());
     const set = values.every((value) => value.length > 0);
+    const setAtMs = setAtByEnvVar[entry.envVars[0]]?.setAtMs;
     return {
       id: entry.id,
       title: entry.title,
@@ -315,6 +363,7 @@ export function keySetupStatus(env = {}) {
       tier: entry.tier,
       clientExposed: Boolean(entry.clientExposed),
       set,
+      expiry: set ? keySetupKeyExpiry({ validityDays: entry.validityDays, setAtMs }) : null,
     };
   });
   return {

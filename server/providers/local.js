@@ -3,6 +3,17 @@ import { tomtomProxy } from './traffic.js';
 import { firmsProxy } from './firms.js';
 import { gbfsProxy } from './gbfs.js';
 import { celestrakProxy, rocketLaunchesProxy } from './space.js';
+import {
+  aemetBeachesProxy,
+  aemetEnvironmentalProxy,
+  aemetFireRiskProxy,
+  aemetForecastProxy,
+  aemetLightningProxy,
+  aemetSeaSurfaceTempProxy,
+  aemetStationsProxy,
+  aemetUvIndexProxy,
+  aemetWarningsProxy,
+} from './weather.js';
 export { LL2_CACHE_TTL_MS, launchLibraryRequestHeaders } from './space.js';
 /**
  * Local Node provider middleware for God's Eye View.
@@ -4486,9 +4497,32 @@ function keySetupEndpoint() {
       wasExternalAtBoot,
     });
   };
+  // When this panel last saved a value for a key with a `validityDays`
+  // window (currently just AEMET), keyed by env var name — {setAtMs}. No
+  // secrets: names and timestamps only. Read/write are best-effort; losing
+  // this file only costs the expiry badge, never a credential, so it gets
+  // the plain `.gev-cache`-style treatment rather than the hardened
+  // atomic-write path `persistStore` uses for actual key material.
+  const setAtMetaPath = path.join(__dirname, '.gev-cache', 'key-setup-meta.json');
+  const readSetAtMeta = () => {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(setAtMetaPath, 'utf8'));
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  };
+  const writeSetAtMeta = (meta) => {
+    try {
+      fs.mkdirSync(path.dirname(setAtMetaPath), { recursive: true });
+      fs.writeFileSync(setAtMetaPath, JSON.stringify(meta), 'utf8');
+    } catch (error) {
+      console.warn('[KeySetup] Could not save key-issue metadata (expiry badge only):', error?.message || error);
+    }
+  };
   const providerStatus = () => {
     const inStore = storeValues();
-    const status = keySetupStatus(process.env);
+    const status = keySetupStatus(process.env, readSetAtMeta());
     for (const key of status.keys) {
       // 'file' = this panel's own store holds exactly this value (replace/remove
       // offered); 'external' = supplied by env/Keychain/another workflow
@@ -4626,6 +4660,20 @@ function keySetupEndpoint() {
           for (const [name, value] of Object.entries(verdict.updates)) {
             process.env[name] = value === null ? '' : value;
           }
+          // Record/clear the issue date behind the expiry badge. A save
+          // always means "this value is fresh right now" — replacing an
+          // expiring key resets its countdown, same as getting a new one.
+          const meta = readSetAtMeta();
+          let metaChanged = false;
+          for (const [name, value] of Object.entries(verdict.updates)) {
+            if (value === null) {
+              if (name in meta) { delete meta[name]; metaChanged = true; }
+            } else {
+              meta[name] = { setAtMs: Date.now() };
+              metaChanged = true;
+            }
+          }
+          if (metaChanged) writeSetAtMeta(meta);
           respond(res, 200, {
             ok: true,
             saved: Object.keys(verdict.updates),
@@ -4770,6 +4818,15 @@ export function localProviderPlugins() {
       celestrakProxy(),
       tomtomProxy(),
       firmsProxy(),
+      aemetStationsProxy(),
+      aemetWarningsProxy(),
+      aemetForecastProxy(),
+      aemetLightningProxy(),
+      aemetFireRiskProxy(),
+      aemetUvIndexProxy(),
+      aemetSeaSurfaceTempProxy(),
+      aemetBeachesProxy(),
+      aemetEnvironmentalProxy(),
       rocketLaunchesProxy(),
       terrainHeightsProxy(),
       adsbdbProxy(),

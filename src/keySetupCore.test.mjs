@@ -7,6 +7,7 @@ import {
   KEY_SETUP_VALUE_LIMIT,
   commandCompletedSuccessfully,
   isKeySetupExternallyManaged,
+  keySetupKeyExpiry,
   keySetupStatus,
   keySetupRequirement,
   knownKeySetupEnvVars,
@@ -14,6 +15,8 @@ import {
   upsertDotenvValues,
   validateKeySetupUpdates,
 } from './keySetupCore.mjs';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 test('provider requirements name the registry env vars and next step', () => {
   assert.equal(
@@ -353,4 +356,60 @@ test('server Google key can be saved and removed without appearing in status val
   assert.equal(entry.set, true);
   assert.ok(!entry.clientExposed);
   assert.ok(!JSON.stringify(status).includes(secret));
+});
+
+test('key expiry: no validity window or no recorded issue date reports nothing', () => {
+  assert.equal(keySetupKeyExpiry({}), null, 'no validityDays at all');
+  assert.equal(
+    keySetupKeyExpiry({ validityDays: 90 }),
+    null,
+    'a validity window with no recorded setAtMs (never saved through the panel, or saved before this feature existed)',
+  );
+  assert.equal(keySetupKeyExpiry({ validityDays: 0, setAtMs: Date.now() }), null);
+});
+
+test('key expiry: days remaining, warning window, and expired all compute off one clock', () => {
+  const now = Date.UTC(2026, 0, 90); // day 90 of a synthetic year, for round numbers
+  const freshlySaved = keySetupKeyExpiry({ validityDays: 90, setAtMs: now, now });
+  assert.equal(freshlySaved.daysRemaining, 90);
+  assert.equal(freshlySaved.expired, false);
+  assert.equal(freshlySaved.warning, false);
+
+  const insideWarningWindow = keySetupKeyExpiry({
+    validityDays: 90,
+    setAtMs: now - 80 * DAY_MS,
+    now,
+  });
+  assert.equal(insideWarningWindow.daysRemaining, 10);
+  assert.equal(insideWarningWindow.expired, false);
+  assert.equal(insideWarningWindow.warning, true, 'inside KEY_SETUP_EXPIRY_WARNING_DAYS of expiry');
+
+  const justExpired = keySetupKeyExpiry({ validityDays: 90, setAtMs: now - 90 * DAY_MS, now });
+  assert.equal(justExpired.daysRemaining, 0);
+  assert.equal(justExpired.expired, true);
+  assert.equal(justExpired.warning, false, 'expired takes priority over warning, never both');
+
+  const longExpired = keySetupKeyExpiry({ validityDays: 90, setAtMs: now - 200 * DAY_MS, now });
+  assert.equal(longExpired.expired, true);
+  assert.ok(longExpired.daysRemaining < 0);
+});
+
+test('status attaches expiry only to a set key whose registry entry declares validityDays', () => {
+  const now = Date.now();
+  const status = keySetupStatus(
+    { AEMET_API_KEY: 'fixture-key', FIRMS_MAP_KEY: 'fixture-key' },
+    { AEMET_API_KEY: { setAtMs: now }, FIRMS_MAP_KEY: { setAtMs: now } },
+  );
+  const aemet = status.keys.find((key) => key.id === 'aemet');
+  assert.ok(aemet.expiry, 'AEMET declares validityDays and has a recorded issue date');
+  assert.equal(aemet.expiry.daysRemaining, 90);
+  const firms = status.keys.find((key) => key.id === 'firms');
+  assert.equal(firms.expiry, null, 'FIRMS has no validityDays, regardless of recorded metadata');
+});
+
+test('status omits expiry for an unset key even if stale metadata lingers for it', () => {
+  const status = keySetupStatus({}, { AEMET_API_KEY: { setAtMs: Date.now() } });
+  const aemet = status.keys.find((key) => key.id === 'aemet');
+  assert.equal(aemet.set, false);
+  assert.equal(aemet.expiry, null, 'a removed/never-set key shows no expiry, however old the leftover metadata is');
 });
