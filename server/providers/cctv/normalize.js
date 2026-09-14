@@ -385,6 +385,19 @@ export function isLikelyFinlandCoordinate(lat, lon) {
   return lat >= 59.5 && lat <= 70.5 && lon >= 19 && lon <= 32;
 }
 
+/** Catalonia + Andorra bounding box (generous: mainland Catalonia is roughly
+ * 40.5..42.9 N, 0.15..3.4 E; Andorra's cameras, republished in the same feed,
+ * sit inside that same box). */
+export function isLikelyCataloniaCoordinate(lat, lon) {
+  return (
+    isPlausibleLatLon(lat, lon) &&
+    lat >= 40.3 &&
+    lat <= 42.9 &&
+    lon >= 0.0 &&
+    lon <= 3.4
+  );
+}
+
 /** Bilbao metro-area bounding box (observed catalog extent 43.24..43.29 N,
  * -2.97..-2.90 E, with margin for future cameras). */
 export function isLikelyBilbaoCoordinate(lat, lon) {

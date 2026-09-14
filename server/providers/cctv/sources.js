@@ -54,6 +54,12 @@ import {
   BILBAO_IMAGE_ORIGIN,
   DEFAULT_BILBAO_MAX_SOURCES,
   BILBAO_CENTER,
+  CATALONIA_CAMERAS_URL,
+  CATALONIA_IMAGE_HOSTS,
+  CATALONIA_FONT_CREDIT,
+  CATALONIA_FONT_ELEVATION_M,
+  DEFAULT_CATALONIA_MAX_SOURCES,
+  CATALONIA_ANCHORS,
   CCTV_SOURCE_FETCH_TIMEOUT_MS,
 } from './constants.js';
 import {
@@ -72,6 +78,7 @@ import {
   isLikelyTexasCoordinate,
   isLikelyNswCoordinate,
   isLikelyBilbaoCoordinate,
+  isLikelyCataloniaCoordinate,
   decodeNumericEntities,
   cameraDisplayCode,
   rowArrayToObject,
@@ -1481,6 +1488,174 @@ export async function loadBilbaoSourcesFromOpenData() {
   } catch (error) {
     console.warn(
       '[CCTV] Bilbao camera download error:',
+      error?.message || error,
+    );
+    return [];
+  }
+}
+
+/**
+ * Parse the Catalonia (`cameres.xml`) WFS/GML feed into raw feature records.
+ * Regex-based like the Tarktee DATEX2 parser above — the feed is small
+ * (~160 features) and this avoids pulling in an XML dependency for one field
+ * set per feature.
+ *
+ * @param {string} xml
+ * @returns {Array<{fid:string, lat:number, lon:number, carretera:string, municipi:string, pk:string, link:string, font:string}>}
+ */
+export function parseCataloniaXml(xml) {
+  const out = [];
+  const blockRe = /<gml:featureMember>([\s\S]*?)<\/gml:featureMember>/g;
+  const tag = (block, name) => {
+    const match = new RegExp(`<cite:${name}>([^<]*)<\\/cite:${name}>`).exec(
+      block,
+    );
+    return match ? decodeNumericEntities(match[1]) : '';
+  };
+  let match;
+  while ((match = blockRe.exec(String(xml || ''))) !== null) {
+    const block = match[1];
+    const fidMatch = /<cite:cameres\s+fid="([^"]+)"/.exec(block);
+    const coordsMatch = /<gml:coordinates[^>]*>([^<]+)<\/gml:coordinates>/.exec(
+      block,
+    );
+    if (!fidMatch || !coordsMatch) continue;
+    const [lonRaw, latRaw] = coordsMatch[1].split(',');
+    out.push({
+      fid: fidMatch[1],
+      lon: toFiniteNumber(lonRaw),
+      lat: toFiniteNumber(latRaw),
+      carretera: tag(block, 'carretera'),
+      municipi: tag(block, 'municipi'),
+      pk: tag(block, 'pk'),
+      link: tag(block, 'link'),
+      font: tag(block, 'font'),
+    });
+  }
+  return out;
+}
+
+/**
+ * Validate and normalize one Catalonia feed `link` against the publisher
+ * host allowlist (CATALONIA_IMAGE_HOSTS), upgrading to https. Rejects
+ * anything else, including a host that merely resembles an allowed one.
+ *
+ * @param {string} rawUrl
+ * @returns {string} Normalized https URL, or '' if not accepted.
+ */
+export function normalizeCataloniaImageUrl(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(String(rawUrl || '').trim());
+  } catch {
+    return '';
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+  if (!CATALONIA_IMAGE_HOSTS.has(parsed.hostname)) return '';
+  parsed.protocol = 'https:';
+  return parsed.toString();
+}
+
+/**
+ * Human label for one Catalonia camera: "<road/place> (<municipality>)",
+ * skipping the parenthetical when the municipality is already named in the
+ * road/place text or when one half is missing.
+ *
+ * @param {string} carretera
+ * @param {string} municipi
+ * @returns {string}
+ */
+export function cataloniaCameraName(carretera, municipi) {
+  const road = String(carretera || '').trim();
+  const city = String(municipi || '').trim();
+  if (road && city) {
+    return road.toLowerCase().includes(city.toLowerCase())
+      ? road
+      : `${road} (${city})`;
+  }
+  return road || city || 'Càmera de trànsit';
+}
+
+/**
+ * Fetch Catalonia traffic cameras (Servei Català de Trànsit), keyless: one
+ * WFS/GML XML list. The feed aggregates four publishers under `font` — SCT's
+ * own highway cameras plus hotlinked Barcelona (IMI), Terrassa and Andorra
+ * cameras — so frame URLs are checked against a host allowlist rather than
+ * one pinned origin, and each non-SCT camera carries its publisher as a
+ * `credit` alongside the shared `provider`. The feed carries no heading, so
+ * every camera takes the id-hash fallback, low-confidence pose (same as TfL
+ * and Fintraffic).
+ *
+ * @returns {Promise<Array<object>>} Normalized camera source objects.
+ */
+export async function loadCataloniaSourcesFromOpenData() {
+  try {
+    const resp = await fetch(CATALONIA_CAMERAS_URL, {
+      headers: { Accept: 'application/xml,text/xml,*/*' },
+      signal: AbortSignal.timeout(CCTV_SOURCE_FETCH_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      console.warn('[CCTV] Catalonia camera download failed:', resp.status);
+      return [];
+    }
+    const xml = await resp.text();
+    const rows = parseCataloniaXml(xml);
+    if (!rows.length) return [];
+
+    const cameras = [];
+    for (const row of rows) {
+      if (!row.fid) continue;
+      if (!isLikelyCataloniaCoordinate(row.lat, row.lon)) continue;
+      const imageUrl = normalizeCataloniaImageUrl(row.link);
+      if (!imageUrl) continue;
+
+      const font = row.font.trim();
+      const cameraId = `cat-${row.fid
+        .replace(/^cameres\.fid-/, '')
+        .replace(/[^a-zA-Z0-9]/g, '')}`;
+
+      cameras.push({
+        id: cameraId,
+        name: cataloniaCameraName(row.carretera, row.municipi),
+        city: row.municipi.trim() || 'Catalunya',
+        cityId: 'catalunya',
+        provider: 'Servei Català de Trànsit',
+        lat: row.lat,
+        lon: row.lon,
+        headingDeg: fallbackHeadingFromId(cameraId),
+        headingConfidence: 'low',
+        pitchDeg: -18,
+        fovDeg: 44,
+        rangeM: 145,
+        mountHeightM: 8,
+        groundElevationM: CATALONIA_FONT_ELEVATION_M[font] ?? 80,
+        feedType: 'image',
+        url: imageUrl,
+        snapshotUrl: imageUrl,
+        sourceKind: 'catalonia-open-data',
+        license:
+          "Generalitat de Catalunya — Llicència oberta d'ús d'informació",
+        credit: CATALONIA_FONT_CREDIT[font] || '',
+      });
+    }
+
+    const unique = Array.from(
+      new Map(cameras.map((camera) => [camera.id, camera])).values(),
+    );
+    const maxRaw = Number(
+      process.env.CCTV_CATALONIA_MAX_SOURCES || DEFAULT_CATALONIA_MAX_SOURCES,
+    );
+    const maxCount = Number.isFinite(maxRaw)
+      ? Math.max(8, Math.min(600, Math.floor(maxRaw)))
+      : DEFAULT_CATALONIA_MAX_SOURCES;
+    const prioritized = prioritizeSources(unique, maxCount, CATALONIA_ANCHORS);
+    console.log(
+      `[CCTV] Loaded Catalonia camera sources: ${unique.length} (using nearest ${prioritized.length})`,
+    );
+    return prioritized;
+  } catch (error) {
+    console.warn(
+      '[CCTV] Catalonia camera download error:',
       error?.message || error,
     );
     return [];

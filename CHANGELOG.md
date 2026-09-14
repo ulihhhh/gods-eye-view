@@ -1,5 +1,12 @@
 # Changelog
 
+- Add Catalonia (Servei Català de Trànsit) as a keyless CCTV source pack: ~163
+  cameras from a WFS/GML feed that aggregates SCT's own highway cameras with
+  hotlinked Barcelona, Terrassa and Andorra cameras, each partner named as a
+  credit beside the shared provider. Ambient-card refresh paced to 3 minutes,
+  matching the empirically observed upstream cadence. `CCTV_CATALONIA_MAX_SOURCES`
+  sets the cap and `CCTV_CATALONIA_ENABLED=0` turns the pack off.
+
 - Add Bilbao (Ayuntamiento de Bilbao, CC BY 4.0) as a keyless CCTV source pack:
   119 municipal cameras with compass headings carried directly in the feed.
   `CCTV_BILBAO_MAX_SOURCES` sets the cap and `CCTV_BILBAO_ENABLED=0` turns the

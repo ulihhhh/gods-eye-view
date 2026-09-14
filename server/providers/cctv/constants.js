@@ -231,6 +231,50 @@ export const BILBAO_CAMERAS_URL =
 export const BILBAO_IMAGE_ORIGIN = 'https://www.bilbao.eus/camarastrafico/';
 export const DEFAULT_BILBAO_MAX_SOURCES = 150;
 export const BILBAO_CENTER = { lat: 43.263, lon: -2.935 };
+/**
+ * Catalonia traffic cameras (Servei Català de Trànsit): one keyless WFS/GML
+ * XML list (verified 2026-09-15, 163 features, hourly catalog refresh). The
+ * feed aggregates four publishers under one `font` field — SCT's own highway
+ * cameras plus hotlinked municipal/national cameras from Barcelona (IMI),
+ * Terrassa, and Andorra — each on its own image host, so frame URLs are
+ * validated against a host allowlist rather than one pinned origin.
+ */
+export const CATALONIA_CAMERAS_URL =
+  'http://www.gencat.cat/transit/opendata/cameres.xml';
+/** Allowed image hosts, one per `font` publisher in the feed. */
+export const CATALONIA_IMAGE_HOSTS = Object.freeze(
+  new Set([
+    'mct.gencat.cat', // SCT
+    'www.bcn.cat', // IMI (Ajuntament de Barcelona)
+    'emap.terrassa.cat', // Ajuntament de Terrassa
+    'app.mobilitat.ad', // Govern d'Andorra
+  ]),
+);
+/** Per-`font` partner credit, shown beside the provider in the CCTV panel
+ * (same pattern as DriveBC's partner-supplied cameras). SCT is the feed's
+ * own publisher and carries no separate credit. */
+export const CATALONIA_FONT_CREDIT = Object.freeze({
+  IMI: 'Ajuntament de Barcelona',
+  Terrassa: 'Ajuntament de Terrassa',
+  Andorra: "Govern d'Andorra",
+});
+/** Ground-elevation priors in metres, by `font`: the feed carries no
+ * elevation, and this pack spans sea level (Barcelona) to Pyrenean valleys
+ * (Andorra, ~1,000+ m) — a single flat prior would badly misplace one end.
+ * The client's ground snap corrects these on 3D-tile stacks. */
+export const CATALONIA_FONT_ELEVATION_M = Object.freeze({
+  SCT: 80,
+  IMI: 20,
+  Terrassa: 270,
+  Andorra: 1100,
+});
+export const DEFAULT_CATALONIA_MAX_SOURCES = 200;
+/** Prioritization anchors: Barcelona, Terrassa and Andorra la Vella. */
+export const CATALONIA_ANCHORS = [
+  { lat: 41.3874, lon: 2.1686 }, // Barcelona
+  { lat: 41.5636, lon: 2.0111 }, // Terrassa
+  { lat: 42.5063, lon: 1.5218 }, // Andorra la Vella
+];
 /** Camera CATALOGS change rarely; 15 min keeps multi-megabyte upstream list refetches (Austin rows.json + 4 Caltrans districts + TfL + Ontario 511) infrequent. Frames are fetched per-request and are unaffected. */
 export const CCTV_SOURCE_CACHE_MS = 15 * 60 * 1000;
 /** Per-provider catalog-fetch timeout. Bounds the worst-case refresh so one

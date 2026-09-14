@@ -17,6 +17,7 @@ import {
   loadWarendorfSourcesFromCatalog,
   loadNswSourcesFromOpenData,
   loadBilbaoSourcesFromOpenData,
+  loadCataloniaSourcesFromOpenData,
 } from './sources.js';
 
 /** Env kill switch: unset or anything but "0" means enabled. */
@@ -85,6 +86,11 @@ const LIVE_PACKS = [
     name: 'bilbao',
     enabled: () => envEnabled('CCTV_BILBAO_ENABLED'),
     load: loadBilbaoSourcesFromOpenData,
+  },
+  {
+    name: 'catalonia',
+    enabled: () => envEnabled('CCTV_CATALONIA_ENABLED'),
+    load: loadCataloniaSourcesFromOpenData,
   },
 ];
 /**

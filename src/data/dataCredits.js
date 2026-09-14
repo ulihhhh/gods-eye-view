@@ -252,6 +252,14 @@ export const DATA_CREDITS = [
       '(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>)',
   },
   {
+    key: 'catalonia-cctv',
+    html:
+      'CCTV cameras &amp; frames (Catalonia &amp; Andorra): ' +
+      '<a href="https://transit.gencat.cat/" target="_blank" rel="noopener">Servei Català de Trànsit</a> ' +
+      '(Llicència oberta d’ús d’informació - Catalunya); some cameras are supplied by partners ' +
+      '(Ajuntament de Barcelona, Ajuntament de Terrassa, Govern d’Andorra), each named in the CCTV panel',
+  },
+  {
     key: 'telegeography',
     html:
       'Submarine cables: © TeleGeography — ' +
