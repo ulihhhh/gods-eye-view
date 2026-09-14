@@ -295,6 +295,7 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   // rather than silently turning on the wrong layer.
   Object.freeze({ id: 'aemet-weather-imagery', token: 'l', disposition: 'enabled-only' }),
   Object.freeze({ id: 'ais-live-vessels', token: 'a', disposition: 'enabled-only' }),
+  Object.freeze({ id: 'alpr-cameras', token: 'p', disposition: 'enabled-only' }),
   Object.freeze({ id: 'bikeshare', token: 'b', disposition: 'enabled-only' }),
   Object.freeze({ id: 'cctv', token: 'c', disposition: 'enabled+options', optionOwner: 'cctv' }),
   Object.freeze({ id: 'earthquakes', token: 'e', disposition: 'enabled-only' }),

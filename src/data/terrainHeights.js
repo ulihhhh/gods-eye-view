@@ -1,3 +1,4 @@
+import { applicationServices } from '../services/application.js';
 // src/data/terrainHeights.js — batched, cached client terrain-height resolver
 // (docs/plans/2026-07-05-entity-height-datum-fix.md Task 3).
 //
@@ -17,7 +18,7 @@
 //      single request much past ~700-1500 points (depending on coordinate
 //      precision) risks a raw socket-level 431 *before* the proxy's own
 //      request handler runs. So every network request this module issues is
-//      chunked at CHUNK_SIZE (200 points), well under that ceiling, and
+//      chunked at CHUNK_SIZE (64 points), well under that ceiling, and
 //      chunks are sent SEQUENTIALLY (not in parallel) to keep this client
 //      well-behaved against a single dev-server proxy.
 //   2. The proxy's disk cache is keyed by the raw `points` query string, with
@@ -32,7 +33,9 @@
 import { ensureGeoidReady, geoidHeight } from './geoid.js';
 
 /** Max points per outgoing request to `/api/terrain/heights` (see file header, point 1). */
-const CHUNK_SIZE = 200;
+// Match the server's upstream batch so sequential upstream work also fits
+// within this client's 30-second request deadline when Re:Earth slows.
+const CHUNK_SIZE = 64;
 
 /** Avoid repeatedly hitting a known-failing proxy from warm fallback reads. */
 const GEOID_FALLBACK_COOLDOWN_MS = 60_000;
@@ -99,11 +102,8 @@ export function cachedRealEllipsoidalGround(lat, lon) {
 async function fetchChunk(chunk) {
   // lon,lat order (matches the proxy's documented `points=lon,lat;…` contract
   // and Task 2's implementation).
-  const pointsParam = chunk.map(({ lat, lon }) => `${lon.toFixed(5)},${lat.toFixed(5)}`).join(';');
-  const url = `/api/terrain/heights?points=${encodeURIComponent(pointsParam)}`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
-  if (!res.ok) throw new Error(`terrain heights proxy HTTP ${res.status}`);
-  const body = await res.json();
+  const results = await applicationServices.terrain.getHeights(chunk, { signal: AbortSignal.timeout(30000) });
+  const body = { results };
   if (!Array.isArray(body?.results)) throw new Error('malformed terrain heights response (no results array)');
   if (body.results.length !== chunk.length) {
     throw new Error(
@@ -116,7 +116,7 @@ async function fetchChunk(chunk) {
   // the response's own lon/lat fields to re-match — those are also present
   // for callers who want them, but this module doesn't need them.
   for (let i = 0; i < chunk.length; i += 1) {
-    const ellipsoid = Number(body.results[i]?.ellipsoid);
+    const ellipsoid = body.results[i]?.ellipsoid;
     if (!Number.isFinite(ellipsoid)) throw new Error(`non-finite ellipsoid height at index ${i}`);
     out.set(chunk[i].key, ellipsoid);
   }
@@ -145,7 +145,7 @@ function geoidFallback(lat, lon, sourceOrthometricM) {
  * - Results already warm in the in-memory cache are returned without any
  *   network call.
  * - Remaining (deduplicated) coordinates are sent to `/api/terrain/heights`
- *   in sequential chunks of <=200 points.
+ *   in sequential chunks of <=64 points.
  * - If a chunk request fails (network error, non-ok HTTP, malformed body),
  *   every point in THAT chunk falls back to geoid math
  *   (`sourceOrthometricM + geoidHeight` or `geoidHeight` alone) rather than

@@ -133,79 +133,81 @@ export function aemetStationsProxy() {
     };
   }
 
+  function installMiddleware(server) {
+    server.middlewares.use('/api/aemet/stations', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify(obj));
+      };
+      try {
+        const subPath = String(req.url || '').split('?')[0];
+        const key = mapKey();
+        await readDiskOnce();
+
+        if (subPath === '/status') {
+          sendJson(200, {
+            hasKey: Boolean(key),
+            lastFetch: mem ? mem.at : null,
+            count: mem ? filterFreshAemetStations(mem.stations, Date.now()).length : null,
+            stale: mem ? Date.now() - mem.at >= TTL_MS : false,
+            ttlMs: TTL_MS,
+          });
+          return;
+        }
+
+        if (!key) {
+          sendJson(503, { error: 'no_key' });
+          return;
+        }
+
+        const entry = mem;
+        if (entry && Date.now() - entry.at < TTL_MS) {
+          sendJson(200, buildPayload(entry, false));
+          return;
+        }
+        // Stale or missing → refresh, single-flight (concurrent requests
+        // share one upstream pass). Capture the promise locally BEFORE
+        // awaiting: the .finally() nulls `inflight` the moment it settles.
+        if (!inflight) {
+          inflight = refreshUpstream(key)
+            .then(async (fresh) => {
+              mem = fresh;
+              await writeDisk(fresh);
+              return fresh;
+            })
+            .catch((err) => {
+              console.warn(
+                `[aemet-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
+              );
+              return null;
+            })
+            .finally(() => {
+              inflight = null;
+            });
+        }
+        const pending = inflight;
+        const fresh = await pending;
+        if (fresh) {
+          sendJson(200, buildPayload(fresh, false));
+        } else if (entry) {
+          sendJson(200, buildPayload(entry, true)); // upstream down — stale beats empty
+        } else {
+          sendJson(502, { error: 'aemet fetch failed and no cache available' });
+        }
+      } catch (err) {
+        console.warn('[aemet-proxy] error:', err?.message || err);
+        sendJson(500, { error: 'aemet proxy error' });
+      }
+    });
+  }
   return {
     name: 'aemet-stations-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/aemet/stations', async (req, res) => {
-        const sendJson = (status, obj) => {
-          if (res.headersSent) return;
-          res.writeHead(status, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
-          });
-          res.end(JSON.stringify(obj));
-        };
-        try {
-          const subPath = String(req.url || '').split('?')[0];
-          const key = mapKey();
-          await readDiskOnce();
-
-          if (subPath === '/status') {
-            sendJson(200, {
-              hasKey: Boolean(key),
-              lastFetch: mem ? mem.at : null,
-              count: mem ? filterFreshAemetStations(mem.stations, Date.now()).length : null,
-              stale: mem ? Date.now() - mem.at >= TTL_MS : false,
-              ttlMs: TTL_MS,
-            });
-            return;
-          }
-
-          if (!key) {
-            sendJson(503, { error: 'no_key' });
-            return;
-          }
-
-          const entry = mem;
-          if (entry && Date.now() - entry.at < TTL_MS) {
-            sendJson(200, buildPayload(entry, false));
-            return;
-          }
-          // Stale or missing → refresh, single-flight (concurrent requests
-          // share one upstream pass). Capture the promise locally BEFORE
-          // awaiting: the .finally() nulls `inflight` the moment it settles.
-          if (!inflight) {
-            inflight = refreshUpstream(key)
-              .then(async (fresh) => {
-                mem = fresh;
-                await writeDisk(fresh);
-                return fresh;
-              })
-              .catch((err) => {
-                console.warn(
-                  `[aemet-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
-                );
-                return null;
-              })
-              .finally(() => {
-                inflight = null;
-              });
-          }
-          const pending = inflight;
-          const fresh = await pending;
-          if (fresh) {
-            sendJson(200, buildPayload(fresh, false));
-          } else if (entry) {
-            sendJson(200, buildPayload(entry, true)); // upstream down — stale beats empty
-          } else {
-            sendJson(502, { error: 'aemet fetch failed and no cache available' });
-          }
-        } catch (err) {
-          console.warn('[aemet-proxy] error:', err?.message || err);
-          sendJson(500, { error: 'aemet proxy error' });
-        }
-      });
-    },
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }
 
@@ -324,76 +326,78 @@ export function aemetWarningsProxy() {
     };
   }
 
+  function installMiddleware(server) {
+    server.middlewares.use('/api/aemet/warnings', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify(obj));
+      };
+      try {
+        const subPath = String(req.url || '').split('?')[0];
+        const key = mapKey();
+        await readDiskOnce();
+
+        if (subPath === '/status') {
+          sendJson(200, {
+            hasKey: Boolean(key),
+            lastFetch: mem ? mem.at : null,
+            count: mem ? filterActiveAemetWarnings(mem.zones, Date.now()).length : null,
+            stale: mem ? Date.now() - mem.at >= TTL_MS : false,
+            ttlMs: TTL_MS,
+          });
+          return;
+        }
+
+        if (!key) {
+          sendJson(503, { error: 'no_key' });
+          return;
+        }
+
+        const entry = mem;
+        if (entry && Date.now() - entry.at < TTL_MS) {
+          sendJson(200, buildPayload(entry, false));
+          return;
+        }
+        if (!inflight) {
+          inflight = refreshUpstream(key)
+            .then(async (fresh) => {
+              mem = fresh;
+              await writeDisk(fresh);
+              return fresh;
+            })
+            .catch((err) => {
+              console.warn(
+                `[aemet-warnings-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
+              );
+              return null;
+            })
+            .finally(() => {
+              inflight = null;
+            });
+        }
+        const pending = inflight;
+        const fresh = await pending;
+        if (fresh) {
+          sendJson(200, buildPayload(fresh, false));
+        } else if (entry) {
+          sendJson(200, buildPayload(entry, true)); // upstream down — stale beats empty
+        } else {
+          sendJson(502, { error: 'aemet warnings fetch failed and no cache available' });
+        }
+      } catch (err) {
+        console.warn('[aemet-warnings-proxy] error:', err?.message || err);
+        sendJson(500, { error: 'aemet warnings proxy error' });
+      }
+    });
+  }
   return {
     name: 'aemet-warnings-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/aemet/warnings', async (req, res) => {
-        const sendJson = (status, obj) => {
-          if (res.headersSent) return;
-          res.writeHead(status, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
-          });
-          res.end(JSON.stringify(obj));
-        };
-        try {
-          const subPath = String(req.url || '').split('?')[0];
-          const key = mapKey();
-          await readDiskOnce();
-
-          if (subPath === '/status') {
-            sendJson(200, {
-              hasKey: Boolean(key),
-              lastFetch: mem ? mem.at : null,
-              count: mem ? filterActiveAemetWarnings(mem.zones, Date.now()).length : null,
-              stale: mem ? Date.now() - mem.at >= TTL_MS : false,
-              ttlMs: TTL_MS,
-            });
-            return;
-          }
-
-          if (!key) {
-            sendJson(503, { error: 'no_key' });
-            return;
-          }
-
-          const entry = mem;
-          if (entry && Date.now() - entry.at < TTL_MS) {
-            sendJson(200, buildPayload(entry, false));
-            return;
-          }
-          if (!inflight) {
-            inflight = refreshUpstream(key)
-              .then(async (fresh) => {
-                mem = fresh;
-                await writeDisk(fresh);
-                return fresh;
-              })
-              .catch((err) => {
-                console.warn(
-                  `[aemet-warnings-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
-                );
-                return null;
-              })
-              .finally(() => {
-                inflight = null;
-              });
-          }
-          const pending = inflight;
-          const fresh = await pending;
-          if (fresh) {
-            sendJson(200, buildPayload(fresh, false));
-          } else if (entry) {
-            sendJson(200, buildPayload(entry, true)); // upstream down — stale beats empty
-          } else {
-            sendJson(502, { error: 'aemet warnings fetch failed and no cache available' });
-          }
-        } catch (err) {
-          console.warn('[aemet-warnings-proxy] error:', err?.message || err);
-          sendJson(500, { error: 'aemet warnings proxy error' });
-        }
-      });
-    },
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }
 
@@ -524,72 +528,74 @@ export function aemetForecastProxy() {
     }
   }
 
+  function installMiddleware(server) {
+    server.middlewares.use('/api/aemet/forecast', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify(obj));
+      };
+      try {
+        const url = new URL(req.url || '', 'http://internal');
+        const key = apiKey();
+
+        if (url.pathname === '/status') {
+          sendJson(200, {
+            hasKey: Boolean(key),
+            municipiosLoaded: municipiosMem ? municipiosMem.municipios.length : 0,
+            municipiosLastFetch: municipiosMem ? municipiosMem.at : null,
+            cachedForecastCount: forecastByMunicipio.size,
+          });
+          return;
+        }
+
+        if (!key) {
+          sendJson(503, { error: 'no_key' });
+          return;
+        }
+
+        const lat = Number(url.searchParams.get('lat'));
+        const lon = Number(url.searchParams.get('lon'));
+        if (!Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lon) || Math.abs(lon) > 180) {
+          sendJson(400, { error: 'bad_request' });
+          return;
+        }
+
+        const municipios = await ensureMunicipios(key);
+        const nearest = findNearestAemetMunicipio(municipios, lat, lon);
+        if (!nearest) {
+          sendJson(502, { error: 'aemet municipio lookup failed and no cache available' });
+          return;
+        }
+
+        const { forecast, fetchedAt, stale } = await ensureForecast(key, nearest.municipio.id);
+
+        sendJson(200, {
+          fetchedAt,
+          stale,
+          ttlMs: FORECAST_TTL_MS,
+          municipio: {
+            id: nearest.municipio.id,
+            name: nearest.municipio.name,
+            lat: nearest.municipio.lat,
+            lon: nearest.municipio.lon,
+            distanceKm: nearest.distanceKm,
+          },
+          hours: filterUpcomingAemetForecastHours(forecast.hours, madridCivilNow()),
+        });
+      } catch (err) {
+        console.warn('[aemet-forecast-proxy] error:', err?.message || err);
+        sendJson(502, { error: 'aemet forecast fetch failed and no cache available' });
+      }
+    });
+  }
   return {
     name: 'aemet-forecast-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/aemet/forecast', async (req, res) => {
-        const sendJson = (status, obj) => {
-          if (res.headersSent) return;
-          res.writeHead(status, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
-          });
-          res.end(JSON.stringify(obj));
-        };
-        try {
-          const url = new URL(req.url || '', 'http://internal');
-          const key = apiKey();
-
-          if (url.pathname === '/status') {
-            sendJson(200, {
-              hasKey: Boolean(key),
-              municipiosLoaded: municipiosMem ? municipiosMem.municipios.length : 0,
-              municipiosLastFetch: municipiosMem ? municipiosMem.at : null,
-              cachedForecastCount: forecastByMunicipio.size,
-            });
-            return;
-          }
-
-          if (!key) {
-            sendJson(503, { error: 'no_key' });
-            return;
-          }
-
-          const lat = Number(url.searchParams.get('lat'));
-          const lon = Number(url.searchParams.get('lon'));
-          if (!Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lon) || Math.abs(lon) > 180) {
-            sendJson(400, { error: 'bad_request' });
-            return;
-          }
-
-          const municipios = await ensureMunicipios(key);
-          const nearest = findNearestAemetMunicipio(municipios, lat, lon);
-          if (!nearest) {
-            sendJson(502, { error: 'aemet municipio lookup failed and no cache available' });
-            return;
-          }
-
-          const { forecast, fetchedAt, stale } = await ensureForecast(key, nearest.municipio.id);
-
-          sendJson(200, {
-            fetchedAt,
-            stale,
-            ttlMs: FORECAST_TTL_MS,
-            municipio: {
-              id: nearest.municipio.id,
-              name: nearest.municipio.name,
-              lat: nearest.municipio.lat,
-              lon: nearest.municipio.lon,
-              distanceKm: nearest.distanceKm,
-            },
-            hours: filterUpcomingAemetForecastHours(forecast.hours, madridCivilNow()),
-          });
-        } catch (err) {
-          console.warn('[aemet-forecast-proxy] error:', err?.message || err);
-          sendJson(502, { error: 'aemet forecast fetch failed and no cache available' });
-        }
-      });
-    },
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }
 
@@ -654,77 +660,79 @@ export function aemetLightningProxy() {
     return { at: Date.now(), buffer, contentType };
   }
 
+  function installMiddleware(server) {
+    server.middlewares.use('/api/aemet/lightning', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify(obj));
+      };
+      try {
+        const subPath = String(req.url || '').split('?')[0];
+        const key = apiKey();
+
+        if (subPath === '/status') {
+          sendJson(200, {
+            hasKey: Boolean(key),
+            lastFetch: mem ? mem.at : null,
+            stale: mem ? Date.now() - mem.at >= TTL_MS : false,
+            ttlMs: TTL_MS,
+            contentType: mem ? mem.contentType : null,
+          });
+          return;
+        }
+
+        if (!key) {
+          sendJson(503, { error: 'no_key' });
+          return;
+        }
+
+        const entry = mem;
+        if (entry && Date.now() - entry.at < TTL_MS) {
+          res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' });
+          res.end(entry.buffer);
+          return;
+        }
+        if (!inflight) {
+          inflight = fetchUpstream(key)
+            .then((fresh) => {
+              mem = fresh;
+              return fresh;
+            })
+            .catch((err) => {
+              console.warn(
+                `[aemet-lightning-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
+              );
+              return null;
+            })
+            .finally(() => {
+              inflight = null;
+            });
+        }
+        const pending = inflight;
+        const fresh = await pending;
+        if (fresh) {
+          res.writeHead(200, { 'Content-Type': fresh.contentType, 'Cache-Control': 'no-store' });
+          res.end(fresh.buffer);
+        } else if (entry) {
+          res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' }); // upstream down — stale beats empty
+          res.end(entry.buffer);
+        } else {
+          sendJson(502, { error: 'aemet lightning fetch failed and no cache available' });
+        }
+      } catch (err) {
+        console.warn('[aemet-lightning-proxy] error:', err?.message || err);
+        sendJson(500, { error: 'aemet lightning proxy error' });
+      }
+    });
+  }
   return {
     name: 'aemet-lightning-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/aemet/lightning', async (req, res) => {
-        const sendJson = (status, obj) => {
-          if (res.headersSent) return;
-          res.writeHead(status, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
-          });
-          res.end(JSON.stringify(obj));
-        };
-        try {
-          const subPath = String(req.url || '').split('?')[0];
-          const key = apiKey();
-
-          if (subPath === '/status') {
-            sendJson(200, {
-              hasKey: Boolean(key),
-              lastFetch: mem ? mem.at : null,
-              stale: mem ? Date.now() - mem.at >= TTL_MS : false,
-              ttlMs: TTL_MS,
-              contentType: mem ? mem.contentType : null,
-            });
-            return;
-          }
-
-          if (!key) {
-            sendJson(503, { error: 'no_key' });
-            return;
-          }
-
-          const entry = mem;
-          if (entry && Date.now() - entry.at < TTL_MS) {
-            res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' });
-            res.end(entry.buffer);
-            return;
-          }
-          if (!inflight) {
-            inflight = fetchUpstream(key)
-              .then((fresh) => {
-                mem = fresh;
-                return fresh;
-              })
-              .catch((err) => {
-                console.warn(
-                  `[aemet-lightning-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
-                );
-                return null;
-              })
-              .finally(() => {
-                inflight = null;
-              });
-          }
-          const pending = inflight;
-          const fresh = await pending;
-          if (fresh) {
-            res.writeHead(200, { 'Content-Type': fresh.contentType, 'Cache-Control': 'no-store' });
-            res.end(fresh.buffer);
-          } else if (entry) {
-            res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' }); // upstream down — stale beats empty
-            res.end(entry.buffer);
-          } else {
-            sendJson(502, { error: 'aemet lightning fetch failed and no cache available' });
-          }
-        } catch (err) {
-          console.warn('[aemet-lightning-proxy] error:', err?.message || err);
-          sendJson(500, { error: 'aemet lightning proxy error' });
-        }
-      });
-    },
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }
 
@@ -805,78 +813,80 @@ export function aemetFireRiskProxy() {
     }
   }
 
+  function installMiddleware(server) {
+    server.middlewares.use('/api/aemet/fire-risk', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify(obj));
+      };
+      try {
+        const subPath = String(req.url || '').split('?')[0];
+        const key = apiKey();
+
+        if (subPath === '/status') {
+          sendJson(200, {
+            hasKey: Boolean(key),
+            lastFetch: mem ? mem.at : null,
+            stale: mem ? Date.now() - mem.at >= TTL_MS : false,
+            ttlMs: TTL_MS,
+            contentType: mem ? mem.contentType : null,
+            source: mem ? mem.source : null,
+          });
+          return;
+        }
+
+        if (!key) {
+          sendJson(503, { error: 'no_key' });
+          return;
+        }
+
+        const entry = mem;
+        if (entry && Date.now() - entry.at < TTL_MS) {
+          res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' });
+          res.end(entry.buffer);
+          return;
+        }
+        if (!inflight) {
+          inflight = fetchUpstream(key)
+            .then((fresh) => {
+              mem = fresh;
+              return fresh;
+            })
+            .catch((err) => {
+              console.warn(
+                `[aemet-fire-risk-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
+              );
+              return null;
+            })
+            .finally(() => {
+              inflight = null;
+            });
+        }
+        const pending = inflight;
+        const fresh = await pending;
+        if (fresh) {
+          res.writeHead(200, { 'Content-Type': fresh.contentType, 'Cache-Control': 'no-store' });
+          res.end(fresh.buffer);
+        } else if (entry) {
+          res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' }); // upstream down — stale beats empty
+          res.end(entry.buffer);
+        } else {
+          sendJson(502, { error: 'aemet fire-risk fetch failed and no cache available' });
+        }
+      } catch (err) {
+        console.warn('[aemet-fire-risk-proxy] error:', err?.message || err);
+        sendJson(500, { error: 'aemet fire-risk proxy error' });
+      }
+    });
+  }
   return {
     name: 'aemet-fire-risk-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/aemet/fire-risk', async (req, res) => {
-        const sendJson = (status, obj) => {
-          if (res.headersSent) return;
-          res.writeHead(status, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
-          });
-          res.end(JSON.stringify(obj));
-        };
-        try {
-          const subPath = String(req.url || '').split('?')[0];
-          const key = apiKey();
-
-          if (subPath === '/status') {
-            sendJson(200, {
-              hasKey: Boolean(key),
-              lastFetch: mem ? mem.at : null,
-              stale: mem ? Date.now() - mem.at >= TTL_MS : false,
-              ttlMs: TTL_MS,
-              contentType: mem ? mem.contentType : null,
-              source: mem ? mem.source : null,
-            });
-            return;
-          }
-
-          if (!key) {
-            sendJson(503, { error: 'no_key' });
-            return;
-          }
-
-          const entry = mem;
-          if (entry && Date.now() - entry.at < TTL_MS) {
-            res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' });
-            res.end(entry.buffer);
-            return;
-          }
-          if (!inflight) {
-            inflight = fetchUpstream(key)
-              .then((fresh) => {
-                mem = fresh;
-                return fresh;
-              })
-              .catch((err) => {
-                console.warn(
-                  `[aemet-fire-risk-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
-                );
-                return null;
-              })
-              .finally(() => {
-                inflight = null;
-              });
-          }
-          const pending = inflight;
-          const fresh = await pending;
-          if (fresh) {
-            res.writeHead(200, { 'Content-Type': fresh.contentType, 'Cache-Control': 'no-store' });
-            res.end(fresh.buffer);
-          } else if (entry) {
-            res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' }); // upstream down — stale beats empty
-            res.end(entry.buffer);
-          } else {
-            sendJson(502, { error: 'aemet fire-risk fetch failed and no cache available' });
-          }
-        } catch (err) {
-          console.warn('[aemet-fire-risk-proxy] error:', err?.message || err);
-          sendJson(500, { error: 'aemet fire-risk proxy error' });
-        }
-      });
-    },
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }
 
@@ -975,79 +985,81 @@ export function aemetUvIndexProxy() {
     return { at: Date.now(), elaborated: snapshot.elaborated, validAt: snapshot.validAt, cities };
   }
 
+  function installMiddleware(server) {
+    server.middlewares.use('/api/aemet/uv-index', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify(obj));
+      };
+      try {
+        const subPath = String(req.url || '').split('?')[0];
+        const key = apiKey();
+
+        if (subPath === '/status') {
+          sendJson(200, {
+            hasKey: Boolean(key),
+            lastFetch: mem ? mem.at : null,
+            count: mem ? mem.cities.length : null,
+            stale: mem ? Date.now() - mem.at >= UV_TTL_MS : false,
+            ttlMs: UV_TTL_MS,
+          });
+          return;
+        }
+
+        if (!key) {
+          sendJson(503, { error: 'no_key' });
+          return;
+        }
+
+        const entry = mem;
+        if (entry && Date.now() - entry.at < UV_TTL_MS) {
+          sendJson(200, {
+            fetchedAt: entry.at, stale: false, ttlMs: UV_TTL_MS,
+            count: entry.cities.length, elaborated: entry.elaborated, validAt: entry.validAt, cities: entry.cities,
+          });
+          return;
+        }
+        if (!inflight) {
+          inflight = fetchUpstream(key)
+            .then((fresh) => {
+              mem = fresh;
+              return fresh;
+            })
+            .catch((err) => {
+              console.warn(
+                `[aemet-uv-index-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
+              );
+              return null;
+            })
+            .finally(() => {
+              inflight = null;
+            });
+        }
+        const pending = inflight;
+        const fresh = await pending;
+        const payload = fresh || entry;
+        if (payload) {
+          sendJson(200, {
+            fetchedAt: payload.at, stale: !fresh, ttlMs: UV_TTL_MS,
+            count: payload.cities.length, elaborated: payload.elaborated, validAt: payload.validAt, cities: payload.cities,
+          });
+        } else {
+          sendJson(502, { error: 'aemet uv-index fetch failed and no cache available' });
+        }
+      } catch (err) {
+        console.warn('[aemet-uv-index-proxy] error:', err?.message || err);
+        sendJson(500, { error: 'aemet uv-index proxy error' });
+      }
+    });
+  }
   return {
     name: 'aemet-uv-index-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/aemet/uv-index', async (req, res) => {
-        const sendJson = (status, obj) => {
-          if (res.headersSent) return;
-          res.writeHead(status, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
-          });
-          res.end(JSON.stringify(obj));
-        };
-        try {
-          const subPath = String(req.url || '').split('?')[0];
-          const key = apiKey();
-
-          if (subPath === '/status') {
-            sendJson(200, {
-              hasKey: Boolean(key),
-              lastFetch: mem ? mem.at : null,
-              count: mem ? mem.cities.length : null,
-              stale: mem ? Date.now() - mem.at >= UV_TTL_MS : false,
-              ttlMs: UV_TTL_MS,
-            });
-            return;
-          }
-
-          if (!key) {
-            sendJson(503, { error: 'no_key' });
-            return;
-          }
-
-          const entry = mem;
-          if (entry && Date.now() - entry.at < UV_TTL_MS) {
-            sendJson(200, {
-              fetchedAt: entry.at, stale: false, ttlMs: UV_TTL_MS,
-              count: entry.cities.length, elaborated: entry.elaborated, validAt: entry.validAt, cities: entry.cities,
-            });
-            return;
-          }
-          if (!inflight) {
-            inflight = fetchUpstream(key)
-              .then((fresh) => {
-                mem = fresh;
-                return fresh;
-              })
-              .catch((err) => {
-                console.warn(
-                  `[aemet-uv-index-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
-                );
-                return null;
-              })
-              .finally(() => {
-                inflight = null;
-              });
-          }
-          const pending = inflight;
-          const fresh = await pending;
-          const payload = fresh || entry;
-          if (payload) {
-            sendJson(200, {
-              fetchedAt: payload.at, stale: !fresh, ttlMs: UV_TTL_MS,
-              count: payload.cities.length, elaborated: payload.elaborated, validAt: payload.validAt, cities: payload.cities,
-            });
-          } else {
-            sendJson(502, { error: 'aemet uv-index fetch failed and no cache available' });
-          }
-        } catch (err) {
-          console.warn('[aemet-uv-index-proxy] error:', err?.message || err);
-          sendJson(500, { error: 'aemet uv-index proxy error' });
-        }
-      });
-    },
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }
 
@@ -1108,77 +1120,79 @@ export function aemetSeaSurfaceTempProxy() {
     return { at: Date.now(), buffer, contentType };
   }
 
+  function installMiddleware(server) {
+    server.middlewares.use('/api/aemet/sea-surface-temp', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify(obj));
+      };
+      try {
+        const subPath = String(req.url || '').split('?')[0];
+        const key = apiKey();
+
+        if (subPath === '/status') {
+          sendJson(200, {
+            hasKey: Boolean(key),
+            lastFetch: mem ? mem.at : null,
+            stale: mem ? Date.now() - mem.at >= TTL_MS : false,
+            ttlMs: TTL_MS,
+            contentType: mem ? mem.contentType : null,
+          });
+          return;
+        }
+
+        if (!key) {
+          sendJson(503, { error: 'no_key' });
+          return;
+        }
+
+        const entry = mem;
+        if (entry && Date.now() - entry.at < TTL_MS) {
+          res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' });
+          res.end(entry.buffer);
+          return;
+        }
+        if (!inflight) {
+          inflight = fetchUpstream(key)
+            .then((fresh) => {
+              mem = fresh;
+              return fresh;
+            })
+            .catch((err) => {
+              console.warn(
+                `[aemet-sea-surface-temp-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
+              );
+              return null;
+            })
+            .finally(() => {
+              inflight = null;
+            });
+        }
+        const pending = inflight;
+        const fresh = await pending;
+        if (fresh) {
+          res.writeHead(200, { 'Content-Type': fresh.contentType, 'Cache-Control': 'no-store' });
+          res.end(fresh.buffer);
+        } else if (entry) {
+          res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' }); // upstream down — stale beats empty
+          res.end(entry.buffer);
+        } else {
+          sendJson(502, { error: 'aemet sea-surface-temp fetch failed and no cache available' });
+        }
+      } catch (err) {
+        console.warn('[aemet-sea-surface-temp-proxy] error:', err?.message || err);
+        sendJson(500, { error: 'aemet sea-surface-temp proxy error' });
+      }
+    });
+  }
   return {
     name: 'aemet-sea-surface-temp-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/aemet/sea-surface-temp', async (req, res) => {
-        const sendJson = (status, obj) => {
-          if (res.headersSent) return;
-          res.writeHead(status, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
-          });
-          res.end(JSON.stringify(obj));
-        };
-        try {
-          const subPath = String(req.url || '').split('?')[0];
-          const key = apiKey();
-
-          if (subPath === '/status') {
-            sendJson(200, {
-              hasKey: Boolean(key),
-              lastFetch: mem ? mem.at : null,
-              stale: mem ? Date.now() - mem.at >= TTL_MS : false,
-              ttlMs: TTL_MS,
-              contentType: mem ? mem.contentType : null,
-            });
-            return;
-          }
-
-          if (!key) {
-            sendJson(503, { error: 'no_key' });
-            return;
-          }
-
-          const entry = mem;
-          if (entry && Date.now() - entry.at < TTL_MS) {
-            res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' });
-            res.end(entry.buffer);
-            return;
-          }
-          if (!inflight) {
-            inflight = fetchUpstream(key)
-              .then((fresh) => {
-                mem = fresh;
-                return fresh;
-              })
-              .catch((err) => {
-                console.warn(
-                  `[aemet-sea-surface-temp-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
-                );
-                return null;
-              })
-              .finally(() => {
-                inflight = null;
-              });
-          }
-          const pending = inflight;
-          const fresh = await pending;
-          if (fresh) {
-            res.writeHead(200, { 'Content-Type': fresh.contentType, 'Cache-Control': 'no-store' });
-            res.end(fresh.buffer);
-          } else if (entry) {
-            res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' }); // upstream down — stale beats empty
-            res.end(entry.buffer);
-          } else {
-            sendJson(502, { error: 'aemet sea-surface-temp fetch failed and no cache available' });
-          }
-        } catch (err) {
-          console.warn('[aemet-sea-surface-temp-proxy] error:', err?.message || err);
-          sendJson(500, { error: 'aemet sea-surface-temp proxy error' });
-        }
-      });
-    },
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }
 
@@ -1349,15 +1363,8 @@ export function aemetBeachesProxy({
     return [...beachById.entries()].map(([id, entry]) => ({ id, ...entry }));
   }
 
-  return {
-    name: 'aemet-beaches-proxy',
-    // Test-only hook: await the in-flight background sweep directly instead
-    // of polling — mirrors the `_xForTest()` convention the frontend layers
-    // use, applied here because this proxy's sweep is fire-and-forget and a
-    // request never awaits it.
-    _sweepPromiseForTest: () => sweepPromise,
-    configureServer(server) {
-      server.middlewares.use('/api/aemet/beaches', async (req, res) => {
+  function installMiddleware(server) {
+    server.middlewares.use('/api/aemet/beaches', async (req, res) => {
         const sendJson = (status, obj) => {
           if (res.headersSent) return;
           res.writeHead(status, {
@@ -1409,7 +1416,16 @@ export function aemetBeachesProxy({
           sendJson(500, { error: 'aemet beaches proxy error' });
         }
       });
-    },
+  }
+  return {
+    name: 'aemet-beaches-proxy',
+    // Test-only hook: await the in-flight background sweep directly instead
+    // of polling — mirrors the `_xForTest()` convention the frontend layers
+    // use, applied here because this proxy's sweep is fire-and-forget and a
+    // request never awaits it.
+    _sweepPromiseForTest: () => sweepPromise,
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }
 
@@ -1524,70 +1540,72 @@ export function aemetEnvironmentalProxy() {
     return { at: Date.now(), rows: [...rowByIndicativo.values()] };
   }
 
+  function installMiddleware(server) {
+    server.middlewares.use('/api/aemet/environmental', async (req, res) => {
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify(obj));
+      };
+      try {
+        const subPath = String(req.url || '').split('?')[0];
+        const key = apiKey();
+
+        if (subPath === '/status') {
+          sendJson(200, {
+            hasKey: Boolean(key),
+            lastFetch: mem ? mem.at : null,
+            count: mem ? mem.rows.length : null,
+            stale: mem ? Date.now() - mem.at >= ENV_TTL_MS : false,
+            ttlMs: ENV_TTL_MS,
+          });
+          return;
+        }
+
+        if (!key) {
+          sendJson(503, { error: 'no_key' });
+          return;
+        }
+
+        const entry = mem;
+        if (entry && Date.now() - entry.at < ENV_TTL_MS) {
+          sendJson(200, { fetchedAt: entry.at, stale: false, ttlMs: ENV_TTL_MS, count: entry.rows.length, stations: entry.rows });
+          return;
+        }
+        if (!inflight) {
+          inflight = fetchUpstream(key)
+            .then((fresh) => {
+              mem = fresh;
+              return fresh;
+            })
+            .catch((err) => {
+              console.warn(`[aemet-environmental-proxy] refresh failed (${err?.message || err}) — serving cache if any`);
+              return null;
+            })
+            .finally(() => {
+              inflight = null;
+            });
+        }
+        const pending = inflight;
+        const fresh = await pending;
+        const payload = fresh || entry;
+        if (payload) {
+          sendJson(200, { fetchedAt: payload.at, stale: !fresh, ttlMs: ENV_TTL_MS, count: payload.rows.length, stations: payload.rows });
+        } else {
+          sendJson(502, { error: 'aemet environmental fetch failed and no cache available' });
+        }
+      } catch (err) {
+        console.warn('[aemet-environmental-proxy] error:', err?.message || err);
+        sendJson(500, { error: 'aemet environmental proxy error' });
+      }
+    });
+  }
   return {
     name: 'aemet-environmental-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/aemet/environmental', async (req, res) => {
-        const sendJson = (status, obj) => {
-          if (res.headersSent) return;
-          res.writeHead(status, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
-          });
-          res.end(JSON.stringify(obj));
-        };
-        try {
-          const subPath = String(req.url || '').split('?')[0];
-          const key = apiKey();
-
-          if (subPath === '/status') {
-            sendJson(200, {
-              hasKey: Boolean(key),
-              lastFetch: mem ? mem.at : null,
-              count: mem ? mem.rows.length : null,
-              stale: mem ? Date.now() - mem.at >= ENV_TTL_MS : false,
-              ttlMs: ENV_TTL_MS,
-            });
-            return;
-          }
-
-          if (!key) {
-            sendJson(503, { error: 'no_key' });
-            return;
-          }
-
-          const entry = mem;
-          if (entry && Date.now() - entry.at < ENV_TTL_MS) {
-            sendJson(200, { fetchedAt: entry.at, stale: false, ttlMs: ENV_TTL_MS, count: entry.rows.length, stations: entry.rows });
-            return;
-          }
-          if (!inflight) {
-            inflight = fetchUpstream(key)
-              .then((fresh) => {
-                mem = fresh;
-                return fresh;
-              })
-              .catch((err) => {
-                console.warn(`[aemet-environmental-proxy] refresh failed (${err?.message || err}) — serving cache if any`);
-                return null;
-              })
-              .finally(() => {
-                inflight = null;
-              });
-          }
-          const pending = inflight;
-          const fresh = await pending;
-          const payload = fresh || entry;
-          if (payload) {
-            sendJson(200, { fetchedAt: payload.at, stale: !fresh, ttlMs: ENV_TTL_MS, count: payload.rows.length, stations: payload.rows });
-          } else {
-            sendJson(502, { error: 'aemet environmental fetch failed and no cache available' });
-          }
-        } catch (err) {
-          console.warn('[aemet-environmental-proxy] error:', err?.message || err);
-          sendJson(500, { error: 'aemet environmental proxy error' });
-        }
-      });
-    },
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }

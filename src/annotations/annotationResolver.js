@@ -1,7 +1,10 @@
+import { applicationServices } from '../services/application.js';
+import { defaultGeospatial } from '../search/defaults.js';
 import * as Cesium from 'cesium';
 import { lookupNeighborhoodRing } from '../data/neighborhoodPolygons.js';
 import { lookupNaturalRegionOutline, findNaturalRegion } from '../data/naturalEarthRegions.js';
 import { registerDynamicCredit, NATURAL_EARTH_CREDIT } from '../data/dataCredits.js';
+import { unavailablePlaceSearch } from '../search/placeSearch.js';
 import { isPickedWorldPosition } from '../data/scenePick.js';
 
 /**
@@ -19,7 +22,6 @@ import { isPickedWorldPosition } from '../data/scenePick.js';
  * raw geometry ring instead of a bounding box, which is what an outline needs.
  */
 
-const geocodeCache = new Map();
 const footprintCache = new Map();
 const monumentCache = new Map(); // OSM monuments/memorials near a view center, keyed by rounded coord
 const enclosingAreaCache = new Map(); // smallest enclosing named non-building polygon, keyed by ~1km coord bucket
@@ -90,8 +92,9 @@ function linkAbort(controller, externalSignal) {
  * }>}
  */
 export async function resolveAnnotationTarget({
+  placeSearch = unavailablePlaceSearch,
   viewer, target, latitude, longitude, footprint = false, intent = 'the_thing',
-  entityKind = null, labelHint = null, deferFootprint = false, screenX, screenY, signal,
+  entityKind = null, labelHint = null, deferFootprint = false, allowDistant = false, screenX, screenY, signal,
 }) {
   let lon = Number(longitude);
   let lat = Number(latitude);
@@ -123,7 +126,7 @@ export async function resolveAnnotationTarget({
       // miss we fall through to geocode + fetchLocalMonument below. The model's entityKind counts too:
       // a point_feature by fact ("Heroes of the Alamo" — no monument word) deserves the same path.
       if (center && (isMonumentLikeQuery(query) || isGroundsLikeQuery(query) || entityKind === 'point_feature')) {
-        const placeHit = await placesTextSearch(query, center.lat, center.lon, 6000, signal);
+        const placeHit = await placesTextSearch(query, center.lat, center.lon, 6000, signal, placeSearch);
         if (placeHit) {
           trace.places = `${placeHit.lat.toFixed(5)},${placeHit.lon.toFixed(5)}`;
           if (placeHit.distanceM <= PLACES_MAX_DISTANCE_M) {
@@ -140,7 +143,7 @@ export async function resolveAnnotationTarget({
         }
       }
       if (source !== 'places') {
-        const geocoded = await geocodePlace(query, viewportBias(viewer), signal);
+        const geocoded = await geocodePlace(query, viewportBias(viewer), signal, placeSearch);
         if (geocoded) {
           lat = geocoded.lat;
           lon = geocoded.lon;
@@ -156,13 +159,13 @@ export async function resolveAnnotationTarget({
         // LOOKING AT. If the geocode missed or landed far from the view centre, try a view-biased
         // Places Text Search; a hit within the trust bound overrides + skips the gate. Local geocodes
         // (neighborhoods, nearby buildings) are NOT far, so they keep the geocode + scope/polygon path.
-        if (center && trace.places === 'skipped' && !bypassNearViewGuards) {
+        if (center && trace.places === 'skipped' && !bypassNearViewGuards && !allowDistant) {
           let geocodeFar = source !== 'geocode';
           if (source === 'geocode' && approximateDistanceM(center.lat, center.lon, lat, lon) / 1000 > MIN_DRIFT_FLOOR_KM) {
             geocodeFar = true;
           }
           if (geocodeFar) {
-            const placeHit = await placesTextSearch(query, center.lat, center.lon, 6000, signal);
+            const placeHit = await placesTextSearch(query, center.lat, center.lon, 6000, signal, placeSearch);
             if (placeHit && placeHit.distanceM <= PLACES_MAX_DISTANCE_M) {
               lat = placeHit.lat;
               lon = placeHit.lon;
@@ -241,7 +244,7 @@ export async function resolveAnnotationTarget({
     const limitKm = Math.max(VIEWPORT_DRIFT_FACTOR * vpGate.radiusKm, MIN_DRIFT_FLOOR_KM);
     return driftKm > limitKm ? { driftKm, limitKm } : null;
   };
-  if (fromGeocode && !bypassNearViewGuards) {
+  if (fromGeocode && !bypassNearViewGuards && !allowDistant) {
     const drift = gateDrift(lat, lon);
     if (drift) {
       if (trace.query) {
@@ -602,50 +605,16 @@ function ringAreaM2(ring) {
   return Math.abs(area) / 2;
 }
 
-/**
- * Forward-geocode a place name via Google Geocoding, biased to the current
- * viewport so "the marina" resolves near where the user is looking.
- */
-async function geocodePlace(query, biasRect, signal) {
-  const apiKey = window.__GOOGLE_MAPS_API_KEY__ || import.meta.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return null;
-
-  const cacheKey = `${query.toLowerCase()}|${biasRect || ''}`;
-  const cached = cacheRead(geocodeCache, cacheKey);
-  if (cached !== undefined) return cached;
-
-  let url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&key=${apiKey}`;
-  if (biasRect) url += `&bounds=${biasRect}`;
-
-  try {
-    const response = await fetch(url, { signal });
-    const data = await response.json();
-    if (data.status !== 'OK' || !data.results?.length) {
-      // ZERO_RESULTS is a definitive not-found (cacheable); OVER_QUERY_LIMIT /
-      // REQUEST_DENIED / UNKNOWN_ERROR are transient → don't poison the cache.
-      negCache(geocodeCache, cacheKey, signal, data?.status === 'ZERO_RESULTS');
-      return null;
-    }
-    const result = data.results[0];
-    const place = {
-      lat: result.geometry.location.lat,
-      lon: result.geometry.location.lng,
-      label: shortLabel(result.formatted_address),
-      // The CANONICAL name of the resolved feature (e.g. "Mission District",
-      // "Texas State Capitol") — used for OSM name-matching instead of the raw
-      // utterance, so incidental tokens ("...Texas", "...Austin") can't win.
-      primaryName: extractPrimaryName(result),
-      types: result.types || [],
-      // Geocode viewport (sw/ne box framing the feature), normalized to the Places
-      // low/high shape — sizes grounds discs and flyTo framing for geocode anchors.
-      viewport: normalizeGeocodeViewport(result.geometry?.bounds || result.geometry?.viewport),
-    };
-    cacheWrite(geocodeCache, cacheKey, place);
-    return place;
-  } catch {
-    negCache(geocodeCache, cacheKey, signal, false); // network/abort — transient
-    return null;
-  }
+/** Resolve a name through the supplied service; geometry selection stays here. */
+async function geocodePlace(query, biasRect, signal, placeSearch) {
+  const { place } = await placeSearch.geocode(query, { bias: biasRect, signal });
+  signal?.throwIfAborted();
+  if (!place) return null;
+  return {
+    lat: place.lat, lon: place.lng, label: shortLabel(place.label),
+    primaryName: place.name || null, types: place.types,
+    viewport: normalizeGeocodeViewport(place.viewport),
+  };
 }
 
 /** Geocoding returns {southwest:{lat,lng},northeast:{lat,lng}}; normalize to the Places
@@ -660,7 +629,7 @@ function normalizeGeocodeViewport(vp) {
   };
 }
 
-const placesCache = new Map(); // Text Search hits, keyed by query + rounded view centre
+const placesCaches = new WeakMap(); // Cache isolated by provider configuration
 
 /**
  * View-biased Google Places TEXT SEARCH for a named landmark/POI. Geocoding
@@ -673,7 +642,9 @@ const placesCache = new Map(); // Text Search hits, keyed by query + rounded vie
  * @returns {Promise<null | { lat:number, lon:number, label:string|null, distanceM:number,
  *   viewport:{low:{latitude:number,longitude:number},high:{latitude:number,longitude:number}}|null }>}
  */
-async function placesTextSearch(query, centerLat, centerLon, radiusM, signal) {
+async function placesTextSearch(query, centerLat, centerLon, radiusM, signal, service = defaultGeospatial) {
+  const placesCache = placesCaches.get(service) || new Map();
+  placesCaches.set(service, placesCache);
   const q = String(query || '').trim();
   if (!q || !Number.isFinite(centerLat) || !Number.isFinite(centerLon)) return null;
 
@@ -681,16 +652,10 @@ async function placesTextSearch(query, centerLat, centerLon, radiusM, signal) {
   const cached = cacheRead(placesCache, cacheKey);
   if (cached !== undefined) return cached;
 
-  const params = new URLSearchParams({
-    q,
-    lat: String(centerLat),
-    lon: String(centerLon),
-    radiusM: String(radiusM),
-  });
   try {
-    const response = await fetch(`/api/google/text-search?${params}`, { signal });
-    if (!response.ok) { negCache(placesCache, cacheKey, signal, false); return null; } // transient
-    const data = await response.json();
+    const data = { places: await service.textSearch?.(q, {
+      latitude: centerLat, longitude: centerLon, radiusM,
+    }, { signal }) };
     const hit = Array.isArray(data?.places)
       ? data.places.find((p) => Number.isFinite(p?.latitude) && Number.isFinite(p?.longitude))
       : null;
@@ -714,23 +679,6 @@ async function placesTextSearch(query, centerLat, centerLon, radiusM, signal) {
     negCache(placesCache, cacheKey, signal, false); // network/abort — transient
     return null;
   }
-}
-
-/**
- * The canonical name of the geocoded feature: the address component whose own
- * types match the result's feature type (e.g. the `neighborhood` component for a
- * neighborhood result). Address-only responses may identify a landmark's city
- * without naming the landmark itself. Return null in that case so the caller
- * keeps the requested name instead of matching a nearby building in that city.
- */
-function extractPrimaryName(result) {
-  const resultTypes = new Set((result.types || []).map((t) => String(t).toLowerCase()));
-  const comps = Array.isArray(result.address_components) ? result.address_components : [];
-  for (const c of comps) {
-    const ct = (c.types || []).map((t) => String(t).toLowerCase());
-    if (ct.some((t) => t !== 'political' && resultTypes.has(t))) return c.long_name;
-  }
-  return null;
 }
 
 /**
@@ -792,26 +740,9 @@ export function refineScope(scope, entityKind) {
   return scope;
 }
 
-/** True when an HTTP-200 Overpass body actually signals a runtime FAILURE (server-side
- *  timeout / out-of-memory) via its `remark` — a transient error, not an authoritative
- *  empty result, so callers must not cache it as a definitive not-found. */
-function overpassHasError(data) {
-  const remark = String(data?.remark || '').toLowerCase();
-  return remark.includes('runtime error') || remark.includes('timed out') || remark.includes('out of memory');
-}
-
 /** A distinct Overpass throttle result that must not enter the ordinary transient ladder. */
 export function isRateLimitedOutcome(value) {
   return value?.rateLimited === true;
-}
-
-/** Parse Retry-After seconds or an HTTP date into a non-negative millisecond delay. */
-function parseRetryAfterMs(value) {
-  if (value == null || String(value).trim() === '') return null;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
-  const at = Date.parse(String(value));
-  return Number.isFinite(at) ? Math.max(0, at - Date.now()) : null;
 }
 
 /** POST an Overpass QL query and return elements, a transient null, or a throttle object. */
@@ -820,20 +751,7 @@ async function overpassJson(query, timeoutMs = 14000, signal) {
   const detach = linkAbort(controller, signal);
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch('/api/overpass', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
-    });
-    const retryAfter = res.headers?.get?.('Retry-After');
-    if (res.status === 429 || (res.status === 503 && retryAfter != null)) {
-      return { rateLimited: true, retryAfterMs: parseRetryAfterMs(retryAfter) };
-    }
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (overpassHasError(data)) return null; // 200 with a body-level timeout/error → transient
-    return Array.isArray(data?.elements) ? data.elements : null;
+    return await applicationServices.boundaries.query(query, { signal: controller.signal });
   } catch {
     return null;
   } finally {
@@ -1838,13 +1756,13 @@ export function viewportBias(viewer) {
  * plain geocode path. Returns the Places hit
  * ({ lat, lon, label, types, viewport, distanceM, … }) or null.
  */
-export async function placesNearViewRecovery(viewer, query, geocoded = null, signal = undefined) {
+export async function placesNearViewRecovery(viewer, query, geocoded = null, signal = undefined, placeSearch = defaultGeospatial) {
   const center = pickWorldFromScreen(viewer, 0.5, 0.5) || viewportProximity(viewer);
   if (!center) return null;
   const geocodeFar = !geocoded
     || approximateDistanceM(center.lat, center.lon, geocoded.lat, geocoded.lon) / 1000 > MIN_DRIFT_FLOOR_KM;
   if (!geocodeFar) return null;
-  const hit = await placesTextSearch(query, center.lat, center.lon, 6000, signal);
+  const hit = await placesTextSearch(query, center.lat, center.lon, 6000, signal, placeSearch);
   return (hit && hit.distanceM <= PLACES_MAX_DISTANCE_M) ? hit : null;
 }
 
@@ -1936,7 +1854,7 @@ function shortLabel(formattedAddress) {
  * @param {AbortSignal} [signal]
  * @returns {Promise<{name:string, ring:Array<[number,number]>}|null>}
  */
-export async function resolveRegionRingForQuery(name, signal) {
+export async function resolveRegionRingForQuery(name, signal, placeSearch = unavailablePlaceSearch) {
   const q = String(name || '').trim();
   if (!q) return null;
   const ne = await findNaturalRegion(q).catch(() => null);
@@ -1946,7 +1864,7 @@ export async function resolveRegionRingForQuery(name, signal) {
     const ring = [...ne.polygons].sort((a, b) => b.length - a.length)[0];
     if (ring?.length >= 3) return { name: ne.name, ring };
   }
-  const geo = await geocodePlace(q, null, signal).catch(() => null);
+  const geo = await geocodePlace(q, null, signal, placeSearch).catch(() => null);
   if (!geo) return null;
   const scope = scopeFromTypes(geo.types);
   if (!['country', 'state', 'county', 'city'].includes(scope)) return null;

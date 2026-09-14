@@ -1,3 +1,5 @@
+import { createStandaloneCatalog } from './catalog.js';
+import { createStandalonePlaceSearch } from './placeSearch.js';
 import { createApplication } from '../app/application.js';
 import { createStandaloneScene } from './scene.js';
 import { createStandaloneControls } from './controls.js';
@@ -11,6 +13,8 @@ let constructed = false;
 export function createStandaloneApplication({
   googleApiKey,
   cesiumToken,
+  geospatial = {},
+  voice = {},
   allowQaRegistration = false,
 }) {
   if (constructed)
@@ -18,19 +22,32 @@ export function createStandaloneApplication({
   constructed = true;
   const loadingScreen = document.getElementById('loading-screen');
   const loaderStatus = loadingScreen.querySelector('.loader-status');
+  let placeSearch;
+  const catalog = createStandaloneCatalog();
   return createApplication({
-    createScene: (context) =>
-      createStandaloneScene({
+    createScene: (context) => {
+      placeSearch = createStandalonePlaceSearch({
+        ...geospatial,
+        resolveApiKey: () => googleApiKey,
+        signal: context.signal,
+      });
+      return createStandaloneScene({
         ...context,
         googleApiKey,
         cesiumToken,
         loaderStatus,
-      }),
+      });
+    },
     createControls: (context) =>
-      createStandaloneControls({ ...context, loaderStatus }),
+      createStandaloneControls({
+        ...context,
+        loaderStatus,
+        placeSearch,
+        catalog,
+      }),
     createData: (context) =>
-      createStandaloneData({ ...context, allowQaRegistration }),
+      createStandaloneData({ ...context, allowQaRegistration, catalog }),
     createTools: (context) =>
-      createStandaloneTools({ ...context, loadingScreen }),
+      createStandaloneTools({ ...context, loadingScreen, placeSearch, voice }),
   });
 }

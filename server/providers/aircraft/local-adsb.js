@@ -28,21 +28,23 @@ import {
  */
 export function localAdsbProxy() {
   const cache = new Map();
+  function installMiddleware(server) {
+    server.middlewares.use('/api/local-adsb', async (req, res) => {
+      if (process.env.LOCAL_ADSB_MOCK === '1') {
+        const body = { ...normalizeLocalAdsbSnapshot(mockLocalAdsbSnapshot()), stale: false, baseUrl: 'mock' };
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(body));
+        return;
+      }
+      const baseUrl = process.env.LOCAL_ADSB_BASE_URL || DEFAULT_LOCAL_ADSB_BASE_URL;
+      const { status, body } = await resolveLocalAdsbRequest({ cache, baseUrl });
+      res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify(body));
+    });
+  }
   return {
     name: 'local-adsb-proxy',
-    configureServer(server) {
-      server.middlewares.use('/api/local-adsb', async (req, res) => {
-        if (process.env.LOCAL_ADSB_MOCK === '1') {
-          const body = { ...normalizeLocalAdsbSnapshot(mockLocalAdsbSnapshot()), stale: false, baseUrl: 'mock' };
-          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-          res.end(JSON.stringify(body));
-          return;
-        }
-        const baseUrl = process.env.LOCAL_ADSB_BASE_URL || DEFAULT_LOCAL_ADSB_BASE_URL;
-        const { status, body } = await resolveLocalAdsbRequest({ cache, baseUrl });
-        res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-        res.end(JSON.stringify(body));
-      });
-    },
+    configureServer: installMiddleware,
+    configurePreviewServer: installMiddleware,
   };
 }
