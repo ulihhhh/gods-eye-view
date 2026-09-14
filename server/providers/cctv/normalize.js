@@ -385,6 +385,37 @@ export function isLikelyFinlandCoordinate(lat, lon) {
   return lat >= 59.5 && lat <= 70.5 && lon >= 19 && lon <= 32;
 }
 
+/** Bilbao metro-area bounding box (observed catalog extent 43.24..43.29 N,
+ * -2.97..-2.90 E, with margin for future cameras). */
+export function isLikelyBilbaoCoordinate(lat, lon) {
+  return (
+    isPlausibleLatLon(lat, lon) &&
+    lat >= 43.15 &&
+    lat <= 43.35 &&
+    lon >= -3.05 &&
+    lon <= -2.85
+  );
+}
+
+/**
+ * Decode decimal numeric HTML character references ("&#237;" -> "í"), the
+ * only entity form the Bilbao camera names use for accented characters, plus
+ * the handful of named entities XML/HTML text commonly carries.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function decodeNumericEntities(text) {
+  return String(text || '')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .trim();
+}
+
 /**
  * Human label for one Fintraffic preset (camera view).
  *

@@ -220,6 +220,17 @@ export const NSW_IMAGE_USER_AGENT =
  * out around 120 characters.
  */
 export const NSW_MAX_VIEW_LABEL = 140;
+/**
+ * Bilbao municipal traffic cameras (Ayuntamiento de Bilbao): one keyless
+ * GeoJSON list (verified 2026-09-15, 119 cameras, all `Tipo: "Ayto"`).
+ * Frame URLs and a per-camera compass heading (`Rotacion_SPA`, degrees) are
+ * both carried directly on each feature — no direction-word parsing needed.
+ */
+export const BILBAO_CAMERAS_URL =
+  'https://www.bilbao.eus/aytoonline/srvDatasetCamaras?formato=geojson';
+export const BILBAO_IMAGE_ORIGIN = 'https://www.bilbao.eus/camarastrafico/';
+export const DEFAULT_BILBAO_MAX_SOURCES = 150;
+export const BILBAO_CENTER = { lat: 43.263, lon: -2.935 };
 /** Camera CATALOGS change rarely; 15 min keeps multi-megabyte upstream list refetches (Austin rows.json + 4 Caltrans districts + TfL + Ontario 511) infrequent. Frames are fetched per-request and are unaffected. */
 export const CCTV_SOURCE_CACHE_MS = 15 * 60 * 1000;
 /** Per-provider catalog-fetch timeout. Bounds the worst-case refresh so one

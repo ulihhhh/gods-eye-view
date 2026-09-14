@@ -16,6 +16,7 @@ import {
   loadTarkteeSourcesFromDatex,
   loadWarendorfSourcesFromCatalog,
   loadNswSourcesFromOpenData,
+  loadBilbaoSourcesFromOpenData,
 } from './sources.js';
 
 /** Env kill switch: unset or anything but "0" means enabled. */
@@ -79,6 +80,11 @@ const LIVE_PACKS = [
     name: 'nsw',
     enabled: () => envEnabled('CCTV_NSW_ENABLED'),
     load: loadNswSourcesFromOpenData,
+  },
+  {
+    name: 'bilbao',
+    enabled: () => envEnabled('CCTV_BILBAO_ENABLED'),
+    load: loadBilbaoSourcesFromOpenData,
   },
 ];
 /**

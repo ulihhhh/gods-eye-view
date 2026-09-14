@@ -1,5 +1,10 @@
 # Changelog
 
+- Add Bilbao (Ayuntamiento de Bilbao, CC BY 4.0) as a keyless CCTV source pack:
+  119 municipal cameras with compass headings carried directly in the feed.
+  `CCTV_BILBAO_MAX_SOURCES` sets the cap and `CCTV_BILBAO_ENABLED=0` turns the
+  pack off.
+
 - Let CLI tools, development launchers and the setup doctor use an explicit project directory while retaining their existing default paths.
 
 - Split application scene, controls, catalog, tools and HTML into reusable components; configure application request services and sources without changing global fetch. Preserve standalone markup and voice behavior. Explicit annotation navigation may resolve a distant named target.

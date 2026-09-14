@@ -245,6 +245,13 @@ export const DATA_CREDITS = [
       '(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>)',
   },
   {
+    key: 'bilbao-cctv',
+    html:
+      'CCTV cameras &amp; frames (Bilbao): ' +
+      '<a href="https://www.bilbao.eus/" target="_blank" rel="noopener">Ayuntamiento de Bilbao</a> ' +
+      '(<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>)',
+  },
+  {
     key: 'telegeography',
     html:
       'Submarine cables: © TeleGeography — ' +

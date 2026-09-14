@@ -50,6 +50,10 @@ import {
   DEFAULT_NSW_MAX_SOURCES,
   SYDNEY_CENTER,
   NSW_MAX_VIEW_LABEL,
+  BILBAO_CAMERAS_URL,
+  BILBAO_IMAGE_ORIGIN,
+  DEFAULT_BILBAO_MAX_SOURCES,
+  BILBAO_CENTER,
   CCTV_SOURCE_FETCH_TIMEOUT_MS,
 } from './constants.js';
 import {
@@ -67,6 +71,8 @@ import {
   isLikelyBcCoordinate,
   isLikelyTexasCoordinate,
   isLikelyNswCoordinate,
+  isLikelyBilbaoCoordinate,
+  decodeNumericEntities,
   cameraDisplayCode,
   rowArrayToObject,
   prioritizeSources,
@@ -1386,6 +1392,97 @@ export async function loadNswSourcesFromOpenData() {
     return prioritized;
   } catch (error) {
     console.warn('[CCTV] NSW camera download error:', error?.message || error);
+    return [];
+  }
+}
+
+/**
+ * Fetch Bilbao municipal traffic cameras (Ayuntamiento de Bilbao), keyless:
+ * one GeoJSON list. Frame URLs are stills on bilbao.eus; each feature also
+ * carries its own compass heading (`Rotacion_SPA`, degrees) directly, unlike
+ * most packs which infer or fall back to an id-hash heading.
+ *
+ * @returns {Promise<Array<object>>} Normalized camera source objects.
+ */
+export async function loadBilbaoSourcesFromOpenData() {
+  try {
+    const resp = await fetch(BILBAO_CAMERAS_URL, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(CCTV_SOURCE_FETCH_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      console.warn('[CCTV] Bilbao camera download failed:', resp.status);
+      return [];
+    }
+    const payload = await resp.json();
+    const features = Array.isArray(payload?.features) ? payload.features : [];
+    if (!features.length) return [];
+
+    const cameras = [];
+    for (const feature of features) {
+      const props = feature?.properties || {};
+      const rawId = String(props.ID || '').trim();
+      if (!rawId) continue;
+
+      const coords = feature?.geometry?.coordinates;
+      const lon = typeof coords?.[0] === 'number' ? coords[0] : NaN;
+      const lat = typeof coords?.[1] === 'number' ? coords[1] : NaN;
+      if (!isLikelyBilbaoCoordinate(lat, lon)) continue;
+
+      const imageUrl = String(props.URL || '').trim();
+      if (!imageUrl.startsWith(BILBAO_IMAGE_ORIGIN)) continue; // official-host pin
+
+      const heading = toFiniteNumber(props.Rotacion_SPA, NaN);
+      const hasHeading = Number.isFinite(heading);
+      const cameraId = `bilbao-${rawId}`;
+      const name =
+        decodeNumericEntities(props.Nombre || props.Texto_SPA) ||
+        `Bilbao Camera ${rawId}`;
+
+      cameras.push({
+        id: cameraId,
+        name,
+        city: 'Bilbao',
+        cityId: 'bilbao',
+        provider: 'Ayuntamiento de Bilbao',
+        lat,
+        lon,
+        headingDeg: hasHeading
+          ? ((heading % 360) + 360) % 360
+          : fallbackHeadingFromId(cameraId),
+        headingConfidence: hasHeading ? 'high' : 'low',
+        pitchDeg: hasHeading ? -24 : -18,
+        fovDeg: hasHeading ? 56 : 44,
+        rangeM: hasHeading ? 210 : 145,
+        mountHeightM: hasHeading ? 10 : 8,
+        groundElevationM: 20, // Nervión-basin prior; the client's ground snap corrects.
+        feedType: 'image',
+        url: imageUrl,
+        snapshotUrl: imageUrl,
+        sourceKind: 'bilbao-open-data',
+        license: 'Ayuntamiento de Bilbao open data (CC BY 4.0)',
+      });
+    }
+
+    const unique = Array.from(
+      new Map(cameras.map((camera) => [camera.id, camera])).values(),
+    );
+    const maxRaw = Number(
+      process.env.CCTV_BILBAO_MAX_SOURCES || DEFAULT_BILBAO_MAX_SOURCES,
+    );
+    const maxCount = Number.isFinite(maxRaw)
+      ? Math.max(8, Math.min(300, Math.floor(maxRaw)))
+      : DEFAULT_BILBAO_MAX_SOURCES;
+    const prioritized = prioritizeSources(unique, maxCount, [BILBAO_CENTER]);
+    console.log(
+      `[CCTV] Loaded Bilbao camera sources: ${unique.length} (using nearest ${prioritized.length})`,
+    );
+    return prioritized;
+  } catch (error) {
+    console.warn(
+      '[CCTV] Bilbao camera download error:',
+      error?.message || error,
+    );
     return [];
   }
 }
