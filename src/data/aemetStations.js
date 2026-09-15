@@ -6,7 +6,7 @@ import {
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
 import { TEMPERATURE_COLOR_STOPS, temperatureColorRgb } from './temperatureColorScale.js';
-import { buildTemperatureGradientImage } from './temperatureGradientRaster.js';
+import { buildTemperatureGradientImages } from './temperatureGradientRaster.js';
 import { getCcaaFeatures } from './spainBoundaries.js';
 import { SPAIN_PROVINCIAL_CAPITALS } from './spainCapitals.js';
 import { buildCapitalTemperatureRecords } from './capitalTemperatures.js';
@@ -300,10 +300,10 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
   let _clickHandler = null;
   /** @type {'points'|'gradient'} which view mode the row's pill has selected */
   let _viewMode = 'points';
-  /** @type {Cesium.ImageryLayer|null} the mounted IDW gradient overlay, or null when not in gradient mode */
-  let _gradientLayer = null;
+  /** @type {Cesium.ImageryLayer[]} the mounted IDW gradient overlay layers (one per region — mainland, Canary Islands), empty when not in gradient mode */
+  let _gradientLayers = [];
   /**
-   * Bumped on every gradient (re)build request so a `buildTemperatureGradientImage()`
+   * Bumped on every gradient (re)build request so a `buildTemperatureGradientImages()`
    * that resolves after the user has since switched back to points, disabled
    * the layer, or triggered a newer rebuild (the next 5-min poll) can
    * recognize it's stale and silently drop its result instead of mounting an
@@ -344,8 +344,8 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
   }
 
   function _removeGradientLayer() {
-    if (_gradientLayer && _viewer) _viewer.imageryLayers.remove(_gradientLayer, true);
-    _gradientLayer = null;
+    if (_viewer) for (const layer of _gradientLayers) _viewer.imageryLayers.remove(layer, true);
+    _gradientLayers = [];
   }
 
   /**
@@ -406,19 +406,20 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
 
   /**
    * (Re)build the IDW gradient overlay from the current station snapshot and
-   * mount it as a Cesium imagery layer, replacing whatever was mounted
-   * before. A no-op whenever the gradient view isn't actually what should be
-   * showing right now (still 'points', or the layer got disabled/destroyed
-   * while this was in flight) — checked both before starting and again after
-   * the async build resolves, via `_gradientToken`.
+   * mount it as Cesium imagery layers (one per region — mainland, Canary
+   * Islands), replacing whatever was mounted before. A no-op whenever the
+   * gradient view isn't actually what should be showing right now (still
+   * 'points', or the layer got disabled/destroyed while this was in flight)
+   * — checked both before starting and again after the async build resolves,
+   * via `_gradientToken`.
    */
   async function _rebuildGradientLayer() {
     if (_viewMode !== 'gradient' || !_enabled || !_viewer) return;
     const token = ++_gradientToken;
     const stations = [..._stationById.values()];
-    let result;
+    let results;
     try {
-      result = await buildTemperatureGradientImage(stations);
+      results = await buildTemperatureGradientImages(stations);
     } catch (e) {
       if (token !== _gradientToken) return;
       _gradientError = 'Gradient build error';
@@ -426,18 +427,19 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       return;
     }
     if (token !== _gradientToken || _viewMode !== 'gradient' || !_enabled || !_viewer) return;
-    if (!result) {
+    if (!results?.length) {
       _gradientError = 'No station data for gradient';
       return;
     }
     try {
-      const provider = await Cesium.SingleTileImageryProvider.fromUrl(result.dataUrl, {
-        rectangle: Cesium.Rectangle.fromDegrees(...result.bbox),
-      });
+      const providers = await Promise.all(results.map((result) => Cesium.SingleTileImageryProvider.fromUrl(
+        result.dataUrl,
+        { rectangle: Cesium.Rectangle.fromDegrees(...result.bbox) },
+      )));
       if (token !== _gradientToken || _viewMode !== 'gradient' || !_enabled || !_viewer) return;
       _removeGradientLayer();
-      _gradientLayer = new Cesium.ImageryLayer(provider);
-      _viewer.imageryLayers.add(_gradientLayer);
+      _gradientLayers = providers.map((provider) => new Cesium.ImageryLayer(provider));
+      for (const layer of _gradientLayers) _viewer.imageryLayers.add(layer);
       _gradientError = null;
     } catch (e) {
       if (token !== _gradientToken) return;
@@ -889,7 +891,7 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       return _gradientError;
     },
     _hasGradientLayerForTest() {
-      return Boolean(_gradientLayer);
+      return _gradientLayers.length > 0;
     },
     // Bumped once per _rebuildGradientLayer() call regardless of outcome —
     // a test can diff this across a setParams() call to prove a rebuild was

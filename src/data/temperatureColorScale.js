@@ -7,24 +7,45 @@
  */
 
 /**
- * Smooth temperature gradient, coldest to hottest. Anchor stops chosen for a
- * readable spread across the temperatures AEMET's Spain network actually
- * reports (roughly -10°C mountain lows to 40°C+ summer highs), linearly
- * interpolated between neighbors — a genuinely continuous gradient rather
- * than the small number of visually-identical stepped bands this started
- * with. Plain RGB bytes, no Cesium, so it's testable without a Cesium.Color
- * round-trip — and usable by both the point layer and the canvas-rasterized
- * gradient overlay.
+ * Smooth temperature gradient, coldest to hottest — the standard
+ * meteorological "rainbow" progression (violet → blue → cyan → green →
+ * yellow → orange → red → magenta) that AEMET, Windy, Ventusky, and most
+ * other weather services converge on for absolute-temperature maps: hue
+ * itself carries the "how hot" signal, so a reader gets the gist without
+ * consulting the legend. Anchors now span -15°C to 45°C, wide enough to
+ * keep giving distinct color to Spain's actual station extremes — Pyrenean
+ * winter lows and Andalusian heatwave highs (Córdoba hit 47.6°C in Aug
+ * 2021) — instead of clipping them to the same shade as an ordinary cold or
+ * hot day. The two new end stops (violet at -15, deep magenta/maroon at 45)
+ * exist for that "this is exceptional" signal specifically: mid-scale colors
+ * repeating at the extremes would flatten heatwave/cold-snap days into
+ * whatever their nearest in-range neighbor already looked like.
+ *
+ * Deliberately NOT the raw-primary "jet" colormap despite the same hue path:
+ * jet's saturated primaries create false perceptual banding around its
+ * sharp yellow transition (a well-known critique of scientific/climate
+ * visualizations — see Ed Hawkins' "which colour scale" writeup), so these
+ * stops are softened/desaturated a step from pure RGB primaries, same as
+ * this scale's previous version — only the anchor placement and range
+ * changed, not that design choice.
+ *
+ * Stops are linearly interpolated between neighbors — a genuinely
+ * continuous gradient rather than a small number of visually-identical
+ * stepped bands. Plain RGB bytes, no Cesium, so it's testable without a
+ * Cesium.Color round-trip — and usable by both the point layer and the
+ * canvas-rasterized gradient overlay.
  */
 export const TEMPERATURE_COLOR_STOPS = Object.freeze([
-  Object.freeze({ c: -10, rgb: [40, 60, 170] }),
-  Object.freeze({ c: 0, rgb: [59, 108, 255] }),
-  Object.freeze({ c: 10, rgb: [59, 182, 255] }),
-  Object.freeze({ c: 18, rgb: [70, 220, 190] }),
-  Object.freeze({ c: 24, rgb: [140, 230, 90] }),
-  Object.freeze({ c: 28, rgb: [255, 210, 60] }),
-  Object.freeze({ c: 33, rgb: [255, 140, 50] }),
-  Object.freeze({ c: 40, rgb: [230, 40, 40] }),
+  Object.freeze({ c: -15, rgb: [120, 60, 165] }),
+  Object.freeze({ c: -5, rgb: [70, 80, 195] }),
+  Object.freeze({ c: 0, rgb: [60, 130, 255] }), // freezing point — kept as its own anchor, not just a point along the blue stretch
+  Object.freeze({ c: 8, rgb: [65, 190, 230] }),
+  Object.freeze({ c: 15, rgb: [90, 210, 150] }),
+  Object.freeze({ c: 21, rgb: [160, 220, 90] }),
+  Object.freeze({ c: 27, rgb: [255, 200, 50] }),
+  Object.freeze({ c: 33, rgb: [255, 130, 40] }),
+  Object.freeze({ c: 39, rgb: [225, 50, 40] }),
+  Object.freeze({ c: 45, rgb: [150, 20, 60] }),
 ]);
 
 function lerp(a, b, t) {

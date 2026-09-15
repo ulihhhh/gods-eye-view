@@ -21,9 +21,10 @@ import {
  *
  * Points are colored by water temperature — the one number a beachgoer
  * actually plans around — on a continuous gradient scaled to the real
- * range Spanish coastal waters see, not `aemetStations.js`'s -10..40°C air
- * scale. Same `RELATIVE_TO_GROUND` + no-`disableDepthTestDistance`
- * treatment Phase A0 established, applied from the start.
+ * range Spanish coastal waters see, not `temperatureColorScale.js`'s much
+ * wider air-temperature scale. Same `RELATIVE_TO_GROUND` + no-
+ * `disableDepthTestDistance` treatment Phase A0 established, applied from
+ * the start.
  */
 
 export const AEMET_BEACHES_SELECTED_OVERLAY_SOURCE_ID = 'aemet-beaches-selected';
@@ -49,19 +50,33 @@ const POINT_HEIGHT_OFFSET_M = 2.0;
 
 /**
  * Sea-surface water temperature stops for Spanish coastal waters — a
- * narrower, warmer-skewed range than `aemetStations.js`'s air-temperature
- * scale (real Spanish sea temps run roughly 14–29°C across the year), same
- * continuous-gradient approach for the same reason: two close readings
- * (e.g. 22 and 23°C) should read as visibly different, not identical within
- * a stepped band.
+ * narrower range than `temperatureColorScale.js`'s air-temperature scale
+ * (winter Cantabrian/Atlantic lows around 14°C up to open-water summer
+ * norms in the high 20s), but reusing that scale's exact blue → cyan →
+ * green → yellow-green → gold → orange → red hues at each corresponding
+ * stop, remapped onto water's own range — the same color always means the
+ * same "how hot" regardless of whether it's air or sea temperature, and it
+ * keeps both scales' "no red-green-only transitions" colorblind-safe
+ * property.
+ *
+ * The top stop was 29°C until AEMET's and buoy-network records made that
+ * clearly too low: Spain's Mediterranean coast has repeatedly logged
+ * confirmed marine-heatwave readings above it in recent summers — the
+ * Balearic Sea's basin-wide average hit 29.3°C on 11 Aug 2022, and the
+ * Dragonera buoy alone hit 31.9°C on 12 Aug 2024 — so 29°C was clamping a
+ * genuine "the sea is dangerously warm" reading to the same orange as an
+ * ordinary summer day. Extended to 32°C with `temperatureColorScale.js`'s
+ * 39°C red as the new top anchor, the same "give the exceptional reading
+ * its own color" fix applied there.
  */
 export const WATER_TEMP_COLOR_STOPS = Object.freeze([
-  Object.freeze({ c: 14, rgb: [40, 100, 200] }),
-  Object.freeze({ c: 18, rgb: [59, 182, 255] }),
-  Object.freeze({ c: 21, rgb: [70, 220, 190] }),
-  Object.freeze({ c: 24, rgb: [140, 230, 90] }),
-  Object.freeze({ c: 26, rgb: [255, 210, 60] }),
-  Object.freeze({ c: 29, rgb: [255, 120, 40] }),
+  Object.freeze({ c: 14, rgb: [60, 130, 255] }),
+  Object.freeze({ c: 18, rgb: [65, 190, 230] }),
+  Object.freeze({ c: 21, rgb: [90, 210, 150] }),
+  Object.freeze({ c: 24, rgb: [160, 220, 90] }),
+  Object.freeze({ c: 26, rgb: [255, 200, 50] }),
+  Object.freeze({ c: 29, rgb: [255, 130, 40] }),
+  Object.freeze({ c: 32, rgb: [225, 50, 40] }),
 ]);
 
 function lerp(a, b, t) {

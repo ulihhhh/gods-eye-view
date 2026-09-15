@@ -1,32 +1,35 @@
 /**
  * Renders the AEMET temperature-gradient overlay: an IDW-interpolated raster
  * (`temperatureInterpolation.js`) painted to an offscreen canvas and clipped
- * to Spain's outline — then handed back as a data URL ready for
+ * to a region's outline — then handed back as a data URL ready for
  * `new Cesium.SingleTileImageryProvider({ url, rectangle })`. CCAA borders
- * are NOT baked in here — at this canvas's resolution (~1.5km/pixel for all
- * of Spain) stroked borders turned into visible staircases once zoomed in.
- * `aemetStations.js` draws them separately as real vector Cesium polylines
- * instead, which stay crisp at any zoom.
+ * are NOT baked in here — at this canvas's resolution (~1.5km/pixel for the
+ * mainland region) stroked borders turned into visible staircases once
+ * zoomed in. `aemetStations.js` draws them separately as real vector Cesium
+ * polylines instead, which stay crisp at any zoom.
  *
  * Kept DOM-dependent parts (canvas) behind an injectable `createCanvas`, the
  * same seam `aemetWeatherImagery.js` uses for `loadImage`, so the pure grid
  * math above it stays node-testable while this module itself only runs in a
  * real browser.
+ *
+ * Two SEPARATE regions/images, not one: the Canary Islands sit ~1,000 km
+ * southwest of the mainland, so a single raster rectangle spanning both
+ * would waste most of its canvas on empty ocean. Instead each region gets
+ * its own tightly-cropped bbox, raster, and clip path — and `aemetStations.js`
+ * mounts one `Cesium.ImageryLayer` per region returned here. IDW still runs
+ * against the FULL station list for both regions (not just each region's own
+ * stations): the hash grid in `temperatureInterpolation.js` finds nearest
+ * neighbors by absolute distance, and mainland/Canary stations are far
+ * enough apart that neither region's cells end up pulling from the other's
+ * stations anyway.
  */
 
 import { buildIdwGrid } from './temperatureInterpolation.js';
 import { getCcaaFeatures } from './spainBoundaries.js';
 import { temperatureColorRgb } from './aemetStations.js';
 
-/**
- * The Canary Islands sit ~1,000 km southwest of the mainland — including
- * them would stretch the raster rectangle across a mostly-empty ocean gap
- * for no visual benefit. Left out of the v1 raster/clip bbox; still part of
- * the bundled boundary pack for whatever uses `spainBoundaries.js` next.
- * The pack is province-level, so this is the Canary Islands' two provinces
- * (Las Palmas, Santa Cruz de Tenerife), not one `'canarias'` id.
- */
-const EXCLUDED_PROVINCE_IDS = new Set(['las-palmas', 'santa-cruz-de-tenerife']);
+const CANARY_PROVINCE_IDS = new Set(['las-palmas', 'santa-cruz-de-tenerife']);
 
 const BBOX_PADDING_DEG = 0.15;
 const GRID_CELLS_X = 180;
@@ -105,24 +108,10 @@ function paintGridCanvas(grid, createCanvas) {
   return canvas;
 }
 
-/**
- * Build the full gradient overlay image for the given station readings.
- * @param {Array<{lat: number, lon: number, temperatureC: number}>} stations
- * @param {object} [options]
- * @param {(w: number, h: number) => HTMLCanvasElement|null} [options.createCanvas]
- * @returns {Promise<{dataUrl: string, bbox: [number, number, number, number]}|null>}
- *   `null` when there's no DOM (headless/test) or no usable station data.
- */
-export async function buildTemperatureGradientImage(stations, { createCanvas = defaultCreateCanvas } = {}) {
-  const allFeatures = await getCcaaFeatures();
-  const features = allFeatures.filter((f) => !EXCLUDED_PROVINCE_IDS.has(f.id));
+/** Build one region's raster+clip image, or `null` for an empty feature set / no DOM. */
+function buildRegionImage(features, points, createCanvas) {
   if (!features.length) return null;
   const bbox = computeBbox(features);
-
-  const points = (stations || [])
-    .filter((s) => Number.isFinite(s?.lat) && Number.isFinite(s?.lon) && Number.isFinite(s?.temperatureC))
-    .map((s) => ({ lat: s.lat, lon: s.lon, value: s.temperatureC }));
-  if (!points.length) return null;
 
   const grid = buildIdwGrid(points, bbox, { cellsX: GRID_CELLS_X });
   const rasterCanvas = paintGridCanvas(grid, createCanvas);
@@ -145,4 +134,33 @@ export async function buildTemperatureGradientImage(stations, { createCanvas = d
   ctx.restore();
 
   return { dataUrl: outputCanvas.toDataURL('image/png'), bbox };
+}
+
+/**
+ * Build the gradient overlay images for the given station readings — one per
+ * region (mainland+Baleares+Ceuta/Melilla, and the Canary Islands).
+ * @param {Array<{lat: number, lon: number, temperatureC: number}>} stations
+ * @param {object} [options]
+ * @param {(w: number, h: number) => HTMLCanvasElement|null} [options.createCanvas]
+ * @returns {Promise<Array<{dataUrl: string, bbox: [number, number, number, number]}>>}
+ *   Empty when there's no DOM (headless/test) or no usable station data. A
+ *   region with no boundary features (shouldn't happen with the bundled
+ *   pack) or no DOM is simply omitted rather than failing the whole call.
+ */
+export async function buildTemperatureGradientImages(stations, { createCanvas = defaultCreateCanvas } = {}) {
+  const allFeatures = await getCcaaFeatures();
+  const mainlandFeatures = allFeatures.filter((f) => !CANARY_PROVINCE_IDS.has(f.id));
+  const canaryFeatures = allFeatures.filter((f) => CANARY_PROVINCE_IDS.has(f.id));
+
+  const points = (stations || [])
+    .filter((s) => Number.isFinite(s?.lat) && Number.isFinite(s?.lon) && Number.isFinite(s?.temperatureC))
+    .map((s) => ({ lat: s.lat, lon: s.lon, value: s.temperatureC }));
+  if (!points.length) return [];
+
+  const images = [];
+  for (const features of [mainlandFeatures, canaryFeatures]) {
+    const image = buildRegionImage(features, points, createCanvas);
+    if (image) images.push(image);
+  }
+  return images;
 }
