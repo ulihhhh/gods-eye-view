@@ -409,3 +409,42 @@ that schema requires a corresponding codec change.
 `standalone/catalog` selects the existing page-scoped default instances and metadata.
 Reusable data setup imports no standalone layer defaults. The current compatibility
 source setters remain available while callers migrate to instance construction.
+
+### Layer construction
+
+`application/layers` constructs the current catalog from explicit source objects
+and an application AbortSignal. Small `src/app/layers` modules wire existing scene
+services into each family factory. Standalone provider selection lives in
+`src/standalone/layerSources.js`. The construction export has its own checked
+dependency graph, excluding standalone setup and compatibility layer instances.
+
+Both aircraft layers share the catalog's classification registry; launches use
+its satellites and Contacts uses its aircraft, vessels and installations. Data
+registration, controls and voice actions read those same instances. Destruction
+remains the manager's responsibility; classification also observes application
+abort when startup has not reached registration. Scene engines remain page-owned,
+so this change does not introduce multiple simultaneous viewers.
+
+Direct `src/data` compatibility entries retain their old defaults and testing
+exports. Browser regression probes use the registered instance's testing surface
+to avoid accidentally inspecting an unused compatibility instance. Existing source
+setters apply only to compatibility instances; the normal application supplies
+its sources at construction.
+
+### Application operations
+
+`application/operations` accepts request-service instances and an application
+lifetime. It constructs terrain resolution, coarse floor/mesh caches and an
+annotation resolver without selecting upstream providers. Its checked graph is
+separate from standalone setup. Scene construction returns these operations; the
+catalog and controls use the same surface owner. Layers still own their individual
+ground-snap caches and model resources.
+
+Terrain cancellation rejects late replies before caching, clears floor queues and
+removes the map-stack listener. Annotation lookup caches are instance-owned and
+cleared on cancellation. Geometry selection and floor policies are unchanged.
+HUD and weather controllers accept their respective service; regional lookup and
+location framing use the supplied operations. Voice shares the same boundary and
+floor services, with analyst memory scoped to the runner. Direct compatibility
+entrypoints retain default services; normal assembly does not configure their
+source slots.

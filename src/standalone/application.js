@@ -23,20 +23,25 @@ export function createStandaloneApplication({
   const loadingScreen = document.getElementById('loading-screen');
   const loaderStatus = loadingScreen.querySelector('.loader-status');
   let placeSearch;
-  const catalog = createStandaloneCatalog();
+  let catalog;
   return createApplication({
-    createScene: (context) => {
+    createScene: async (context) => {
       placeSearch = createStandalonePlaceSearch({
         ...geospatial,
         resolveApiKey: () => googleApiKey,
         signal: context.signal,
       });
-      return createStandaloneScene({
+      const scene = await createStandaloneScene({
         ...context,
         googleApiKey,
         cesiumToken,
         loaderStatus,
       });
+      catalog = createStandaloneCatalog({
+        signal: context.signal,
+        surface: scene.operations.surface,
+      });
+      return scene;
     },
     createControls: (context) =>
       createStandaloneControls({
