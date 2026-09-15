@@ -7,6 +7,9 @@ import {
 } from '../overlays/worldOverlay.js';
 import { TEMPERATURE_COLOR_STOPS, temperatureColorRgb } from './temperatureColorScale.js';
 import { buildTemperatureGradientImage } from './temperatureGradientRaster.js';
+import { getCcaaFeatures } from './spainBoundaries.js';
+import { SPAIN_PROVINCIAL_CAPITALS } from './spainCapitals.js';
+import { buildCapitalTemperatureRecords } from './capitalTemperatures.js';
 
 export { TEMPERATURE_COLOR_STOPS, temperatureColorRgb } from './temperatureColorScale.js';
 
@@ -36,6 +39,22 @@ export const AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
   collisionCapacity: 0,
   moving: false,
 });
+
+/**
+ * Ambient labels for every provincial capital's nearest-station temperature,
+ * shown only in gradient view mode. ~52 capitals — a fixed, small count, so
+ * this budget is comfortable headroom rather than a tight cohort like the
+ * thousands-of-points ambient layers use.
+ */
+export const AEMET_CAPITALS_OVERLAY_SOURCE_ID = 'aemet-capitals';
+export const AEMET_CAPITALS_OVERLAY_SOURCE_OPTIONS = Object.freeze({
+  cohortLimit: 60,
+  collisionCapacity: 60,
+  moving: false,
+});
+
+const CCAA_BORDER_COLOR = Cesium.Color.fromCssColorString('rgba(20, 24, 30, 0.55)');
+const CCAA_BORDER_WIDTH_PX = 1.5;
 
 const DEFAULT_OVERLAY_HOST = Object.freeze({
   setEntries: setOverlayEntries,
@@ -210,6 +229,34 @@ export function createAemetStationSelectedOverlayEntry(id, position, station, fo
   };
 }
 
+/**
+ * One ambient label for a provincial capital's nearest-station temperature —
+ * same shape as `earthquakes/model.js`'s `createEarthquakeOverlayEntry`, the
+ * established pattern for a small, non-interactive, always-on text label.
+ * @param {object} input
+ * @param {string} input.id
+ * @param {Cesium.Cartesian3} input.position
+ * @param {string} input.name
+ * @param {number} input.temperatureC
+ * @returns {object}
+ */
+export function createCapitalTemperatureOverlayEntry({ id, position, name, temperatureC }) {
+  return {
+    id: String(id),
+    position,
+    variant: 'label',
+    title: `${name} ${temperatureC.toFixed(0)}°`,
+    collisionGroup: 'ambient-label',
+    paintLane: 'ambient-label',
+    interactive: false,
+    edgeFade: 'keyhole',
+    horizonCull: true,
+    terrainOcclusion: false,
+    verticalOnly: true,
+    placement: 'above',
+  };
+}
+
 /** Validate `/api/aemet/forecast`'s payload shape before using it to extend a card. */
 export function normalizeAemetForecastPayload(payload) {
   if (!Array.isArray(payload?.hours)) return null;
@@ -258,6 +305,17 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
    */
   let _gradientToken = 0;
   let _gradientError = null;
+  /** @type {Cesium.CustomDataSource|null} static CCAA border polylines, built once and only toggled show/hide */
+  let _borderDataSource = null;
+  let _bordersBuilt = false;
+  /**
+   * Own token for the capital-label rebuild — deliberately separate from
+   * `_gradientToken`. Both rebuilds can be in flight from the same
+   * enable()/poll tick; sharing one counter would make each call's own
+   * `++token` invalidate the OTHER build in progress even though nothing
+   * about that other build actually changed.
+   */
+  let _capitalLabelsToken = 0;
   /**
    * Bumped on every select/clear so a Phase-A2 forecast fetch that resolves
    * after the user has already moved on (reselected a different station,
@@ -282,6 +340,62 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
   function _removeGradientLayer() {
     if (_gradientLayer && _viewer) _viewer.imageryLayers.remove(_gradientLayer, true);
     _gradientLayer = null;
+  }
+
+  /**
+   * Build the CCAA border polylines once and cache them — this geometry is
+   * static (unlike the gradient raster, which is rebuilt from live station
+   * data every poll), so it's built lazily on first entry into gradient mode
+   * and never rebuilt again; only `_borderDataSource.show` toggles after
+   * that. Vector polylines (not baked into the raster canvas) stay crisp at
+   * any zoom — see `temperatureGradientRaster.js`'s module comment for why
+   * the raster approach was dropped.
+   */
+  async function _buildBordersOnce() {
+    if (_bordersBuilt || !_borderDataSource) return;
+    _bordersBuilt = true; // set before the await: one build in flight, not one per rapid toggle
+    let features;
+    try {
+      features = await getCcaaFeatures();
+    } catch (e) {
+      _bordersBuilt = false;
+      console.warn('[Data:AemetStations] CCAA border load error:', e);
+      return;
+    }
+    if (!_borderDataSource) return; // destroyed while loading
+    for (const feature of features) {
+      for (const ring of feature.rings) {
+        _borderDataSource.entities.add({
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()),
+            material: CCAA_BORDER_COLOR,
+            width: CCAA_BORDER_WIDTH_PX,
+            clampToGround: true,
+          },
+        });
+      }
+    }
+  }
+
+  /**
+   * (Re)build the capital temperature labels from the current station
+   * snapshot. Independent of `_rebuildGradientLayer` (own token, not
+   * awaited by it) — the raster PNG and these labels are unrelated async
+   * work that both happen to run on gradient-mode entry and each poll.
+   */
+  async function _rebuildCapitalLabels() {
+    if (_viewMode !== 'gradient' || !_enabled || !_viewer) return;
+    const token = ++_capitalLabelsToken;
+    const stations = [..._stationById.values()];
+    const records = buildCapitalTemperatureRecords(SPAIN_PROVINCIAL_CAPITALS, stations);
+    if (token !== _capitalLabelsToken || _viewMode !== 'gradient' || !_enabled || !_viewer) return;
+    const entries = records.map((r) => createCapitalTemperatureOverlayEntry({
+      id: `capital:${r.capitalId}`,
+      position: Cesium.Cartesian3.fromDegrees(r.lon, r.lat),
+      name: r.name,
+      temperatureC: r.temperatureC,
+    }));
+    overlayHost.setEntries(AEMET_CAPITALS_OVERLAY_SOURCE_ID, entries, AEMET_CAPITALS_OVERLAY_SOURCE_OPTIONS);
   }
 
   /**
@@ -339,11 +453,19 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
     if (next === 'gradient') {
       if (_dataSource) _dataSource.show = false;
       void _rebuildGradientLayer();
+      void _buildBordersOnce().then(() => {
+        if (_borderDataSource && _viewMode === 'gradient') _borderDataSource.show = true;
+      });
+      overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, true);
+      void _rebuildCapitalLabels();
     } else {
       _gradientToken += 1; // invalidate any in-flight build
       _removeGradientLayer();
       _gradientError = null;
       if (_dataSource && _enabled) _dataSource.show = true;
+      if (_borderDataSource) _borderDataSource.show = false;
+      _capitalLabelsToken += 1; // invalidate any in-flight build
+      overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, false);
     }
     return true;
   }
@@ -495,6 +617,10 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       _dataSource = new Cesium.CustomDataSource('aemet-stations');
       _dataSource.show = false;
       viewer.dataSources.add(_dataSource);
+      _borderDataSource = new Cesium.CustomDataSource('aemet-ccaa-borders');
+      _borderDataSource.show = false;
+      viewer.dataSources.add(_borderDataSource);
+      _bordersBuilt = false;
       _count = 0;
       _lastUpdate = null;
       _lastError = null;
@@ -503,6 +629,7 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       _viewMode = 'points';
       _gradientError = null;
       overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, false);
+      overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, false);
       console.log('[Data:AemetStations] Initialized');
     },
 
@@ -512,7 +639,14 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer);
       registerPickOwner('aemet-stations', (pickedId) => String(pickedId).startsWith('aemet-station:'));
-      if (_viewMode === 'gradient') void _rebuildGradientLayer();
+      if (_viewMode === 'gradient') {
+        void _rebuildGradientLayer();
+        void _buildBordersOnce().then(() => {
+          if (_borderDataSource && _viewMode === 'gradient' && _enabled) _borderDataSource.show = true;
+        });
+        overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, true);
+        void _rebuildCapitalLabels();
+      }
     },
 
     disable(viewer) {
@@ -521,7 +655,10 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       if (_dataSource) _dataSource.show = false;
       _gradientToken += 1;
       _removeGradientLayer();
+      if (_borderDataSource) _borderDataSource.show = false;
+      _capitalLabelsToken += 1;
       overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, false);
+      overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, false);
       _removeClickHandler();
       unregisterPickOwner('aemet-stations');
     },
@@ -552,7 +689,7 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
             label: 'GRADIENTE',
             active: !isPoints,
             state: !isPoints ? (_gradientError ? 'error' : 'active') : 'idle',
-            title: _gradientError || 'Superficie interpolada (IDW) recortada a España, con fronteras de CCAA',
+            title: _gradientError || 'Superficie interpolada (IDW) recortada a España, con fronteras de CCAA y temperaturas de capitales de provincia',
             params: { viewMode: 'gradient' },
           },
         ],
@@ -617,10 +754,14 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
         _dataSource.entities.removeAll();
         for (const entity of nextEntities) _dataSource.entities.add(entity);
         _stationById = nextStationById;
-        // Keep the gradient in sync with each poll, same cadence as the
-        // point entities above — fire-and-forget, `_rebuildGradientLayer`
-        // itself is a no-op unless the gradient view is actually active.
-        if (_viewMode === 'gradient') void _rebuildGradientLayer();
+        // Keep the gradient and capital labels in sync with each poll, same
+        // cadence as the point entities above — fire-and-forget, both rebuilds
+        // are no-ops unless the gradient view is actually active. Borders are
+        // NOT touched here: static geometry, built once by `_buildBordersOnce`.
+        if (_viewMode === 'gradient') {
+          void _rebuildGradientLayer();
+          void _rebuildCapitalLabels();
+        }
 
         // A refresh must not silently drop an open selection — re-resolve it
         // against the fresh data (which also means the card's numbers update
@@ -650,10 +791,18 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       _gradientToken += 1;
       _removeGradientLayer();
       _gradientError = null;
+      _capitalLabelsToken += 1;
+      overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, false);
+      overlayHost.clearSource(AEMET_CAPITALS_OVERLAY_SOURCE_ID);
       if (_dataSource) {
         viewer.dataSources.remove(_dataSource, true);
         _dataSource = null;
       }
+      if (_borderDataSource) {
+        viewer.dataSources.remove(_borderDataSource, true);
+        _borderDataSource = null;
+      }
+      _bordersBuilt = false;
       _stationById = new Map();
       _count = 0;
       _lastUpdate = null;
@@ -747,6 +896,24 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
     // `_rebuildGradientLayer()` promise it kicks off.
     _rebuildGradientLayerForTest() {
       return _rebuildGradientLayer();
+    },
+    // Same test-hook shape as the gradient layer's, for the CCAA border data
+    // source and the capital-label rebuild (see those functions' own
+    // comments for why each is a separate build/token from the gradient's).
+    _buildBordersOnceForTest() {
+      return _buildBordersOnce();
+    },
+    _bordersVisibleForTest() {
+      return Boolean(_borderDataSource?.show);
+    },
+    _borderEntityCountForTest() {
+      return _borderDataSource?.entities.values.length ?? 0;
+    },
+    _rebuildCapitalLabelsForTest() {
+      return _rebuildCapitalLabels();
+    },
+    _capitalLabelsTokenForTest() {
+      return _capitalLabelsToken;
     },
   };
   return layer;

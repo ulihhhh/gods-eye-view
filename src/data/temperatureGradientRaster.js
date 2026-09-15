@@ -1,9 +1,12 @@
 /**
  * Renders the AEMET temperature-gradient overlay: an IDW-interpolated raster
- * (`temperatureInterpolation.js`) painted to an offscreen canvas, clipped to
- * Spain's outline, with CCAA borders stroked on top as reference lines —
- * then handed back as a data URL ready for
- * `new Cesium.SingleTileImageryProvider({ url, rectangle })`.
+ * (`temperatureInterpolation.js`) painted to an offscreen canvas and clipped
+ * to Spain's outline — then handed back as a data URL ready for
+ * `new Cesium.SingleTileImageryProvider({ url, rectangle })`. CCAA borders
+ * are NOT baked in here — at this canvas's resolution (~1.5km/pixel for all
+ * of Spain) stroked borders turned into visible staircases once zoomed in.
+ * `aemetStations.js` draws them separately as real vector Cesium polylines
+ * instead, which stay crisp at any zoom.
  *
  * Kept DOM-dependent parts (canvas) behind an injectable `createCanvas`, the
  * same seam `aemetWeatherImagery.js` uses for `loadImage`, so the pure grid
@@ -28,8 +31,6 @@ const GRID_CELLS_X = 180;
 /** Canvas pixels per grid cell — smooths the blocky IDW grid via the browser's own bilinear upscale on drawImage. */
 const OUTPUT_SCALE = 3;
 const HEATMAP_ALPHA = 0.55;
-const BORDER_STROKE = 'rgba(20, 24, 30, 0.55)';
-const BORDER_WIDTH_PX = 1;
 
 function defaultCreateCanvas(width, height) {
   if (typeof document === 'undefined') return null;
@@ -140,10 +141,6 @@ export async function buildTemperatureGradientImage(stations, { createCanvas = d
   ctx.clip(clipPath);
   ctx.drawImage(rasterCanvas, 0, 0, outputWidth, outputHeight);
   ctx.restore();
-
-  ctx.strokeStyle = BORDER_STROKE;
-  ctx.lineWidth = BORDER_WIDTH_PX;
-  for (const ring of allRings) ctx.stroke(ringToPath2D(ring, bbox, outputWidth, outputHeight));
 
   return { dataUrl: outputCanvas.toDataURL('image/png'), bbox };
 }

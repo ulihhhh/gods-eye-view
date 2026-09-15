@@ -5,10 +5,9 @@ import { buildTemperatureGradientImage } from './temperatureGradientRaster.js';
 import { getCcaaFeatures } from './spainBoundaries.js';
 
 // No real DOM under node:test — stub just enough of the Canvas 2D API that
-// this module's orchestration (grid build → paint → clip → stroke → export)
-// runs end to end without needing actual pixel rendering (that path is
-// covered by manual browser verification; this test is about wiring, not
-// pixels).
+// this module's orchestration (grid build → paint → clip → export) runs end
+// to end without needing actual pixel rendering (that path is covered by
+// manual browser verification; this test is about wiring, not pixels).
 class FakePath2D {
   moveTo() {}
   lineTo() {}
@@ -25,10 +24,7 @@ function makeFakeContext() {
     restore() {},
     clip() {},
     drawImage() {},
-    stroke() {},
     set imageSmoothingEnabled(_v) {},
-    set strokeStyle(_v) {},
-    set lineWidth(_v) {},
   };
 }
 
