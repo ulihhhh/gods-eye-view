@@ -27,7 +27,7 @@ import { governorRequestRender } from '../renderGovernor.js';
  */
 
 /** Optional allowlist. Empty = render every region the extension has pushed. */
-const REGION_ALLOWLIST = String(import.meta.env.VITE_LIVEUAMAP_REGIONS ?? '')
+const REGION_ALLOWLIST = String(import.meta.env?.VITE_LIVEUAMAP_REGIONS ?? '')
   .split(',')
   .map((r) => r.trim().toLowerCase())
   .filter((r) => /^[a-z0-9-]{1,40}$/.test(r));

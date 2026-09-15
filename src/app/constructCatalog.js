@@ -8,6 +8,7 @@ import { createApplicationCctv } from './layers/cctv.js';
 import { createApplicationRadio } from './layers/radio.js';
 import { createApplicationTraffic } from './layers/traffic.js';
 import { createApplicationBikeshare } from './layers/bikeshare.js';
+import { createApplicationDirections } from './layers/directions.js';
 import { createApplicationInstallations } from './layers/militaryInstallations.js';
 import { createApplicationSatellites } from './layers/satellites.js';
 import { createApplicationLaunches } from './layers/rocketLaunches.js';
@@ -17,7 +18,15 @@ import { createApplicationFirms } from './layers/firms.js';
 import { createApplicationEarthquakes } from './layers/earthquakes.js';
 import { createApplicationCables } from './layers/submarineCables.js';
 import { createInfrastructureLayers } from '../data/infrastructure.js';
-import { localGeoJsonServices } from '../data/localGeojson.js';
+import { localGeoJsonServices } from './localGeojsonServices.js';
+import { createLiveuamapLayer } from '../data/liveuamap.js';
+import { createLocalAdsbLayer } from '../data/localAdsb.js';
+import { createAemetStationsLayer } from '../data/aemetStations.js';
+import { createAemetWarningsLayer } from '../data/aemetWarnings.js';
+import { createAemetWeatherImageryLayer } from '../data/aemetWeatherImagery.js';
+import { createAemetUvIndexLayer } from '../data/aemetUvIndex.js';
+import { createAemetBeachesLayer } from '../data/aemetBeaches.js';
+import { createAemetEnvironmentalLayer } from '../data/aemetEnvironmental.js';
 
 const SOURCE_METHODS = Object.freeze({
   flights: ['getSnapshot'],
@@ -109,6 +118,7 @@ export function createApplicationCatalog({
         createApplicationCctv({ surface, source: sources.cctv }),
         createApplicationRadio({ surface, source: sources.radio }),
         createApplicationBikeshare({ source: sources.bikeshare }),
+        createApplicationDirections(),
         vessels,
         installations,
         createApplicationAwareness({
@@ -127,6 +137,14 @@ export function createApplicationCatalog({
           source: 'NASA FIRMS · LIVE',
           feed: sources.firms,
         }),
+        createLiveuamapLayer(),
+        createLocalAdsbLayer(),
+        createAemetStationsLayer(),
+        createAemetWarningsLayer(),
+        createAemetWeatherImageryLayer(),
+        createAemetUvIndexLayer(),
+        createAemetBeachesLayer(),
+        createAemetEnvironmentalLayer(),
       ],
       metadata,
     );
