@@ -10,6 +10,7 @@ import { buildTemperatureGradientImage } from './temperatureGradientRaster.js';
 import { getCcaaFeatures } from './spainBoundaries.js';
 import { SPAIN_PROVINCIAL_CAPITALS } from './spainCapitals.js';
 import { buildCapitalTemperatureRecords } from './capitalTemperatures.js';
+import { catmullRomSmoothRing } from './ringSmoothing.js';
 
 export { TEMPERATURE_COLOR_STOPS, temperatureColorRgb } from './temperatureColorScale.js';
 
@@ -55,6 +56,21 @@ export const AEMET_CAPITALS_OVERLAY_SOURCE_OPTIONS = Object.freeze({
 
 const CCAA_BORDER_COLOR = Cesium.Color.fromCssColorString('rgba(20, 24, 30, 0.55)');
 const CCAA_BORDER_WIDTH_PX = 1.5;
+/**
+ * Interpolated points inserted per original edge (see `ringSmoothing.js`) —
+ * the bundled boundary data's real vertices are far enough apart that a
+ * straight segment between them reads as a sharp corner once the camera is
+ * close; this curves the rendered line smoothly between them instead.
+ */
+const CCAA_BORDER_SMOOTHING_SUBDIVISIONS = 6;
+
+/**
+ * Tessellation for the gradient's classified rectangle — finer than
+ * `RectangleGraphics`' default (~1° per facet), so the drape follows the
+ * Earth's curvature smoothly across a Spain-sized rectangle instead of a
+ * handful of flat facets.
+ */
+const GRADIENT_RECTANGLE_GRANULARITY_RAD = Cesium.Math.toRadians(0.1);
 
 const DEFAULT_OVERLAY_HOST = Object.freeze({
   setEntries: setOverlayEntries,
@@ -100,6 +116,13 @@ function colorFromRgb([r, g, b], alpha = POINT_ALPHA) {
 
 function temperatureColor(temperatureC, alpha = POINT_ALPHA) {
   return colorFromRgb(temperatureColorRgb(temperatureC) ?? COLOR_UNKNOWN_RGB, alpha);
+}
+
+/** Same points-mode temperature→color mapping, as a CSS hex string for overlay `accent` fields. */
+function temperatureAccentHex(temperatureC) {
+  return `#${(temperatureColorRgb(temperatureC) ?? COLOR_UNKNOWN_RGB)
+    .map((c) => c.toString(16).padStart(2, '0'))
+    .join('')}`;
 }
 
 function fmt(value, unit, digits = 0) {
@@ -215,9 +238,7 @@ export function createAemetStationSelectedOverlayEntry(id, position, station, fo
     priority: Number.MAX_SAFE_INTEGER,
     title,
     details: forecastLine ? [...details, forecastLine] : details,
-    accent: `#${(temperatureColorRgb(station?.temperatureC) ?? COLOR_UNKNOWN_RGB)
-      .map((c) => c.toString(16).padStart(2, '0'))
-      .join('')}`,
+    accent: temperatureAccentHex(station?.temperatureC),
     interactive: false,
     anchorRadiusPx: 9,
     minAnchorGapPx: 11,
@@ -246,6 +267,7 @@ export function createCapitalTemperatureOverlayEntry({ id, position, name, tempe
     position,
     variant: 'label',
     title: `${name} ${temperatureC.toFixed(0)}°`,
+    accent: temperatureAccentHex(temperatureC),
     collisionGroup: 'ambient-label',
     paintLane: 'ambient-label',
     interactive: false,
@@ -294,14 +316,14 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
   let _clickHandler = null;
   /** @type {'points'|'gradient'} which view mode the row's pill has selected */
   let _viewMode = 'points';
-  /** @type {Cesium.ImageryLayer|null} the mounted IDW gradient overlay, or null when not in gradient mode */
-  let _gradientLayer = null;
+  /** @type {Cesium.Entity|null} the mounted IDW gradient overlay, or null when not in gradient mode */
+  let _gradientEntity = null;
   /**
    * Bumped on every gradient (re)build request so a `buildTemperatureGradientImage()`
    * that resolves after the user has since switched back to points, disabled
    * the layer, or triggered a newer rebuild (the next 5-min poll) can
    * recognize it's stale and silently drop its result instead of mounting an
-   * imagery layer nobody asked for anymore.
+   * overlay nobody asked for anymore.
    */
   let _gradientToken = 0;
   let _gradientError = null;
@@ -338,8 +360,8 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
   }
 
   function _removeGradientLayer() {
-    if (_gradientLayer && _viewer) _viewer.imageryLayers.remove(_gradientLayer, true);
-    _gradientLayer = null;
+    if (_gradientEntity && _viewer) _viewer.entities.remove(_gradientEntity);
+    _gradientEntity = null;
   }
 
   /**
@@ -365,9 +387,10 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
     if (!_borderDataSource) return; // destroyed while loading
     for (const feature of features) {
       for (const ring of feature.rings) {
+        const smoothed = catmullRomSmoothRing(ring, CCAA_BORDER_SMOOTHING_SUBDIVISIONS);
         _borderDataSource.entities.add({
           polyline: {
-            positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()),
+            positions: Cesium.Cartesian3.fromDegreesArray(smoothed.flat()),
             material: CCAA_BORDER_COLOR,
             width: CCAA_BORDER_WIDTH_PX,
             clampToGround: true,
@@ -400,11 +423,20 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
 
   /**
    * (Re)build the IDW gradient overlay from the current station snapshot and
-   * mount it as a Cesium imagery layer, replacing whatever was mounted
-   * before. A no-op whenever the gradient view isn't actually what should be
-   * showing right now (still 'points', or the layer got disabled/destroyed
-   * while this was in flight) — checked both before starting and again after
-   * the async build resolves, via `_gradientToken`.
+   * mount it, replacing whatever was mounted before. A no-op whenever the
+   * gradient view isn't actually what should be showing right now (still
+   * 'points', or the layer got disabled/destroyed while this was in flight)
+   * — checked both before starting and again after the async build
+   * resolves, via `_gradientToken`.
+   *
+   * Mounted as a ground-CLASSIFIED `Entity` rectangle, not a
+   * `Cesium.ImageryLayer`: this app renders its base globe via Google
+   * Photorealistic 3D Tiles with `scene.globe.show = false`, so a classic 2D
+   * imagery layer has nothing to drape onto and stays invisible — confirmed
+   * live, the layer mounted with `show:true, ready:true` and simply never
+   * appeared. `classificationType: BOTH` drapes onto whatever surface IS
+   * actually rendered (the 3D-tile mesh here; ordinary terrain too, if this
+   * ever runs with the globe re-enabled).
    */
   async function _rebuildGradientLayer() {
     if (_viewMode !== 'gradient' || !_enabled || !_viewer) return;
@@ -425,13 +457,15 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       return;
     }
     try {
-      const provider = await Cesium.SingleTileImageryProvider.fromUrl(result.dataUrl, {
-        rectangle: Cesium.Rectangle.fromDegrees(...result.bbox),
-      });
-      if (token !== _gradientToken || _viewMode !== 'gradient' || !_enabled || !_viewer) return;
       _removeGradientLayer();
-      _gradientLayer = new Cesium.ImageryLayer(provider);
-      _viewer.imageryLayers.add(_gradientLayer);
+      _gradientEntity = _viewer.entities.add({
+        rectangle: {
+          coordinates: Cesium.Rectangle.fromDegrees(...result.bbox),
+          material: new Cesium.ImageMaterialProperty({ image: result.dataUrl, transparent: true }),
+          classificationType: Cesium.ClassificationType.BOTH,
+          granularity: GRADIENT_RECTANGLE_GRANULARITY_RAD,
+        },
+      });
       _gradientError = null;
     } catch (e) {
       if (token !== _gradientToken) return;
@@ -883,7 +917,7 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       return _gradientError;
     },
     _hasGradientLayerForTest() {
-      return Boolean(_gradientLayer);
+      return Boolean(_gradientEntity);
     },
     // Bumped once per _rebuildGradientLayer() call regardless of outcome —
     // a test can diff this across a setParams() call to prove a rebuild was

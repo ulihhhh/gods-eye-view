@@ -697,6 +697,11 @@ test('createCapitalTemperatureOverlayEntry builds a non-interactive ambient labe
   assert.equal(entry.title, 'Madrid 22°');
   assert.equal(entry.interactive, false);
   assert.equal(entry.collisionGroup, 'ambient-label');
+  assert.equal(
+    entry.accent,
+    `#${temperatureColorRgb(21.6).map((c) => c.toString(16).padStart(2, '0')).join('')}`,
+    'same temperature→color mapping as points mode',
+  );
 });
 
 test('CCAA border polylines are built once and only toggle visibility across view-mode switches', async () => {
