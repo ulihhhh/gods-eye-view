@@ -594,3 +594,91 @@ test('only the single selected highlight skips depth testing — every other sta
     'exactly one use (the selected highlight in _selectStation) — a second one on the per-station points would make them render through the globe again',
   );
 });
+
+test('getRowControls defaults to the POINTS chip active, GRADIENT idle, no legend', () => {
+  const viewer = fakeViewer();
+  const layer = createAemetStationsLayer();
+  layer.init(viewer);
+  try {
+    const controls = layer.getRowControls();
+    assert.equal(controls.chips.length, 2);
+    const [points, gradient] = controls.chips;
+    assert.equal(points.id, 'points');
+    assert.equal(points.active, true);
+    assert.equal(gradient.id, 'gradient');
+    assert.equal(gradient.active, false);
+    assert.deepEqual(controls.legend, []);
+  } finally {
+    layer.destroy(viewer);
+  }
+});
+
+test('setParams({viewMode: "gradient"}) flips the pill and populates a TEMPERATURE_COLOR_STOPS legend', async () => {
+  const viewer = fakeViewer();
+  const layer = createAemetStationsLayer();
+  layer.init(viewer);
+  layer.enable(viewer);
+  try {
+    assert.equal(layer.setParams({ viewMode: 'gradient' }), true);
+    assert.equal(layer._viewModeForTest(), 'gradient');
+    await layer._rebuildGradientLayerForTest(); // no DOM under node:test → resolves to a soft "no gradient" error, not a throw
+    const controls = layer.getRowControls();
+    assert.equal(controls.chips[0].active, false, 'points chip no longer active');
+    assert.equal(controls.chips[1].active, true, 'gradient chip active');
+    assert.equal(controls.legend.length, TEMPERATURE_COLOR_STOPS.length);
+    assert.equal(controls.legend[0].label, `${TEMPERATURE_COLOR_STOPS[0].c}°C`);
+  } finally {
+    layer.destroy(viewer);
+  }
+});
+
+test('setParams rejects an unknown viewMode without changing state', () => {
+  const viewer = fakeViewer();
+  const layer = createAemetStationsLayer();
+  layer.init(viewer);
+  try {
+    assert.equal(layer.setParams({ viewMode: 'bogus' }), false);
+    assert.equal(layer._viewModeForTest(), 'points');
+  } finally {
+    layer.destroy(viewer);
+  }
+});
+
+test('switching back to points clears any gradient error and drops the mounted imagery layer', async () => {
+  const viewer = fakeViewer();
+  const layer = createAemetStationsLayer();
+  layer.init(viewer);
+  layer.enable(viewer);
+  try {
+    layer.setParams({ viewMode: 'gradient' });
+    await layer._rebuildGradientLayerForTest();
+    assert.ok(layer._gradientErrorForTest(), 'no DOM under node:test → build reports an error, not a crash');
+    layer.setParams({ viewMode: 'points' });
+    assert.equal(layer._viewModeForTest(), 'points');
+    assert.equal(layer._gradientErrorForTest(), null);
+    assert.equal(layer._hasGradientLayerForTest(), false);
+  } finally {
+    layer.destroy(viewer);
+  }
+});
+
+test('re-clicking an already-active but errored GRADIENT chip retries the build instead of no-op-ing', async () => {
+  const viewer = fakeViewer();
+  const layer = createAemetStationsLayer();
+  layer.init(viewer);
+  layer.enable(viewer);
+  try {
+    layer.setParams({ viewMode: 'gradient' });
+    await layer._rebuildGradientLayerForTest();
+    assert.ok(layer._gradientErrorForTest(), 'first attempt left an error (no DOM under node:test)');
+    const tokenBefore = layer._gradientTokenForTest();
+    // Same viewMode as before — a naive "already in this mode, no-op" guard
+    // would silently swallow this, leaving the user stuck on the error chip
+    // with no way to retry.
+    assert.equal(layer.setParams({ viewMode: 'gradient' }), true);
+    assert.equal(layer._viewModeForTest(), 'gradient');
+    assert.ok(layer._gradientTokenForTest() > tokenBefore, 'a new rebuild was actually kicked off, not swallowed as a no-op');
+  } finally {
+    layer.destroy(viewer);
+  }
+});

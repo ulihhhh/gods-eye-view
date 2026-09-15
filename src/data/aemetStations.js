@@ -5,6 +5,10 @@ import {
   setOverlayEntries,
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
+import { TEMPERATURE_COLOR_STOPS, temperatureColorRgb } from './temperatureColorScale.js';
+import { buildTemperatureGradientImage } from './temperatureGradientRaster.js';
+
+export { TEMPERATURE_COLOR_STOPS, temperatureColorRgb } from './temperatureColorScale.js';
 
 /**
  * AEMET OpenData live weather station pins — Spain only (~850 stations).
@@ -69,58 +73,6 @@ const POINT_ALPHA = 0.92;
  * so there is no stale one-time sample to go wrong.
  */
 const POINT_HEIGHT_OFFSET_M = 2.0;
-
-/**
- * Smooth temperature gradient, coldest to hottest. Anchor stops chosen for a
- * readable spread across the temperatures AEMET's Spain network actually
- * reports (roughly -10°C mountain lows to 40°C+ summer highs), linearly
- * interpolated between neighbors — a genuinely continuous gradient rather
- * than the small number of visually-identical stepped bands this started
- * with. Exported and pure (plain RGB bytes, no Cesium) so it's testable
- * without a Cesium.Color round-trip.
- */
-export const TEMPERATURE_COLOR_STOPS = Object.freeze([
-  Object.freeze({ c: -10, rgb: [40, 60, 170] }),
-  Object.freeze({ c: 0, rgb: [59, 108, 255] }),
-  Object.freeze({ c: 10, rgb: [59, 182, 255] }),
-  Object.freeze({ c: 18, rgb: [70, 220, 190] }),
-  Object.freeze({ c: 24, rgb: [140, 230, 90] }),
-  Object.freeze({ c: 28, rgb: [255, 210, 60] }),
-  Object.freeze({ c: 33, rgb: [255, 140, 50] }),
-  Object.freeze({ c: 40, rgb: [230, 40, 40] }),
-]);
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-/**
- * Interpolate a temperature (°C) to an [r,g,b] byte triple along
- * TEMPERATURE_COLOR_STOPS. Values outside the range clamp to the nearest
- * end stop rather than extrapolating. Returns `null` for a non-finite input
- * — the caller substitutes a neutral "unknown" color, never a guessed one.
- * @param {number} temperatureC
- * @returns {[number, number, number]|null}
- */
-export function temperatureColorRgb(temperatureC) {
-  if (!Number.isFinite(temperatureC)) return null;
-  const stops = TEMPERATURE_COLOR_STOPS;
-  if (temperatureC <= stops[0].c) return stops[0].rgb;
-  if (temperatureC >= stops[stops.length - 1].c) return stops[stops.length - 1].rgb;
-  for (let i = 0; i < stops.length - 1; i++) {
-    const a = stops[i];
-    const b = stops[i + 1];
-    if (temperatureC >= a.c && temperatureC <= b.c) {
-      const t = (temperatureC - a.c) / (b.c - a.c);
-      return [
-        Math.round(lerp(a.rgb[0], b.rgb[0], t)),
-        Math.round(lerp(a.rgb[1], b.rgb[1], t)),
-        Math.round(lerp(a.rgb[2], b.rgb[2], t)),
-      ];
-    }
-  }
-  return stops[stops.length - 1].rgb; // unreachable, kept for defensiveness
-}
 
 /** RGB bytes → a Cesium.Color at this layer's standard marker alpha. */
 function colorFromRgb([r, g, b], alpha = POINT_ALPHA) {
@@ -293,6 +245,19 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
   let _selectedEntity = null;
   /** @type {Cesium.ScreenSpaceEventHandler|null} */
   let _clickHandler = null;
+  /** @type {'points'|'gradient'} which view mode the row's pill has selected */
+  let _viewMode = 'points';
+  /** @type {Cesium.ImageryLayer|null} the mounted IDW gradient overlay, or null when not in gradient mode */
+  let _gradientLayer = null;
+  /**
+   * Bumped on every gradient (re)build request so a `buildTemperatureGradientImage()`
+   * that resolves after the user has since switched back to points, disabled
+   * the layer, or triggered a newer rebuild (the next 5-min poll) can
+   * recognize it's stale and silently drop its result instead of mounting an
+   * imagery layer nobody asked for anymore.
+   */
+  let _gradientToken = 0;
+  let _gradientError = null;
   /**
    * Bumped on every select/clear so a Phase-A2 forecast fetch that resolves
    * after the user has already moved on (reselected a different station,
@@ -312,6 +277,75 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
    */
   function _stationPosition(station) {
     return Cesium.Cartesian3.fromDegrees(station.lon, station.lat, POINT_HEIGHT_OFFSET_M);
+  }
+
+  function _removeGradientLayer() {
+    if (_gradientLayer && _viewer) _viewer.imageryLayers.remove(_gradientLayer, true);
+    _gradientLayer = null;
+  }
+
+  /**
+   * (Re)build the IDW gradient overlay from the current station snapshot and
+   * mount it as a Cesium imagery layer, replacing whatever was mounted
+   * before. A no-op whenever the gradient view isn't actually what should be
+   * showing right now (still 'points', or the layer got disabled/destroyed
+   * while this was in flight) — checked both before starting and again after
+   * the async build resolves, via `_gradientToken`.
+   */
+  async function _rebuildGradientLayer() {
+    if (_viewMode !== 'gradient' || !_enabled || !_viewer) return;
+    const token = ++_gradientToken;
+    const stations = [..._stationById.values()];
+    let result;
+    try {
+      result = await buildTemperatureGradientImage(stations);
+    } catch (e) {
+      if (token !== _gradientToken) return;
+      _gradientError = 'Gradient build error';
+      console.warn('[Data:AemetStations] Gradient build error:', e);
+      return;
+    }
+    if (token !== _gradientToken || _viewMode !== 'gradient' || !_enabled || !_viewer) return;
+    if (!result) {
+      _gradientError = 'No station data for gradient';
+      return;
+    }
+    try {
+      const provider = await Cesium.SingleTileImageryProvider.fromUrl(result.dataUrl, {
+        rectangle: Cesium.Rectangle.fromDegrees(...result.bbox),
+      });
+      if (token !== _gradientToken || _viewMode !== 'gradient' || !_enabled || !_viewer) return;
+      _removeGradientLayer();
+      _gradientLayer = new Cesium.ImageryLayer(provider);
+      _viewer.imageryLayers.add(_gradientLayer);
+      _gradientError = null;
+    } catch (e) {
+      if (token !== _gradientToken) return;
+      _gradientError = 'Gradient imagery error';
+      console.warn('[Data:AemetStations] Gradient imagery error:', e);
+    }
+  }
+
+  function _setViewMode(next) {
+    if (next !== 'points' && next !== 'gradient') return false;
+    if (_viewMode === next) {
+      // Already in this mode — but if a prior gradient build failed, clicking
+      // the (still-active) GRADIENT chip again is the user's obvious retry
+      // gesture, not a no-op.
+      if (next === 'gradient' && _gradientError) void _rebuildGradientLayer();
+      return true;
+    }
+    _viewMode = next;
+    if (next === 'gradient') {
+      if (_dataSource) _dataSource.show = false;
+      void _rebuildGradientLayer();
+    } else {
+      _gradientToken += 1; // invalidate any in-flight build
+      _removeGradientLayer();
+      _gradientError = null;
+      if (_dataSource && _enabled) _dataSource.show = true;
+    }
+    return true;
   }
 
   function _clearSelection() {
@@ -466,25 +500,68 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       _lastError = null;
       _enabled = false;
       _stationById = new Map();
+      _viewMode = 'points';
+      _gradientError = null;
       overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, false);
       console.log('[Data:AemetStations] Initialized');
     },
 
     enable(viewer) {
       _enabled = true;
-      if (_dataSource) _dataSource.show = true;
+      if (_dataSource) _dataSource.show = _viewMode === 'points';
       overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer);
       registerPickOwner('aemet-stations', (pickedId) => String(pickedId).startsWith('aemet-station:'));
+      if (_viewMode === 'gradient') void _rebuildGradientLayer();
     },
 
     disable(viewer) {
       _enabled = false;
       _clearSelection();
       if (_dataSource) _dataSource.show = false;
+      _gradientToken += 1;
+      _removeGradientLayer();
       overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, false);
       _removeClickHandler();
       unregisterPickOwner('aemet-stations');
+    },
+
+    /**
+     * `{ viewMode: 'points'|'gradient' }` — the two-way pill this layer's
+     * row control adds. Rejects (`false`) any other value.
+     */
+    setParams(params = {}) {
+      if (params.viewMode !== undefined) return _setViewMode(params.viewMode);
+      return true;
+    },
+
+    getRowControls() {
+      const isPoints = _viewMode === 'points';
+      return {
+        chips: [
+          {
+            id: 'points',
+            label: 'PUNTOS',
+            active: isPoints,
+            state: isPoints ? 'active' : 'idle',
+            title: 'Un punto coloreado por estación',
+            params: { viewMode: 'points' },
+          },
+          {
+            id: 'gradient',
+            label: 'GRADIENTE',
+            active: !isPoints,
+            state: !isPoints ? (_gradientError ? 'error' : 'active') : 'idle',
+            title: _gradientError || 'Superficie interpolada (IDW) recortada a España, con fronteras de CCAA',
+            params: { viewMode: 'gradient' },
+          },
+        ],
+        legend: isPoints ? [] : TEMPERATURE_COLOR_STOPS.map((stop) => ({
+          label: `${stop.c}°C`,
+          color: `rgb(${stop.rgb.join(',')})`,
+          count: '',
+        })),
+      };
     },
 
     async update(viewer) {
@@ -540,6 +617,10 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
         _dataSource.entities.removeAll();
         for (const entity of nextEntities) _dataSource.entities.add(entity);
         _stationById = nextStationById;
+        // Keep the gradient in sync with each poll, same cadence as the
+        // point entities above — fire-and-forget, `_rebuildGradientLayer`
+        // itself is a no-op unless the gradient view is actually active.
+        if (_viewMode === 'gradient') void _rebuildGradientLayer();
 
         // A refresh must not silently drop an open selection — re-resolve it
         // against the fresh data (which also means the card's numbers update
@@ -566,6 +647,9 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       _removeClickHandler();
       unregisterPickOwner('aemet-stations');
       overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, false);
+      _gradientToken += 1;
+      _removeGradientLayer();
+      _gradientError = null;
       if (_dataSource) {
         viewer.dataSources.remove(_dataSource, true);
         _dataSource = null;
@@ -642,6 +726,27 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
     },
     _selectedIdForTest() {
       return _selectedId;
+    },
+    _viewModeForTest() {
+      return _viewMode;
+    },
+    _gradientErrorForTest() {
+      return _gradientError;
+    },
+    _hasGradientLayerForTest() {
+      return Boolean(_gradientLayer);
+    },
+    // Bumped once per _rebuildGradientLayer() call regardless of outcome —
+    // a test can diff this across a setParams() call to prove a rebuild was
+    // actually attempted, not just that the mode flag stayed 'gradient'.
+    _gradientTokenForTest() {
+      return _gradientToken;
+    },
+    // Awaits any in-flight gradient (re)build — a test that switches to
+    // 'gradient' via setParams can't otherwise observe the fire-and-forget
+    // `_rebuildGradientLayer()` promise it kicks off.
+    _rebuildGradientLayerForTest() {
+      return _rebuildGradientLayer();
     },
   };
   return layer;
