@@ -1,20 +1,24 @@
 /**
- * Bundled Spain comunidad-autónoma boundary polygons — offline, lazy-loaded,
- * cached in module scope. Same shape as `naturalEarthRegions.js`: a pure data
+ * Bundled Spain PROVINCIAL boundary polygons — offline, lazy-loaded, cached
+ * in module scope. Same shape as `naturalEarthRegions.js`: a pure data
  * module (no Cesium import, node-testable), backed by a JSON pack under
  * `local_data/spain_boundaries/` (see that directory's `SOURCE.md` for
- * provenance/license).
+ * provenance/license — Natural Earth's 10m admin-1 layer, which for Spain is
+ * at province level: 50 provinces + Ceuta + Melilla, each carrying its
+ * parent comunidad autónoma as `ccaaId`/`ccaaName`).
  *
  * Used by the AEMET temperature-gradient overlay
  * (`temperatureGradientRaster.js`) to clip the interpolated raster to Spain's
- * outline and to draw CCAA borders as reference lines — not for any
- * per-region aggregation (that's a deliberately separate, not-yet-built,
- * choropleth approach).
+ * outline and to draw province border reference lines
+ * (`aemetStations.js`'s `_buildBordersOnce`) — not for any per-region
+ * aggregation (that's a deliberately separate, not-yet-built, choropleth
+ * approach; `ccaaId`/`ccaaName` are carried through for a future caller that
+ * wants to re-aggregate to CCAA level without a second data source).
  */
 
 import { createRetryableLoader } from './retryableLoad.js';
 
-/** @typedef {{id: string, name: string, rings: Array<Array<[number, number]>>}} CcaaFeature */
+/** @typedef {{id: string, name: string, ccaaId: string, ccaaName: string, rings: Array<Array<[number, number]>>}} CcaaFeature */
 
 /**
  * Browser vs. Node take different paths on purpose: a dynamic
@@ -30,12 +34,12 @@ import { createRetryableLoader } from './retryableLoad.js';
  */
 async function loadPackFile() {
   if (typeof document !== 'undefined' && typeof fetch === 'function') {
-    const url = new URL('./local_data/spain_boundaries/ccaa.json', import.meta.url);
+    const url = new URL('./local_data/spain_boundaries/provinces.json', import.meta.url);
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to fetch ccaa.json: HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`Failed to fetch provinces.json: HTTP ${response.status}`);
     return response.json();
   }
-  const mod = await import('./local_data/spain_boundaries/ccaa.json', {
+  const mod = await import('./local_data/spain_boundaries/provinces.json', {
     with: { type: 'json' },
   });
   return mod.default || mod;
@@ -68,7 +72,7 @@ const loadPack = createRetryableLoader(async () => {
 });
 
 /**
- * All CCAA/ciudad-autónoma features (19: 17 comunidades + Ceuta + Melilla).
+ * All provincial features (52: 50 provinces + Ceuta + Melilla).
  * @returns {Promise<CcaaFeature[]>}
  */
 export async function getCcaaFeatures() {
@@ -77,8 +81,8 @@ export async function getCcaaFeatures() {
 }
 
 /**
- * The bounding box covering every loaded CCAA polygon (mainland + Balearics +
- * Canary Islands + Ceuta/Melilla) — i.e. all of Spain.
+ * The bounding box covering every loaded province polygon (mainland +
+ * Balearics + Canary Islands + Ceuta/Melilla) — i.e. all of Spain.
  * @returns {Promise<[number, number, number, number]>} `[west, south, east, north]`
  */
 export async function getSpainBbox() {

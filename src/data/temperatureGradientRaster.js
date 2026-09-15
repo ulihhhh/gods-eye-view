@@ -23,8 +23,10 @@ import { temperatureColorRgb } from './aemetStations.js';
  * them would stretch the raster rectangle across a mostly-empty ocean gap
  * for no visual benefit. Left out of the v1 raster/clip bbox; still part of
  * the bundled boundary pack for whatever uses `spainBoundaries.js` next.
+ * The pack is province-level, so this is the Canary Islands' two provinces
+ * (Las Palmas, Santa Cruz de Tenerife), not one `'canarias'` id.
  */
-const EXCLUDED_CCAA_IDS = new Set(['canarias']);
+const EXCLUDED_PROVINCE_IDS = new Set(['las-palmas', 'santa-cruz-de-tenerife']);
 
 const BBOX_PADDING_DEG = 0.15;
 const GRID_CELLS_X = 180;
@@ -113,7 +115,7 @@ function paintGridCanvas(grid, createCanvas) {
  */
 export async function buildTemperatureGradientImage(stations, { createCanvas = defaultCreateCanvas } = {}) {
   const allFeatures = await getCcaaFeatures();
-  const features = allFeatures.filter((f) => !EXCLUDED_CCAA_IDS.has(f.id));
+  const features = allFeatures.filter((f) => !EXCLUDED_PROVINCE_IDS.has(f.id));
   if (!features.length) return null;
   const bbox = computeBbox(features);
 

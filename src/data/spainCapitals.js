@@ -17,6 +17,11 @@
  * that indirection would only reintroduce the fragile Vite dynamic-JSON-import
  * behavior already found and fixed twice elsewhere in `src/data/`.
  *
+ * `spainBoundaries.js`'s bundled pack is now also province-level (Natural
+ * Earth's admin-1 layer), so these capitals and those boundary polygons
+ * describe the same 52 administrative units — just not cross-referenced by
+ * id here, since nothing currently needs that join.
+ *
  * PURE data module — no Cesium import, node-testable.
  */
 

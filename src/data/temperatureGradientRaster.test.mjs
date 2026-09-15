@@ -73,8 +73,9 @@ test('returns null when createCanvas reports no DOM (headless)', async () => {
   assert.equal(result, null);
 });
 
-test('the raster bbox padding matches the mainland CCAA feature set (sanity cross-check against spainBoundaries.js)', async () => {
+test('the raster bbox padding matches the mainland province feature set (sanity cross-check against spainBoundaries.js)', async () => {
   const features = await getCcaaFeatures();
-  const mainland = features.filter((f) => f.id !== 'canarias');
-  assert.ok(mainland.length === features.length - 1);
+  const EXCLUDED_PROVINCE_IDS = new Set(['las-palmas', 'santa-cruz-de-tenerife']);
+  const mainland = features.filter((f) => !EXCLUDED_PROVINCE_IDS.has(f.id));
+  assert.equal(mainland.length, features.length - EXCLUDED_PROVINCE_IDS.size);
 });
