@@ -1547,8 +1547,25 @@ export function parseCataloniaXml(xml) {
  * host allowlist (CATALONIA_IMAGE_HOSTS), upgrading to https. Rejects
  * anything else, including a host that merely resembles an allowed one.
  *
+ * SCT's own `RenderService` frame link is a special case, for two stacked
+ * reasons (both verified 2026-09-15):
+ *  1. It always 302s to `TransitCamera`, on a Location the upstream
+ *     hardcodes as plain http even when RenderService itself was requested
+ *     over https. fetchWithinHost (media.js) only follows same-origin
+ *     redirects — same scheme included, by design, to stop an upstream
+ *     steering a host-pinned request into a plaintext downgrade — so that
+ *     hop is refused and the camera would render as a placeholder.
+ *  2. mct.gencat.cat's TLS setup itself does not complete a handshake with
+ *     Node's fetch/OpenSSL (`ERR_SSL_WRONG_SIGNATURE_TYPE`) even though it
+ *     is reachable over https from other clients (e.g. curl) — an upstream
+ *     server misconfiguration this proxy cannot route around.
+ * TransitCamera answers the frame directly over **http**, no redirect, and
+ * that is the only transport this host actually serves to this runtime — so
+ * this builds that URL itself from RenderService's `sctidcam` id instead of
+ * registering the (https, then-redirecting) RenderService link.
+ *
  * @param {string} rawUrl
- * @returns {string} Normalized https URL, or '' if not accepted.
+ * @returns {string} Normalized URL, or '' if not accepted.
  */
 export function normalizeCataloniaImageUrl(rawUrl) {
   let parsed;
@@ -1559,6 +1576,16 @@ export function normalizeCataloniaImageUrl(rawUrl) {
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
   if (!CATALONIA_IMAGE_HOSTS.has(parsed.hostname)) return '';
+
+  if (parsed.hostname === 'mct.gencat.cat') {
+    const camId = parsed.searchParams.get('sctidcam');
+    if (!camId) return '';
+    const direct = new URL('http://mct.gencat.cat/mct2bo/TransitCamera');
+    direct.searchParams.set('nom', camId);
+    direct.searchParams.set('visualitzacio', 'imatge');
+    return direct.toString();
+  }
+
   parsed.protocol = 'https:';
   return parsed.toString();
 }

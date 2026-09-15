@@ -91,13 +91,34 @@ test('parseCataloniaXml extracts every field from a feature block', () => {
   });
 });
 
-test('normalizeCataloniaImageUrl only accepts the four registered hosts, upgraded to https', () => {
+test('normalizeCataloniaImageUrl rewrites SCT RenderService links to the direct http TransitCamera URL', () => {
+  // RenderService always 302s to a hardcoded http:// Location (which
+  // fetchWithinHost refuses as a scheme downgrade), and mct.gencat.cat's TLS
+  // setup fails the handshake with Node's fetch regardless — TransitCamera
+  // over plain http is the only transport that actually works here, so we
+  // build that URL from RenderService's sctidcam id instead of registering
+  // the redirector.
   assert.equal(
     normalizeCataloniaImageUrl(
       'http://mct.gencat.cat/mct2bo/RenderService?sctidcam=nc87.gif',
     ),
-    'https://mct.gencat.cat/mct2bo/RenderService?sctidcam=nc87.gif',
+    'http://mct.gencat.cat/mct2bo/TransitCamera?nom=nc87.gif&visualitzacio=imatge',
   );
+  assert.equal(
+    normalizeCataloniaImageUrl(
+      'https://mct.gencat.cat/mct2bo/RenderService?sctidcam=sc64.gif',
+    ),
+    'http://mct.gencat.cat/mct2bo/TransitCamera?nom=sc64.gif&visualitzacio=imatge',
+    'an already-https RenderService link is rewritten the same way',
+  );
+  assert.equal(
+    normalizeCataloniaImageUrl('https://mct.gencat.cat/mct2bo/RenderService'),
+    '',
+    'a RenderService link with no sctidcam id is rejected',
+  );
+});
+
+test('normalizeCataloniaImageUrl accepts the other three registered hosts, upgraded to https', () => {
   assert.equal(
     normalizeCataloniaImageUrl('http://www.bcn.cat/transit/imatges/a.gif'),
     'https://www.bcn.cat/transit/imatges/a.gif',
@@ -214,7 +235,8 @@ test('Catalonia loader keeps SCT, Barcelona, Terrassa and Andorra cameras with p
   assert.equal(sct.credit, '', 'SCT is the publisher, no separate credit');
   assert.equal(
     sct.url,
-    'https://mct.gencat.cat/mct2bo/RenderService?sctidcam=nc87.gif',
+    'http://mct.gencat.cat/mct2bo/TransitCamera?nom=nc87.gif&visualitzacio=imatge',
+    'registers the direct, non-redirecting http frame URL, not the RenderService redirector',
   );
   assert.equal(sct.groundElevationM, 80);
   assert.equal(sct.headingConfidence, 'low', 'the feed carries no heading');
