@@ -98,7 +98,8 @@ const MAP_CONFIG = Object.freeze({
     expandedWidth: 640,
     expandedHeight: 427,
     chipLabel: '🔥 FIRE RISK',
-    chipTitle: 'Forest-fire meteorological risk forecast (today, or tomorrow if not yet published)',
+    chipTitle:
+      'Forest-fire meteorological risk forecast (today, or tomorrow if not yet published)',
     hasSourceField: true, // 'estimado'/'previsto-1' → TODAY/TOMORROW
   }),
   sst: Object.freeze({
@@ -111,7 +112,8 @@ const MAP_CONFIG = Object.freeze({
     expandedWidth: 560,
     expandedHeight: 433,
     chipLabel: '🌊 SEA TEMP',
-    chipTitle: 'EUMETSAT OSI SAF sea-surface-temperature composite (updates ~once a day)',
+    chipTitle:
+      'EUMETSAT OSI SAF sea-surface-temperature composite (updates ~once a day)',
     hasSourceField: false,
   }),
 });
@@ -142,7 +144,12 @@ function sourceLabel(source) {
  * @param {Cesium.Cartesian3} position
  * @returns {object}
  */
-export function createAemetWeatherImageryOverlayEntry(mapKey, imageSlot, meta, position) {
+export function createAemetWeatherImageryOverlayEntry(
+  mapKey,
+  imageSlot,
+  meta,
+  position,
+) {
   const config = MAP_CONFIG[mapKey];
   const age = relativeAgeLabel(meta?.fetchedAtMs);
   const day = config.hasSourceField ? sourceLabel(meta?.source) : null;
@@ -176,7 +183,9 @@ export function createAemetWeatherImageryOverlayEntry(mapKey, imageSlot, meta, p
     thumbnailTitleHeight: expanded ? 16 : 13,
     thumbnailBackground: WORLD_OVERLAY_STYLE.background,
     thumbnailTitleColor: WORLD_OVERLAY_STYLE.title,
-    thumbnailTitleFont: expanded ? WORLD_OVERLAY_STYLE.fontSelected : WORLD_OVERLAY_STYLE.fontLabel,
+    thumbnailTitleFont: expanded
+      ? WORLD_OVERLAY_STYLE.fontSelected
+      : WORLD_OVERLAY_STYLE.fontLabel,
     thumbnailLeaderColor: config.accent,
     thumbnailRuleColor: config.accent,
     thumbnailRuleHeight: expanded ? 3 : 2,
@@ -210,7 +219,13 @@ function defaultLoadImage(url) {
 }
 
 function freshMapState() {
-  return { imageSlot: null, loadedFetchedAtMs: null, loadedSource: null, lastError: null, loadToken: 0 };
+  return {
+    imageSlot: null,
+    loadedFetchedAtMs: null,
+    loadedSource: null,
+    lastError: null,
+    loadToken: 0,
+  };
 }
 
 export function createAemetWeatherImageryLayer({
@@ -221,7 +236,11 @@ export function createAemetWeatherImageryLayer({
   /** @type {string} one of MAP_ORDER — which map is currently shown. Persists across enable/disable, resets only on init(). */
   let _activeMap = 'lightning';
   /** @type {Record<string, {imageSlot: object|null, loadedFetchedAtMs: number|null, loadedSource: string|null, lastError: string|null, loadToken: number}>} */
-  let _perMap = { lightning: freshMapState(), fireRisk: freshMapState(), sst: freshMapState() };
+  let _perMap = {
+    lightning: freshMapState(),
+    fireRisk: freshMapState(),
+    sst: freshMapState(),
+  };
   /** Click-to-expand state — collapsed (small ambient card) by default, shared across whichever map is active. */
   let _expanded = false;
   let _viewer = null;
@@ -231,18 +250,28 @@ export function createAemetWeatherImageryLayer({
   function _publish() {
     const state = _perMap[_activeMap];
     if (!_enabled || !state?.imageSlot) {
-      overlayHost.setEntries(AEMET_WEATHER_IMAGERY_OVERLAY_SOURCE_ID, [], AEMET_WEATHER_IMAGERY_OVERLAY_SOURCE_OPTIONS);
+      overlayHost.setEntries(
+        AEMET_WEATHER_IMAGERY_OVERLAY_SOURCE_ID,
+        [],
+        AEMET_WEATHER_IMAGERY_OVERLAY_SOURCE_OPTIONS,
+      );
       return;
     }
     const position = Cesium.Cartesian3.fromDegrees(ANCHOR_LON, ANCHOR_LAT);
     overlayHost.setEntries(
       AEMET_WEATHER_IMAGERY_OVERLAY_SOURCE_ID,
-      [createAemetWeatherImageryOverlayEntry(
-        _activeMap,
-        state.imageSlot,
-        { fetchedAtMs: state.loadedFetchedAtMs, source: state.loadedSource, expanded: _expanded },
-        position,
-      )],
+      [
+        createAemetWeatherImageryOverlayEntry(
+          _activeMap,
+          state.imageSlot,
+          {
+            fetchedAtMs: state.loadedFetchedAtMs,
+            source: state.loadedSource,
+            expanded: _expanded,
+          },
+          position,
+        ),
+      ],
       AEMET_WEATHER_IMAGERY_OVERLAY_SOURCE_OPTIONS,
     );
   }
@@ -268,7 +297,8 @@ export function createAemetWeatherImageryLayer({
       const picked = viewer.scene.pick(click.position);
       if (picked) {
         const pickedId = resolvePickId(picked);
-        if (pickedId && isOwnedByOtherLayer('aemet-weather-imagery', pickedId)) return;
+        if (pickedId && isOwnedByOtherLayer('aemet-weather-imagery', pickedId))
+          return;
       }
       const hit = overlayHost.hitTest?.(click.position?.x, click.position?.y, {
         sourceId: AEMET_WEATHER_IMAGERY_OVERLAY_SOURCE_ID,
@@ -314,14 +344,20 @@ export function createAemetWeatherImageryLayer({
         state.lastError = 'AEMET_API_KEY not configured';
         return;
       }
-      state.lastError = status.stale ? 'Serving stale AEMET data (upstream unavailable)' : null;
+      state.lastError = status.stale
+        ? 'Serving stale AEMET data (upstream unavailable)'
+        : null;
       // `lastFetch: null` means the PROXY itself has never fetched anything
       // yet — on first boot this must still fall through to a load. A
       // fire-risk source flip (yesterday's previsto-1 replaced by today's
       // real estimado) also means the bytes may have changed even if the
       // timestamp looks the same-ish.
       const neverLoaded = state.loadedFetchedAtMs === null;
-      if (!neverLoaded && status.lastFetch === state.loadedFetchedAtMs && status.source === state.loadedSource) {
+      if (
+        !neverLoaded &&
+        status.lastFetch === state.loadedFetchedAtMs &&
+        status.source === state.loadedSource
+      ) {
         return;
       }
 
@@ -340,7 +376,9 @@ export function createAemetWeatherImageryLayer({
       let source = status.source;
       if (fetchedAtMs === null) {
         try {
-          const refreshed = normalizeAemetWeatherImageryStatus(await (await fetch(config.statusUrl)).json());
+          const refreshed = normalizeAemetWeatherImageryStatus(
+            await (await fetch(config.statusUrl)).json(),
+          );
           fetchedAtMs = refreshed?.lastFetch ?? Date.now();
           source = refreshed?.source ?? source;
         } catch {
@@ -351,7 +389,9 @@ export function createAemetWeatherImageryLayer({
       state.loadedFetchedAtMs = fetchedAtMs;
       state.loadedSource = source;
       if (mapKey === _activeMap) _publish();
-      console.log(`[Data:AemetWeatherImagery] Updated: new ${mapKey} composite loaded`);
+      console.log(
+        `[Data:AemetWeatherImagery] Updated: new ${mapKey} composite loaded`,
+      );
     } catch (e) {
       console.warn(`[Data:AemetWeatherImagery] ${mapKey} fetch error:`, e);
       state.lastError = 'AEMET network error';
@@ -369,7 +409,11 @@ export function createAemetWeatherImageryLayer({
       _viewer = viewer;
       _enabled = false;
       _activeMap = 'lightning';
-      _perMap = { lightning: freshMapState(), fireRisk: freshMapState(), sst: freshMapState() };
+      _perMap = {
+        lightning: freshMapState(),
+        fireRisk: freshMapState(),
+        sst: freshMapState(),
+      };
       _expanded = false;
       overlayHost.setVisible(AEMET_WEATHER_IMAGERY_OVERLAY_SOURCE_ID, false);
       console.log('[Data:AemetWeatherImagery] Initialized');
@@ -407,7 +451,11 @@ export function createAemetWeatherImageryLayer({
       _removeClickHandler();
       overlayHost.setVisible(AEMET_WEATHER_IMAGERY_OVERLAY_SOURCE_ID, false);
       overlayHost.clearSource(AEMET_WEATHER_IMAGERY_OVERLAY_SOURCE_ID);
-      _perMap = { lightning: freshMapState(), fireRisk: freshMapState(), sst: freshMapState() };
+      _perMap = {
+        lightning: freshMapState(),
+        fireRisk: freshMapState(),
+        sst: freshMapState(),
+      };
       _viewer = null;
     },
 

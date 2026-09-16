@@ -93,7 +93,9 @@ export function normalizeEvent(v) {
     description: text(v.description) ?? text(v.udescription),
     lat,
     lng,
-    extraPoints: eventPoints(v.points).filter(([a, b]) => a !== lat || b !== lng),
+    extraPoints: eventPoints(v.points).filter(
+      ([a, b]) => a !== lat || b !== lng,
+    ),
     timestamp: num(v.timestamp), // unix seconds
     timeAgo: text(v.time),
     city: text(v.city) ?? text(v.location),
@@ -103,18 +105,26 @@ export function normalizeEvent(v) {
     categoryId: num(v.cat_id),
     sideId: num(v.color_id), // Liveuamap's faction / "reds-vs-blues" colour bucket
     statusId,
-    status: statusId != null ? LIVEUAMAP_STATUS[statusId] ?? null : null,
+    status: statusId != null ? (LIVEUAMAP_STATUS[statusId] ?? null) : null,
     pictures,
     twitpic: text(v.twitpic),
     video: text(v.video),
     videoKind: videoKind(v.videotype),
     otherRegions: parseOtherRegions(v.otherregions),
     langs: text(v.langs)
-      ? v.langs.split(',').map((s) => s.trim()).filter(Boolean)
+      ? v.langs
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
       : [],
-    animatedPath: v.runway && typeof v.runway === 'object'
-      ? { points: v.runway.pt ?? null, times: v.runway.tm ?? null, angles: v.runway.an ?? null }
-      : null,
+    animatedPath:
+      v.runway && typeof v.runway === 'object'
+        ? {
+            points: v.runway.pt ?? null,
+            times: v.runway.tm ?? null,
+            angles: v.runway.an ?? null,
+          }
+        : null,
   };
 }
 
@@ -190,15 +200,26 @@ export function normalizeField(f) {
  *   markers?:any[]|null}} payload
  */
 export function normalizeSnapshot(payload = {}) {
-  const region = String(payload.region ?? '').trim().toLowerCase();
-  const ovens = payload.ovens && typeof payload.ovens === 'object' ? payload.ovens : null;
+  const region = String(payload.region ?? '')
+    .trim()
+    .toLowerCase();
+  const ovens =
+    payload.ovens && typeof payload.ovens === 'object' ? payload.ovens : null;
 
-  const rawEvents = (Array.isArray(ovens?.venues) && ovens.venues)
-    || (Array.isArray(payload.markers) && payload.markers)
-    || [];
-  const fieldsSource = (payload.fieldsCache && typeof payload.fieldsCache === 'object' && !Array.isArray(payload.fieldsCache) && payload.fieldsCache)
-    || (ovens?.fields && typeof ovens.fields === 'object' && !Array.isArray(ovens.fields) && ovens.fields)
-    || null;
+  const rawEvents =
+    (Array.isArray(ovens?.venues) && ovens.venues) ||
+    (Array.isArray(payload.markers) && payload.markers) ||
+    [];
+  const fieldsSource =
+    (payload.fieldsCache &&
+      typeof payload.fieldsCache === 'object' &&
+      !Array.isArray(payload.fieldsCache) &&
+      payload.fieldsCache) ||
+    (ovens?.fields &&
+      typeof ovens.fields === 'object' &&
+      !Array.isArray(ovens.fields) &&
+      ovens.fields) ||
+    null;
   const rawFields = fieldsSource ? Object.values(fieldsSource) : [];
 
   const events = rawEvents.map(normalizeEvent).filter(Boolean);
@@ -207,8 +228,13 @@ export function normalizeSnapshot(payload = {}) {
   return {
     region,
     resid: num(payload.resid),
-    url: text(payload.href) ?? (region ? `https://${region}.liveuamap.com/` : null),
-    asOf: ovens ? [ovens.datac, ovens.datam, ovens.datay].filter(Boolean).join(' ') || null : null,
+    url:
+      text(payload.href) ??
+      (region ? `https://${region}.liveuamap.com/` : null),
+    asOf: ovens
+      ? [ovens.datac, ovens.datam, ovens.datay].filter(Boolean).join(' ') ||
+        null
+      : null,
     fetchedAt: new Date().toISOString(),
     events,
     fields,

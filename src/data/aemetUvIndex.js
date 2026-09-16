@@ -1,5 +1,9 @@
 import * as Cesium from 'cesium';
-import { registerPickOwner, resolvePickId, unregisterPickOwner } from './pickRegistry.js';
+import {
+  registerPickOwner,
+  resolvePickId,
+  unregisterPickOwner,
+} from './pickRegistry.js';
 import {
   clearOverlaySource,
   setOverlayEntries,
@@ -22,7 +26,8 @@ import {
  * start rather than re-discovering it.
  */
 
-export const AEMET_UV_INDEX_SELECTED_OVERLAY_SOURCE_ID = 'aemet-uv-index-selected';
+export const AEMET_UV_INDEX_SELECTED_OVERLAY_SOURCE_ID =
+  'aemet-uv-index-selected';
 export const AEMET_UV_INDEX_SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
   cohortLimit: 1,
   collisionCapacity: 0,
@@ -168,14 +173,22 @@ export function normalizeAemetUvIndexPayload(payload) {
   for (const city of payload.cities) {
     const lat = Number(city?.lat);
     const lon = Number(city?.lon);
-    if (!Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lon) || Math.abs(lon) > 180) continue;
+    if (
+      !Number.isFinite(lat) ||
+      Math.abs(lat) > 90 ||
+      !Number.isFinite(lon) ||
+      Math.abs(lon) > 180
+    )
+      continue;
     if (!city?.municipioId || !Number.isFinite(city?.uvIndex)) continue;
     rows.push(city);
   }
   return rows;
 }
 
-export function createAemetUvIndexLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = {}) {
+export function createAemetUvIndexLayer({
+  overlayHost = DEFAULT_OVERLAY_HOST,
+} = {}) {
   let _viewer = null;
   let _dataSource = null;
   let _count = 0;
@@ -193,12 +206,18 @@ export function createAemetUvIndexLayer({ overlayHost = DEFAULT_OVERLAY_HOST } =
 
   /** Same RELATIVE_TO_GROUND treatment as `aemetStations.js` — see its own comment for why. */
   function _cityPosition(city) {
-    return Cesium.Cartesian3.fromDegrees(city.lon, city.lat, POINT_HEIGHT_OFFSET_M);
+    return Cesium.Cartesian3.fromDegrees(
+      city.lon,
+      city.lat,
+      POINT_HEIGHT_OFFSET_M,
+    );
   }
 
   function _clearSelection() {
     if (_selectedId) {
-      const original = _dataSource?.entities.getById(`aemet-uv-index:${_selectedId}`);
+      const original = _dataSource?.entities.getById(
+        `aemet-uv-index:${_selectedId}`,
+      );
       if (original?.point) original.point.show = true;
     }
     if (_selectedEntity && _viewer) _viewer.entities.remove(_selectedEntity);
@@ -296,7 +315,9 @@ export function createAemetUvIndexLayer({ overlayHost = DEFAULT_OVERLAY_HOST } =
       if (_dataSource) _dataSource.show = true;
       overlayHost.setVisible(AEMET_UV_INDEX_SELECTED_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer);
-      registerPickOwner('aemet-uv-index', (pickedId) => String(pickedId).startsWith('aemet-uv-index:'));
+      registerPickOwner('aemet-uv-index', (pickedId) =>
+        String(pickedId).startsWith('aemet-uv-index:'),
+      );
     },
 
     disable() {
@@ -332,22 +353,24 @@ export function createAemetUvIndexLayer({ overlayHost = DEFAULT_OVERLAY_HOST } =
         const nextCityById = new Map();
         for (const city of cities) {
           nextCityById.set(city.municipioId, city);
-          nextEntities.push(new Cesium.Entity({
-            id: `aemet-uv-index:${city.municipioId}`,
-            position: _cityPosition(city),
-            point: {
-              pixelSize: 9,
-              color: uvIndexColor(city.uvIndex),
-              outlineColor: COLOR_OUTLINE,
-              outlineWidth: 1,
-              heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
-              // Deliberately NOT disableDepthTestDistance — normal depth
-              // testing against the globe hides a city on the far side of
-              // Earth, same as aemetStations.js.
-            },
-            name: city.name || city.municipioId,
-            properties: { ...city },
-          }));
+          nextEntities.push(
+            new Cesium.Entity({
+              id: `aemet-uv-index:${city.municipioId}`,
+              position: _cityPosition(city),
+              point: {
+                pixelSize: 9,
+                color: uvIndexColor(city.uvIndex),
+                outlineColor: COLOR_OUTLINE,
+                outlineWidth: 1,
+                heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+                // Deliberately NOT disableDepthTestDistance — normal depth
+                // testing against the globe hides a city on the far side of
+                // Earth, same as aemetStations.js.
+              },
+              name: city.name || city.municipioId,
+              properties: { ...city },
+            }),
+          );
         }
 
         _dataSource.entities.removeAll();
@@ -361,7 +384,9 @@ export function createAemetUvIndexLayer({ overlayHost = DEFAULT_OVERLAY_HOST } =
 
         _count = cities.length;
         _lastUpdate = Date.now();
-        _lastError = payload.stale ? 'Serving stale AEMET data (upstream unavailable)' : null;
+        _lastError = payload.stale
+          ? 'Serving stale AEMET data (upstream unavailable)'
+          : null;
         console.log(`[Data:AemetUvIndex] Updated: ${_count} cities`);
         return true;
       } catch (e) {
@@ -392,7 +417,9 @@ export function createAemetUvIndexLayer({ overlayHost = DEFAULT_OVERLAY_HOST } =
       if (!_dataSource || !_dataSource.show) return [];
       const entities = _dataSource.entities.values;
       if (!entities.length) return [];
-      const limit = Number.isFinite(maxCount) ? Math.max(1, Math.floor(maxCount)) : 200;
+      const limit = Number.isFinite(maxCount)
+        ? Math.max(1, Math.floor(maxCount))
+        : 200;
       const now = Cesium.JulianDate.now();
       const result = [];
       for (const entity of entities) {

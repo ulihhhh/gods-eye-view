@@ -55,8 +55,16 @@ export function normalizeAemetStationRecord(raw) {
   const id = String(raw?.idema ?? '').trim();
   const lat = finiteOrNull(raw?.lat);
   const lon = finiteOrNull(raw?.lon);
-  if (!id || lat === null || lon === null || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
-  const name = typeof raw?.ubi === 'string' && raw.ubi.trim() ? raw.ubi.trim() : null;
+  if (
+    !id ||
+    lat === null ||
+    lon === null ||
+    Math.abs(lat) > 90 ||
+    Math.abs(lon) > 180
+  )
+    return null;
+  const name =
+    typeof raw?.ubi === 'string' && raw.ubi.trim() ? raw.ubi.trim() : null;
   const observedAtMs = Date.parse(raw?.fint);
   return {
     id,
@@ -106,7 +114,10 @@ export function normalizeAemetStationsSnapshot(rawRecords) {
     const record = normalizeAemetStationRecord(raw);
     if (!record) continue;
     const existing = latestById.get(record.id);
-    if (!existing || (record.observedAtMs ?? -Infinity) > (existing.observedAtMs ?? -Infinity)) {
+    if (
+      !existing ||
+      (record.observedAtMs ?? -Infinity) > (existing.observedAtMs ?? -Infinity)
+    ) {
       latestById.set(record.id, record);
     }
   }
@@ -129,7 +140,9 @@ export const AEMET_STATION_STALE_MS = 3 * 3600_000;
 export function filterFreshAemetStations(stations, now = Date.now()) {
   if (!Array.isArray(stations)) return [];
   return stations.filter(
-    (station) => Number.isFinite(station?.observedAtMs) && now - station.observedAtMs <= AEMET_STATION_STALE_MS,
+    (station) =>
+      Number.isFinite(station?.observedAtMs) &&
+      now - station.observedAtMs <= AEMET_STATION_STALE_MS,
   );
 }
 
@@ -214,12 +227,21 @@ export function parseAemetCapTar(buffer) {
   return entries;
 }
 
-const XML_ENTITIES = Object.freeze({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" });
+const XML_ENTITIES = Object.freeze({
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+});
 
 /** Decode the small, fixed set of XML entities CAP text fields actually use. */
 function decodeXmlEntities(text) {
   if (typeof text !== 'string') return text;
-  return text.replace(/&(amp|lt|gt|quot|apos);/g, (_, name) => XML_ENTITIES[name]);
+  return text.replace(
+    /&(amp|lt|gt|quot|apos);/g,
+    (_, name) => XML_ENTITIES[name],
+  );
 }
 
 /** First `<tag>...</tag>` match within `text`, trimmed and entity-decoded, or `null`. */
@@ -280,22 +302,36 @@ function parsePolygonRing(text) {
 export function parseAemetCapAlert(xml) {
   if (typeof xml !== 'string' || !xml.includes('<info>')) return null;
   const infoBlocks = extractAllTagBlocks(xml, 'info');
-  const esInfo = infoBlocks.find((block) => extractTag(block, 'language') === 'es-ES');
+  const esInfo = infoBlocks.find(
+    (block) => extractTag(block, 'language') === 'es-ES',
+  );
   if (!esInfo) return null;
 
   const event = extractTag(esInfo, 'event');
   if (!event) return null;
-  const phenomenonRaw = extractNamedValue(esInfo, 'eventCode', 'AEMET-Meteoalerta fenomeno');
+  const phenomenonRaw = extractNamedValue(
+    esInfo,
+    'eventCode',
+    'AEMET-Meteoalerta fenomeno',
+  );
   const [phenomenonCode, phenomenonName] = phenomenonRaw
     ? phenomenonRaw.split(';').map((part) => part.trim())
     : [null, null];
-  const level = extractNamedValue(esInfo, 'parameter', 'AEMET-Meteoalerta nivel');
+  const level = extractNamedValue(
+    esInfo,
+    'parameter',
+    'AEMET-Meteoalerta nivel',
+  );
   const onsetMs = Date.parse(extractTag(esInfo, 'onset') ?? '');
   const expiresMs = Date.parse(extractTag(esInfo, 'expires') ?? '');
 
   const areas = [];
   for (const areaBlock of extractAllTagBlocks(esInfo, 'area')) {
-    const geocode = extractNamedValue(areaBlock, 'geocode', 'AEMET-Meteoalerta zona');
+    const geocode = extractNamedValue(
+      areaBlock,
+      'geocode',
+      'AEMET-Meteoalerta zona',
+    );
     if (!geocode) continue;
     const polygons = extractAllTagBlocks(areaBlock, 'polygon')
       .map(parsePolygonRing)
@@ -311,7 +347,11 @@ export function parseAemetCapAlert(xml) {
     severity: extractTag(esInfo, 'severity'),
     phenomenonCode,
     phenomenonName,
-    probability: extractNamedValue(esInfo, 'parameter', 'AEMET-Meteoalerta probabilidad'),
+    probability: extractNamedValue(
+      esInfo,
+      'parameter',
+      'AEMET-Meteoalerta probabilidad',
+    ),
     onsetMs: Number.isFinite(onsetMs) ? onsetMs : null,
     expiresMs: Number.isFinite(expiresMs) ? expiresMs : null,
     headline: extractTag(esInfo, 'headline'),
@@ -345,7 +385,12 @@ export function normalizeAemetWarningsSnapshot(alerts) {
     for (const area of alert.areas) {
       let zone = zonesByGeocode.get(area.geocode);
       if (!zone) {
-        zone = { geocode: area.geocode, name: area.name, polygons: area.polygons, phenomena: [] };
+        zone = {
+          geocode: area.geocode,
+          name: area.name,
+          polygons: area.polygons,
+          phenomena: [],
+        };
         zonesByGeocode.set(area.geocode, zone);
       }
       zone.phenomena.push({
@@ -366,10 +411,12 @@ export function normalizeAemetWarningsSnapshot(alerts) {
 
 /** A zone reading with no recorded expiry is never treated as active — never guess it's current. */
 function isPhenomenonActive(phenomenon, now) {
-  return Boolean(phenomenon?.level)
-    && phenomenon.level !== 'verde'
-    && Number.isFinite(phenomenon.expiresMs)
-    && phenomenon.expiresMs > now;
+  return (
+    Boolean(phenomenon?.level) &&
+    phenomenon.level !== 'verde' &&
+    Number.isFinite(phenomenon.expiresMs) &&
+    phenomenon.expiresMs > now
+  );
 }
 
 /**
@@ -429,10 +476,12 @@ export function normalizeAemetMunicipioRecord(raw) {
   if (!idMatch) return null;
   const lat = finiteOrNull(raw?.latitud_dec);
   const lon = finiteOrNull(raw?.longitud_dec);
-  if (lat === null || lon === null || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
-  const name = (typeof raw?.nombre === 'string' && raw.nombre.trim())
-    || (typeof raw?.capital === 'string' && raw.capital.trim())
-    || null;
+  if (lat === null || lon === null || Math.abs(lat) > 90 || Math.abs(lon) > 180)
+    return null;
+  const name =
+    (typeof raw?.nombre === 'string' && raw.nombre.trim()) ||
+    (typeof raw?.capital === 'string' && raw.capital.trim()) ||
+    null;
   if (!name) return null;
   return {
     id: idMatch[1],
@@ -465,8 +514,9 @@ export function haversineDistanceKm(lat1, lon1, lat2, lon2) {
   const toRad = (deg) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return 2 * EARTH_RADIUS_KM * Math.asin(Math.sqrt(a));
 }
 
@@ -489,7 +539,12 @@ export function findNearestAemetMunicipio(municipios, lat, lon) {
   let best = null;
   let bestDistanceKm = Infinity;
   for (const municipio of municipios) {
-    const distanceKm = haversineDistanceKm(lat, lon, municipio.lat, municipio.lon);
+    const distanceKm = haversineDistanceKm(
+      lat,
+      lon,
+      municipio.lat,
+      municipio.lon,
+    );
     if (distanceKm < bestDistanceKm) {
       bestDistanceKm = distanceKm;
       best = municipio;
@@ -512,7 +567,8 @@ export function findNearestAemetMunicipio(municipios, lat, lon) {
 function indexByPeriodo(entries) {
   const byPeriodo = new Map();
   for (const entry of entries ?? []) {
-    if (entry?.periodo !== undefined) byPeriodo.set(String(entry.periodo), entry);
+    if (entry?.periodo !== undefined)
+      byPeriodo.set(String(entry.periodo), entry);
   }
   return byPeriodo;
 }
@@ -545,7 +601,8 @@ export function normalizeAemetHourlyForecast(raw) {
 
   const hours = [];
   for (const day of days) {
-    const dateIso = typeof day?.fecha === 'string' ? day.fecha.slice(0, 10) : null;
+    const dateIso =
+      typeof day?.fecha === 'string' ? day.fecha.slice(0, 10) : null;
     if (!dateIso) continue;
     const temperaturaByHour = indexByPeriodo(day.temperatura);
     const skyByHour = indexByPeriodo(day.estadoCielo);
@@ -576,11 +633,15 @@ export function normalizeAemetHourlyForecast(raw) {
         skyDescription: skyByHour.get(periodo)?.descripcion || null,
         precipitationMm: finiteOrNull(precipByHour.get(periodo)?.value),
         windSpeedKmh: finiteOrNull(wind?.velocidad?.[0]),
-        windDirection: (typeof wind?.direccion?.[0] === 'string' && wind.direccion[0]) || null,
+        windDirection:
+          (typeof wind?.direccion?.[0] === 'string' && wind.direccion[0]) ||
+          null,
       });
     }
   }
-  hours.sort((a, b) => (a.dateIso === b.dateIso ? a.hour - b.hour : a.dateIso < b.dateIso ? -1 : 1));
+  hours.sort((a, b) =>
+    a.dateIso === b.dateIso ? a.hour - b.hour : a.dateIso < b.dateIso ? -1 : 1,
+  );
 
   return {
     municipioId: String(record.id ?? ''),
@@ -627,8 +688,9 @@ export function madridCivilNow(nowMs = Date.now()) {
  */
 export function filterUpcomingAemetForecastHours(hours, civilNow, limit = 6) {
   if (!Array.isArray(hours)) return [];
-  const isUpcoming = (h) => h.dateIso > civilNow.dateIso
-    || (h.dateIso === civilNow.dateIso && h.hour >= civilNow.hour);
+  const isUpcoming = (h) =>
+    h.dateIso > civilNow.dateIso ||
+    (h.dateIso === civilNow.dateIso && h.hour >= civilNow.hour);
   return hours.filter(isUpcoming).slice(0, Math.max(0, limit));
 }
 
@@ -709,7 +771,10 @@ export function normalizeAemetUvIndexRecord(raw) {
   const municipioId = String(raw?.id ?? '').trim();
   const uvIndex = finiteOrNull(raw?.uv);
   if (!/^\d+$/.test(municipioId) || uvIndex === null) return null;
-  const name = typeof raw?.valor === 'string' && raw.valor.trim() ? raw.valor.trim() : null;
+  const name =
+    typeof raw?.valor === 'string' && raw.valor.trim()
+      ? raw.valor.trim()
+      : null;
   if (!name) return null;
   return {
     municipioId,
@@ -733,8 +798,12 @@ export function normalizeAemetUvIndexSnapshot(payload) {
     if (record) cities.push(record);
   }
   return {
-    elaborated: typeof payload.FECHA_ELABORACION === 'string' ? payload.FECHA_ELABORACION : null,
-    validAt: typeof payload.FECHA_VALIDEZ === 'string' ? payload.FECHA_VALIDEZ : null,
+    elaborated:
+      typeof payload.FECHA_ELABORACION === 'string'
+        ? payload.FECHA_ELABORACION
+        : null,
+    validAt:
+      typeof payload.FECHA_VALIDEZ === 'string' ? payload.FECHA_VALIDEZ : null,
     cities,
   };
 }
@@ -799,12 +868,22 @@ export const AEMET_BEACHES_NOMENCLATOR_URL =
  */
 export function normalizeAemetBeachNomenclatorEntry(feature) {
   const id = String(feature?.properties?.ID ?? '').trim();
-  const name = typeof feature?.properties?.NOMBRE === 'string' ? feature.properties.NOMBRE.trim() : '';
+  const name =
+    typeof feature?.properties?.NOMBRE === 'string'
+      ? feature.properties.NOMBRE.trim()
+      : '';
   const coordinates = feature?.geometry?.coordinates;
-  if (!/^\d+$/.test(id) || !name || !Array.isArray(coordinates) || coordinates.length < 2) return null;
+  if (
+    !/^\d+$/.test(id) ||
+    !name ||
+    !Array.isArray(coordinates) ||
+    coordinates.length < 2
+  )
+    return null;
   const lon = finiteOrNull(coordinates[0]);
   const lat = finiteOrNull(coordinates[1]);
-  if (lat === null || lon === null || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  if (lat === null || lon === null || Math.abs(lat) > 90 || Math.abs(lon) > 180)
+    return null;
   return { id, name, lat, lon };
 }
 
@@ -850,13 +929,25 @@ export function normalizeAemetBeachForecastRecord(payload) {
   return {
     municipioId,
     date: /^\d{8}$/.test(fecha) ? fecha : null,
-    sky: typeof today?.estadoCielo?.descripcion1 === 'string' ? today.estadoCielo.descripcion1 : null,
-    wind: typeof today?.viento?.descripcion1 === 'string' ? today.viento.descripcion1 : null,
-    waves: typeof today?.oleaje?.descripcion1 === 'string' ? today.oleaje.descripcion1 : null,
+    sky:
+      typeof today?.estadoCielo?.descripcion1 === 'string'
+        ? today.estadoCielo.descripcion1
+        : null,
+    wind:
+      typeof today?.viento?.descripcion1 === 'string'
+        ? today.viento.descripcion1
+        : null,
+    waves:
+      typeof today?.oleaje?.descripcion1 === 'string'
+        ? today.oleaje.descripcion1
+        : null,
     waterTempC: finiteOrNull(today?.tAgua?.valor1),
     maxTempC: finiteOrNull(today?.tMaxima?.valor1),
     uvMax: finiteOrNull(today?.uvMax?.valor1),
-    thermalSensation: typeof today?.sTermica?.descripcion1 === 'string' ? today.sTermica.descripcion1 : null,
+    thermalSensation:
+      typeof today?.sTermica?.descripcion1 === 'string'
+        ? today.sTermica.descripcion1
+        : null,
   };
 }
 
@@ -926,7 +1017,9 @@ export function aemetRadiationEnvelopeUrl(apiKey) {
 function splitAemetCsvLine(line) {
   return line.split(';').map((field) => {
     const trimmed = field.trim();
-    return trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
+    return trimmed.startsWith('"') && trimmed.endsWith('"')
+      ? trimmed.slice(1, -1)
+      : trimmed;
   });
 }
 
@@ -977,14 +1070,27 @@ export function normalizeAemetRadiationSnapshot(csvText) {
     if (!indicativo || !name) continue;
     const sumByType = {};
     for (let j = 2; j < fields.length; j++) {
-      if (fields[j] !== 'GL' && fields[j] !== 'DF' && fields[j] !== 'DT' && fields[j] !== 'UVB' && fields[j] !== 'IR') continue;
+      if (
+        fields[j] !== 'GL' &&
+        fields[j] !== 'DF' &&
+        fields[j] !== 'DT' &&
+        fields[j] !== 'UVB' &&
+        fields[j] !== 'IR'
+      )
+        continue;
       const type = fields[j];
       // The SUMA column is the next occurrence of a value at the end of
       // this block — found by scanning forward to the next Tipo marker (or
       // the row's end) and taking the field immediately before it.
       let end = fields.length;
       for (let k = j + 1; k < fields.length; k++) {
-        if (fields[k] === 'GL' || fields[k] === 'DF' || fields[k] === 'DT' || fields[k] === 'UVB' || fields[k] === 'IR') {
+        if (
+          fields[k] === 'GL' ||
+          fields[k] === 'DF' ||
+          fields[k] === 'DT' ||
+          fields[k] === 'UVB' ||
+          fields[k] === 'IR'
+        ) {
           end = k;
           break;
         }
@@ -1008,9 +1114,13 @@ export function filterActiveAemetWarnings(zones, now = Date.now()) {
   if (!Array.isArray(zones)) return [];
   const result = [];
   for (const zone of zones) {
-    const active = (zone?.phenomena ?? []).filter((phenomenon) => isPhenomenonActive(phenomenon, now));
+    const active = (zone?.phenomena ?? []).filter((phenomenon) =>
+      isPhenomenonActive(phenomenon, now),
+    );
     if (!active.length) continue;
-    const levelRank = Math.max(...active.map((p) => AEMET_WARNING_LEVEL_RANK[p.level] ?? 0));
+    const levelRank = Math.max(
+      ...active.map((p) => AEMET_WARNING_LEVEL_RANK[p.level] ?? 0),
+    );
     const level = Object.keys(AEMET_WARNING_LEVEL_RANK).find(
       (candidate) => AEMET_WARNING_LEVEL_RANK[candidate] === levelRank,
     );

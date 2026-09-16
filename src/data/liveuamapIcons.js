@@ -13,7 +13,8 @@
 const VIEW = 64;
 const C = VIEW / 2; // 32 — glyph centre, all bodies drawn in this frame
 
-const STROKE = 'stroke="rgba(0,0,0,0.35)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"';
+const STROKE =
+  'stroke="rgba(0,0,0,0.35)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"';
 const CUT = 'fill="rgba(0,0,0,0.55)"'; // dark "cut-out" detail on top of a white glyph
 
 // Bodies are drawn in a centred coordinate frame (0,0 = glyph centre).
@@ -105,7 +106,9 @@ const BODIES = {
 const _cache = new Map();
 
 const _b64 = (s) =>
-  (typeof btoa === 'function' ? btoa(s) : Buffer.from(s, 'utf8').toString('base64'));
+  typeof btoa === 'function'
+    ? btoa(s)
+    : Buffer.from(s, 'utf8').toString('base64');
 
 /**
  * Data URI for a category glyph (lazily built, cached per category+size).

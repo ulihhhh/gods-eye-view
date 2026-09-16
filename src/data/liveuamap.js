@@ -1,5 +1,11 @@
 import * as Cesium from 'cesium';
-import { sideColorCss, statusBadge, iconCategory, relativeTime, fieldShapeKind } from './liveuamapPresentation.js';
+import {
+  sideColorCss,
+  statusBadge,
+  iconCategory,
+  relativeTime,
+  fieldShapeKind,
+} from './liveuamapPresentation.js';
 import { iconUriForCategory } from './liveuamapIcons.js';
 import { horizonOccluder } from './iconOrientation.js';
 import { governorRequestRender } from '../renderGovernor.js';
@@ -41,7 +47,8 @@ const HORIZON_MOVE_EPSILON_M = 500;
 /** Stable-ish hue per region — used for the legend swatch and as a color fallback. */
 function regionColorCss(region) {
   let h = 0;
-  for (let i = 0; i < region.length; i += 1) h = (h * 31 + region.charCodeAt(i)) % 360;
+  for (let i = 0; i < region.length; i += 1)
+    h = (h * 31 + region.charCodeAt(i)) % 360;
   return `hsl(${h}, 65%, 55%)`;
 }
 
@@ -102,9 +109,13 @@ function popupRow(label, value) {
 }
 
 function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
-  ));
+  return String(s ?? '').replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[
+        c
+      ],
+  );
 }
 
 export function createLiveuamapLayer() {
@@ -147,8 +158,14 @@ export function createLiveuamapLayer() {
     // colors, so this reads as part of the app rather than a bolted-on popup.
     el.className = 'global-context-panel-inner';
     el.style.cssText = [
-      'position:fixed', 'top:60px', 'right:12px', 'width:280px', 'max-height:66vh',
-      'overflow:auto', 'z-index:9999', 'gap:0',
+      'position:fixed',
+      'top:60px',
+      'right:12px',
+      'width:280px',
+      'max-height:66vh',
+      'overflow:auto',
+      'z-index:9999',
+      'gap:0',
     ].join(';');
     el.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
@@ -164,15 +181,25 @@ export function createLiveuamapLayer() {
         ${popupRow('WHEN', escapeHtml(relativeTime(ev.timestamp) || ev.timeAgo))}
         ${popupRow('DESC', escapeHtml(ev.description))}
         ${ev.video ? popupRow('VIDEO', `${escapeHtml(ev.videoKind || 'attached')} &#9654;`) : ''}
-        ${(ev.otherRegions || []).length
-          ? popupRow('ALSO ON', ev.otherRegions.map((r) => escapeHtml(r.name)).join(', '))
-          : ''}
+        ${
+          (ev.otherRegions || []).length
+            ? popupRow(
+                'ALSO ON',
+                ev.otherRegions.map((r) => escapeHtml(r.name)).join(', '),
+              )
+            : ''
+        }
       </div>
-      ${ev.source
-        ? `<div style="margin-top:8px"><a href="${escapeHtml(ev.source)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font:10px/1 var(--font-mono);letter-spacing:.04em">SOURCE &#8599;</a></div>`
-        : ''}
+      ${
+        ev.source
+          ? `<div style="margin-top:8px"><a href="${escapeHtml(ev.source)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font:10px/1 var(--font-mono);letter-spacing:.04em">SOURCE &#8599;</a></div>`
+          : ''
+      }
     `;
-    el.querySelector('[data-luam-close]')?.addEventListener('click', closePopup);
+    el.querySelector('[data-luam-close]')?.addEventListener(
+      'click',
+      closePopup,
+    );
     document.body.appendChild(el);
     _popupEl = el;
   }
@@ -183,7 +210,10 @@ export function createLiveuamapLayer() {
     const dx = cur.x - prev.x;
     const dy = cur.y - prev.y;
     const dz = cur.z - prev.z;
-    return dx * dx + dy * dy + dz * dz > HORIZON_MOVE_EPSILON_M * HORIZON_MOVE_EPSILON_M;
+    return (
+      dx * dx + dy * dy + dz * dz >
+      HORIZON_MOVE_EPSILON_M * HORIZON_MOVE_EPSILON_M
+    );
   }
 
   /**
@@ -199,7 +229,9 @@ export function createLiveuamapLayer() {
     if (!_enabled || !_viewer || !_dataSource) return;
     const cameraPos = _viewer.camera?.positionWC;
     if (!force && !cameraMoved(_lastHorizonCameraPos, cameraPos)) return;
-    _lastHorizonCameraPos = cameraPos ? { x: cameraPos.x, y: cameraPos.y, z: cameraPos.z } : null;
+    _lastHorizonCameraPos = cameraPos
+      ? { x: cameraPos.x, y: cameraPos.y, z: cameraPos.z }
+      : null;
     const occluder = horizonOccluder(_viewer.camera);
     const now = Cesium.JulianDate.now();
     let changed = false;
@@ -219,7 +251,8 @@ export function createLiveuamapLayer() {
     _clickHandler.setInputAction((movement) => {
       const picked = viewer.scene.pick(movement.position);
       const entity = picked?.id;
-      if (!entity || !_dataSource || !_dataSource.entities.contains(entity)) return;
+      if (!entity || !_dataSource || !_dataSource.entities.contains(entity))
+        return;
       const props = entity.properties;
       if (!props || props.kind?.getValue() !== 'event') return;
       const ev = props.event?.getValue();
@@ -235,17 +268,25 @@ export function createLiveuamapLayer() {
 
     if (_params.showFields) {
       for (const f of payload.fields ?? []) {
-        const fallback = f.sideId != null ? sideColorCss(f.sideId, region) : regionColorCss(region);
+        const fallback =
+          f.sideId != null
+            ? sideColorCss(f.sideId, region)
+            : regionColorCss(region);
         const stroke = cssColor(f.strokeColor, fallback);
         const fill = cssColor(f.fillColor, fallback).withAlpha(
-          Number.isFinite(f.fillOpacity) ? Math.min(0.5, Math.max(0.05, f.fillOpacity)) : 0.2,
+          Number.isFinite(f.fillOpacity)
+            ? Math.min(0.5, Math.max(0.05, f.fillOpacity))
+            : 0.2,
         );
         const shape = fieldShapeKind(f.typeId);
         // Circles (lat/lng + radius, not a ring) and heatmaps (weighted point
         // clouds) aren't ring-shaped geometry — nothing to draw from `rings`.
         if (shape === 'circle' || shape === 'heatmap') continue;
 
-        const lineWidth = Number.isFinite(f.strokeWidth) && f.strokeWidth > 0 ? f.strokeWidth : 3;
+        const lineWidth =
+          Number.isFinite(f.strokeWidth) && f.strokeWidth > 0
+            ? f.strokeWidth
+            : 3;
 
         // The label is its OWN entity, separate from the geometry. Geometry
         // (polygon/polyline, clampToGround) is correctly occluded by Cesium's
@@ -260,7 +301,8 @@ export function createLiveuamapLayer() {
           if (shape === 'line' || shape === 'line-dashed') {
             const positions = [];
             for (const [lat, lng] of ring) {
-              if (Number.isFinite(lat) && Number.isFinite(lng)) positions.push(lng, lat);
+              if (Number.isFinite(lat) && Number.isFinite(lng))
+                positions.push(lng, lat);
             }
             if (positions.length < 4) return;
             entities.add({
@@ -268,12 +310,21 @@ export function createLiveuamapLayer() {
               polyline: {
                 positions: Cesium.Cartesian3.fromDegreesArray(positions),
                 width: lineWidth,
-                material: shape === 'line-dashed'
-                  ? new Cesium.PolylineDashMaterialProperty({ color: stroke, dashLength: 16 })
-                  : stroke,
+                material:
+                  shape === 'line-dashed'
+                    ? new Cesium.PolylineDashMaterialProperty({
+                        color: stroke,
+                        dashLength: 16,
+                      })
+                    : stroke,
                 clampToGround: true,
               },
-              properties: { source: 'liveuamap', region, kind: 'field', name: f.name ?? null },
+              properties: {
+                source: 'liveuamap',
+                region,
+                kind: 'field',
+                name: f.name ?? null,
+              },
             });
             fields += 1;
             if (f.name) {
@@ -281,7 +332,12 @@ export function createLiveuamapLayer() {
                 id: `${id}:label`,
                 position: Cesium.Cartesian3.fromDegrees(ring[0][1], ring[0][0]),
                 label: fieldLabelGraphics(f.name, stroke),
-                properties: { source: 'liveuamap', region, kind: 'field-label', name: f.name },
+                properties: {
+                  source: 'liveuamap',
+                  region,
+                  kind: 'field-label',
+                  name: f.name,
+                },
               });
             }
             return;
@@ -298,7 +354,12 @@ export function createLiveuamapLayer() {
               heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
               classificationType: Cesium.ClassificationType.TERRAIN,
             },
-            properties: { source: 'liveuamap', region, kind: 'field', name: f.name ?? null },
+            properties: {
+              source: 'liveuamap',
+              region,
+              kind: 'field',
+              name: f.name ?? null,
+            },
           });
           fields += 1;
           const centroid = f.name ? ringCentroid(ring) : null;
@@ -307,7 +368,12 @@ export function createLiveuamapLayer() {
               id: `${id}:label`,
               position: Cesium.Cartesian3.fromDegrees(centroid[1], centroid[0]),
               label: fieldLabelGraphics(f.name, stroke),
-              properties: { source: 'liveuamap', region, kind: 'field-label', name: f.name },
+              properties: {
+                source: 'liveuamap',
+                region,
+                kind: 'field-label',
+                name: f.name,
+              },
             });
           }
         });
@@ -316,9 +382,13 @@ export function createLiveuamapLayer() {
 
     let visibleEvents = payload.events ?? [];
     if (_params.verifiedOnly) {
-      visibleEvents = visibleEvents.filter((ev) => ev.status?.tag === 'verified');
+      visibleEvents = visibleEvents.filter(
+        (ev) => ev.status?.tag === 'verified',
+      );
     }
-    const sorted = [...visibleEvents].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
+    const sorted = [...visibleEvents].sort(
+      (a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0),
+    );
 
     sorted.forEach((ev, idx) => {
       if (!Number.isFinite(ev.lat) || !Number.isFinite(ev.lng)) return;
@@ -339,7 +409,9 @@ export function createLiveuamapLayer() {
           image: iconUriForCategory(category),
           // White-fill source glyph: Cesium multiplies this tint straight
           // through, same technique as the aircraft fleet icons.
-          color: Cesium.Color.fromCssColorString(sideColorCss(ev.sideId, region)),
+          color: Cesium.Color.fromCssColorString(
+            sideColorCss(ev.sideId, region),
+          ),
           width: ICON_SIZE,
           height: ICON_SIZE,
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
@@ -352,14 +424,21 @@ export function createLiveuamapLayer() {
               // Status, when known, IS the label color — verified reads green,
               // a rumor amber, fake red — instead of a separate ring/badge on
               // the glyph itself (which stays a clean, unbusy faction tint).
-              fillColor: badge ? Cesium.Color.fromCssColorString(badge.color) : Cesium.Color.WHITE,
+              fillColor: badge
+                ? Cesium.Color.fromCssColorString(badge.color)
+                : Cesium.Color.WHITE,
               outlineColor: Cesium.Color.BLACK,
               outlineWidth: 3,
               style: Cesium.LabelStyle.FILL_AND_OUTLINE,
               pixelOffset: new Cesium.Cartesian2(0, -1 * (ICON_SIZE / 2 + 6)),
               verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
               heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-              translucencyByDistance: new Cesium.NearFarScalar(3.0e5, 1.0, 3.0e6, 0.0),
+              translucencyByDistance: new Cesium.NearFarScalar(
+                3.0e5,
+                1.0,
+                3.0e6,
+                0.0,
+              ),
             }
           : undefined,
         properties: {
@@ -384,7 +463,11 @@ export function createLiveuamapLayer() {
     for (const payload of _lastRegions) {
       const region = payload.region;
       const counts = drawRegion(payload, region);
-      byRegion[region] = { ...counts, fetchedAt: payload.fetchedAt ?? null, asOf: payload.asOf ?? null };
+      byRegion[region] = {
+        ...counts,
+        fetchedAt: payload.fetchedAt ?? null,
+        asOf: payload.asOf ?? null,
+      };
       if (counts.events || counts.fields) anyData = true;
     }
     _byRegion = byRegion;
@@ -419,7 +502,9 @@ export function createLiveuamapLayer() {
       installClickHandler(viewer);
       console.log(
         `[Data:Liveuamap] Initialized (${
-          REGION_ALLOWLIST.length ? `allowlist: ${REGION_ALLOWLIST.join(', ')}` : 'all pushed regions'
+          REGION_ALLOWLIST.length
+            ? `allowlist: ${REGION_ALLOWLIST.join(', ')}`
+            : 'all pushed regions'
         })`,
       );
     },
@@ -430,7 +515,10 @@ export function createLiveuamapLayer() {
       _lastHorizonCameraPos = null;
       cullToHorizon({ force: true });
       if (!_horizonTimer) {
-        _horizonTimer = setInterval(() => cullToHorizon({ force: false }), HORIZON_TICK_MS);
+        _horizonTimer = setInterval(
+          () => cullToHorizon({ force: false }),
+          HORIZON_TICK_MS,
+        );
       }
     },
 
@@ -502,12 +590,16 @@ export function createLiveuamapLayer() {
         ],
         legend: regions.map((region) => {
           const r = _byRegion[region];
-          const age = r.fetchedAt ? relativeTime(new Date(r.fetchedAt).getTime() / 1000) : null;
+          const age = r.fetchedAt
+            ? relativeTime(new Date(r.fetchedAt).getTime() / 1000)
+            : null;
           return {
             label: region,
             color: regionColorCss(region),
             count: (r.events || 0) + (r.fields || 0),
-            blurb: [r.asOf, age ? `pushed ${age}` : null].filter(Boolean).join(' · '),
+            blurb: [r.asOf, age ? `pushed ${age}` : null]
+              .filter(Boolean)
+              .join(' · '),
           };
         }),
       };
@@ -515,7 +607,9 @@ export function createLiveuamapLayer() {
 
     /** Plain-JSON event snapshot for the analyst/voice query engine. */
     getAnalystRecords(maxCount = 500) {
-      const limit = Number.isFinite(maxCount) ? Math.max(1, Math.floor(maxCount)) : 500;
+      const limit = Number.isFinite(maxCount)
+        ? Math.max(1, Math.floor(maxCount))
+        : 500;
       const out = [];
       for (const payload of _lastRegions) {
         for (const ev of payload.events ?? []) {
@@ -565,7 +659,12 @@ export function createLiveuamapLayer() {
         (sum, r) => sum + (r.events || 0) + (r.fields || 0),
         0,
       );
-      return { count, byRegion: _byRegion, lastUpdate: _lastUpdate, error: _lastError };
+      return {
+        count,
+        byRegion: _byRegion,
+        lastUpdate: _lastUpdate,
+        error: _lastError,
+      };
     },
   };
 

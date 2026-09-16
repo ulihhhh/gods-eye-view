@@ -38,10 +38,16 @@ export function localAdsbEntityId(hex) {
  */
 export function buildLocalAdsbEntityOptions(row) {
   const label = row.flight || row.hex.toUpperCase();
-  const altitudeText = Number.isFinite(row.altitudeFt) ? `${Math.round(row.altitudeFt)} ft` : 'alt unknown';
+  const altitudeText = Number.isFinite(row.altitudeFt)
+    ? `${Math.round(row.altitudeFt)} ft`
+    : 'alt unknown';
   return {
     id: localAdsbEntityId(row.hex),
-    position: Cesium.Cartesian3.fromDegrees(row.lon, row.lat, Math.max(0, row.altitudeFt ?? 0) * 0.3048),
+    position: Cesium.Cartesian3.fromDegrees(
+      row.lon,
+      row.lat,
+      Math.max(0, row.altitudeFt ?? 0) * 0.3048,
+    ),
     point: {
       pixelSize: 8,
       color: LOCAL_ADSB_POINT_COLOR,
@@ -119,13 +125,16 @@ export function createLocalAdsbLayer() {
         const response = await fetch(LOCAL_ADSB_ENDPOINT);
         const body = await response.json().catch(() => null);
         if (!body || !Array.isArray(body.aircraft)) {
-          _lastError = body?.error || `local ADS-B proxy HTTP ${response.status}`;
+          _lastError =
+            body?.error || `local ADS-B proxy HTTP ${response.status}`;
           return false;
         }
 
         _dataSource.entities.removeAll();
         for (const row of body.aircraft) {
-          _dataSource.entities.add(new Cesium.Entity(buildLocalAdsbEntityOptions(row)));
+          _dataSource.entities.add(
+            new Cesium.Entity(buildLocalAdsbEntityOptions(row)),
+          );
         }
 
         _count = body.aircraft.length;

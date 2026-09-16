@@ -26,7 +26,9 @@ function hash360(str) {
  * @returns {string} CSS `hsl(...)` color.
  */
 export function sideColorCss(sideId, region) {
-  const hue = Number.isFinite(sideId) ? hash360(`side:${sideId}`) : hash360(`region:${region}`);
+  const hue = Number.isFinite(sideId)
+    ? hash360(`side:${sideId}`)
+    : hash360(`region:${region}`);
   return `hsl(${hue}, 68%, 56%)`;
 }
 
@@ -82,7 +84,9 @@ const DEFAULT_CATEGORY = 'unknown';
  *   didn't match anything (falls back to `category` when the icon is blank).
  */
 export function iconCategory(icon) {
-  const name = String(icon ?? '').trim().toLowerCase();
+  const name = String(icon ?? '')
+    .trim()
+    .toLowerCase();
   const rawCategory = name.replace(/-\d+$/, '') || DEFAULT_CATEGORY;
   for (const [rx, category] of ICON_CATEGORIES) {
     if (rx.test(rawCategory)) return { category, rawCategory };

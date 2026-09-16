@@ -40,10 +40,19 @@ export function normalizeLocalAdsbAircraft(raw) {
   if (!Number.isFinite(lon) || Math.abs(lon) > 180) return null;
 
   const rawAlt = raw.alt_baro ?? raw.altitude;
-  const altitudeFt = rawAlt === 'ground' ? 0 : (Number.isFinite(Number(rawAlt)) ? Number(rawAlt) : null);
-  const trackDeg = Number.isFinite(Number(raw.track)) ? Number(raw.track) : null;
+  const altitudeFt =
+    rawAlt === 'ground'
+      ? 0
+      : Number.isFinite(Number(rawAlt))
+        ? Number(rawAlt)
+        : null;
+  const trackDeg = Number.isFinite(Number(raw.track))
+    ? Number(raw.track)
+    : null;
   const rawSpeed = raw.gs ?? raw.speed;
-  const groundSpeedKt = Number.isFinite(Number(rawSpeed)) ? Number(rawSpeed) : null;
+  const groundSpeedKt = Number.isFinite(Number(rawSpeed))
+    ? Number(rawSpeed)
+    : null;
   const flight = typeof raw.flight === 'string' ? raw.flight.trim() : '';
   const seenS = Number.isFinite(Number(raw.seen)) ? Number(raw.seen) : null;
 
@@ -75,7 +84,9 @@ export function normalizeLocalAdsbSnapshot(json) {
     if (row) aircraft.push(row);
     if (aircraft.length >= MAX_AIRCRAFT) break;
   }
-  const receiverNowS = Number.isFinite(Number(json.now)) ? Number(json.now) : null;
+  const receiverNowS = Number.isFinite(Number(json.now))
+    ? Number(json.now)
+    : null;
   return { receiverNowS, aircraft };
 }
 
@@ -102,7 +113,9 @@ export async function fetchLocalAdsbSnapshot({
   try {
     response = await fetchImpl(url, { signal: makeSignal(timeoutMs) });
   } catch (error) {
-    const wrapped = new Error(`local receiver unreachable: ${error?.message || error}`);
+    const wrapped = new Error(
+      `local receiver unreachable: ${error?.message || error}`,
+    );
     wrapped.reason = 'unreachable';
     throw wrapped;
   }
@@ -121,7 +134,9 @@ export async function fetchLocalAdsbSnapshot({
   }
   const snapshot = normalizeLocalAdsbSnapshot(body);
   if (!snapshot) {
-    const error = new Error('local receiver JSON is not a recognizable aircraft.json payload');
+    const error = new Error(
+      'local receiver JSON is not a recognizable aircraft.json payload',
+    );
     error.reason = 'malformed';
     throw error;
   }
@@ -145,10 +160,46 @@ export function mockLocalAdsbSnapshot(now = Date.now) {
   return {
     now: Math.floor(now() / 1000),
     aircraft: [
-      { hex: 'a1b2c3', flight: 'MOCK01', lat: 30.30, lon: -97.70, alt_baro: 8000, track: 90, gs: 250, seen: 0.4 },
-      { hex: 'd4e5f6', flight: 'MOCK02', lat: 30.20, lon: -97.80, alt_baro: 15000, track: 200, gs: 380, seen: 1.1 },
-      { hex: '112233', flight: null, lat: 30.35, lon: -97.65, alt_baro: 3200, track: 45, gs: 140, seen: 2.8 },
-      { hex: '445566', flight: 'MOCK04', lat: 30.15, lon: -97.60, alt_baro: 'ground', track: 0, gs: 12, seen: 0.1 },
+      {
+        hex: 'a1b2c3',
+        flight: 'MOCK01',
+        lat: 30.3,
+        lon: -97.7,
+        alt_baro: 8000,
+        track: 90,
+        gs: 250,
+        seen: 0.4,
+      },
+      {
+        hex: 'd4e5f6',
+        flight: 'MOCK02',
+        lat: 30.2,
+        lon: -97.8,
+        alt_baro: 15000,
+        track: 200,
+        gs: 380,
+        seen: 1.1,
+      },
+      {
+        hex: '112233',
+        flight: null,
+        lat: 30.35,
+        lon: -97.65,
+        alt_baro: 3200,
+        track: 45,
+        gs: 140,
+        seen: 2.8,
+      },
+      {
+        hex: '445566',
+        flight: 'MOCK04',
+        lat: 30.15,
+        lon: -97.6,
+        alt_baro: 'ground',
+        track: 0,
+        gs: 12,
+        seen: 0.1,
+      },
     ],
   };
 }
@@ -185,8 +236,14 @@ export async function resolveLocalAdsbRequest({
     return { status: 200, body: { ...snapshot, stale: false, baseUrl } };
   } catch (error) {
     if (cached) {
-      return { status: 200, body: { ...cached.snapshot, stale: true, baseUrl } };
+      return {
+        status: 200,
+        body: { ...cached.snapshot, stale: true, baseUrl },
+      };
     }
-    return { status: 502, body: { error: error?.reason || 'unreachable', baseUrl } };
+    return {
+      status: 502,
+      body: { error: error?.reason || 'unreachable', baseUrl },
+    };
   }
 }

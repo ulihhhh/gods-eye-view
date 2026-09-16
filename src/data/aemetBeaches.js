@@ -1,5 +1,9 @@
 import * as Cesium from 'cesium';
-import { registerPickOwner, resolvePickId, unregisterPickOwner } from './pickRegistry.js';
+import {
+  registerPickOwner,
+  resolvePickId,
+  unregisterPickOwner,
+} from './pickRegistry.js';
 import {
   clearOverlaySource,
   setOverlayEntries,
@@ -26,7 +30,8 @@ import {
  * treatment Phase A0 established, applied from the start.
  */
 
-export const AEMET_BEACHES_SELECTED_OVERLAY_SOURCE_ID = 'aemet-beaches-selected';
+export const AEMET_BEACHES_SELECTED_OVERLAY_SOURCE_ID =
+  'aemet-beaches-selected';
 export const AEMET_BEACHES_SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
   cohortLimit: 1,
   collisionCapacity: 0,
@@ -79,7 +84,8 @@ export function waterTempColorRgb(waterTempC) {
   if (!Number.isFinite(waterTempC)) return null;
   const stops = WATER_TEMP_COLOR_STOPS;
   if (waterTempC <= stops[0].c) return stops[0].rgb;
-  if (waterTempC >= stops[stops.length - 1].c) return stops[stops.length - 1].rgb;
+  if (waterTempC >= stops[stops.length - 1].c)
+    return stops[stops.length - 1].rgb;
   for (let i = 0; i < stops.length - 1; i++) {
     const a = stops[i];
     const b = stops[i + 1];
@@ -101,7 +107,10 @@ function colorFromRgb([r, g, b], alpha = POINT_ALPHA) {
 }
 
 function waterTempColor(waterTempC, alpha = POINT_ALPHA) {
-  return colorFromRgb(waterTempColorRgb(waterTempC) ?? COLOR_UNKNOWN_RGB, alpha);
+  return colorFromRgb(
+    waterTempColorRgb(waterTempC) ?? COLOR_UNKNOWN_RGB,
+    alpha,
+  );
 }
 
 /**
@@ -115,9 +124,12 @@ export function buildAemetBeachSelectionCopy(beach) {
   const forecast = beach?.forecast || {};
   const details = [];
   details.push(
-    Number.isFinite(forecast.waterTempC) ? `Water ${forecast.waterTempC}°C` : 'Water temp unknown',
+    Number.isFinite(forecast.waterTempC)
+      ? `Water ${forecast.waterTempC}°C`
+      : 'Water temp unknown',
   );
-  if (Number.isFinite(forecast.maxTempC)) details.push(`Air max ${forecast.maxTempC}°C`);
+  if (Number.isFinite(forecast.maxTempC))
+    details.push(`Air max ${forecast.maxTempC}°C`);
   if (forecast.sky) details.push(String(forecast.sky));
   if (forecast.wind) details.push(`Wind: ${forecast.wind}`);
   if (forecast.waves) details.push(`Waves: ${forecast.waves}`);
@@ -166,14 +178,22 @@ export function normalizeAemetBeachesPayload(payload) {
   for (const beach of payload.beaches) {
     const lat = Number(beach?.lat);
     const lon = Number(beach?.lon);
-    if (!Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lon) || Math.abs(lon) > 180) continue;
+    if (
+      !Number.isFinite(lat) ||
+      Math.abs(lat) > 90 ||
+      !Number.isFinite(lon) ||
+      Math.abs(lon) > 180
+    )
+      continue;
     if (!beach?.id || !beach?.name) continue;
     rows.push(beach);
   }
   return rows;
 }
 
-export function createAemetBeachesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = {}) {
+export function createAemetBeachesLayer({
+  overlayHost = DEFAULT_OVERLAY_HOST,
+} = {}) {
   let _viewer = null;
   let _dataSource = null;
   let _count = 0;
@@ -191,12 +211,18 @@ export function createAemetBeachesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } =
 
   /** Same RELATIVE_TO_GROUND treatment as `aemetStations.js`/`aemetUvIndex.js` — see their own comments for why. */
   function _beachPosition(beach) {
-    return Cesium.Cartesian3.fromDegrees(beach.lon, beach.lat, POINT_HEIGHT_OFFSET_M);
+    return Cesium.Cartesian3.fromDegrees(
+      beach.lon,
+      beach.lat,
+      POINT_HEIGHT_OFFSET_M,
+    );
   }
 
   function _clearSelection() {
     if (_selectedId) {
-      const original = _dataSource?.entities.getById(`aemet-beaches:${_selectedId}`);
+      const original = _dataSource?.entities.getById(
+        `aemet-beaches:${_selectedId}`,
+      );
       if (original?.point) original.point.show = true;
     }
     if (_selectedEntity && _viewer) _viewer.entities.remove(_selectedEntity);
@@ -292,7 +318,9 @@ export function createAemetBeachesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } =
       if (_dataSource) _dataSource.show = true;
       overlayHost.setVisible(AEMET_BEACHES_SELECTED_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer);
-      registerPickOwner('aemet-beaches', (pickedId) => String(pickedId).startsWith('aemet-beaches:'));
+      registerPickOwner('aemet-beaches', (pickedId) =>
+        String(pickedId).startsWith('aemet-beaches:'),
+      );
     },
 
     disable() {
@@ -328,22 +356,24 @@ export function createAemetBeachesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } =
         const nextBeachById = new Map();
         for (const beach of beaches) {
           nextBeachById.set(beach.id, beach);
-          nextEntities.push(new Cesium.Entity({
-            id: `aemet-beaches:${beach.id}`,
-            position: _beachPosition(beach),
-            point: {
-              pixelSize: 9,
-              color: waterTempColor(beach.forecast?.waterTempC),
-              outlineColor: COLOR_OUTLINE,
-              outlineWidth: 1,
-              heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
-              // Deliberately NOT disableDepthTestDistance — normal depth
-              // testing against the globe hides a beach on the far side of
-              // Earth, same as aemetStations.js/aemetUvIndex.js.
-            },
-            name: beach.name || beach.id,
-            properties: { ...beach },
-          }));
+          nextEntities.push(
+            new Cesium.Entity({
+              id: `aemet-beaches:${beach.id}`,
+              position: _beachPosition(beach),
+              point: {
+                pixelSize: 9,
+                color: waterTempColor(beach.forecast?.waterTempC),
+                outlineColor: COLOR_OUTLINE,
+                outlineWidth: 1,
+                heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+                // Deliberately NOT disableDepthTestDistance — normal depth
+                // testing against the globe hides a beach on the far side of
+                // Earth, same as aemetStations.js/aemetUvIndex.js.
+              },
+              name: beach.name || beach.id,
+              properties: { ...beach },
+            }),
+          );
         }
 
         _dataSource.entities.removeAll();
@@ -362,7 +392,10 @@ export function createAemetBeachesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } =
         // background over several minutes, so `stale` reads true for the
         // entire first sweep even though it's actively filling in — not
         // stuck. Only report degraded when stale AND no sweep is running.
-        _lastError = payload.stale && !payload.sweeping ? 'Serving stale AEMET data (upstream unavailable)' : null;
+        _lastError =
+          payload.stale && !payload.sweeping
+            ? 'Serving stale AEMET data (upstream unavailable)'
+            : null;
         console.log(`[Data:AemetBeaches] Updated: ${_count} beaches`);
         return true;
       } catch (e) {
@@ -400,7 +433,9 @@ export function createAemetBeachesLayer({ overlayHost = DEFAULT_OVERLAY_HOST } =
       if (!_dataSource || !_dataSource.show) return [];
       const entities = _dataSource.entities.values;
       if (!entities.length) return [];
-      const limit = Number.isFinite(maxCount) ? Math.max(1, Math.floor(maxCount)) : 200;
+      const limit = Number.isFinite(maxCount)
+        ? Math.max(1, Math.floor(maxCount))
+        : 200;
       const now = Cesium.JulianDate.now();
       const result = [];
       for (const entity of entities) {

@@ -38,16 +38,27 @@ async function readRequestBodyCapped(req, maxBytes) {
 export function liveuamapProxy() {
   const CACHE_DIR = path.join(process.cwd(), '.gev-cache', 'liveuamap');
   const REGION_RE = /^[a-z0-9-]{1,40}$/;
-  const INGEST_TOKEN = String(process.env.LIVEUAMAP_INGEST_TOKEN || 'gev-liveuamap-bridge');
+  const INGEST_TOKEN = String(
+    process.env.LIVEUAMAP_INGEST_TOKEN || 'gev-liveuamap-bridge',
+  );
   const MAX_INGEST_BYTES = 8 * 1024 * 1024;
   const EMPTY = (region) => ({
-    region, resid: null, asOf: null, fetchedAt: null, events: [], fields: [], stale: true,
+    region,
+    resid: null,
+    asOf: null,
+    fetchedAt: null,
+    events: [],
+    fields: [],
+    stale: true,
   });
 
   const readRegion = async (region) => {
     try {
-      const parsed = JSON.parse(await fsp.readFile(path.join(CACHE_DIR, `${region}.json`), 'utf8'));
-      if (Array.isArray(parsed?.events) && Array.isArray(parsed?.fields)) return parsed;
+      const parsed = JSON.parse(
+        await fsp.readFile(path.join(CACHE_DIR, `${region}.json`), 'utf8'),
+      );
+      if (Array.isArray(parsed?.events) && Array.isArray(parsed?.fields))
+        return parsed;
     } catch {
       /* no snapshot yet */
     }
@@ -73,61 +84,77 @@ export function liveuamapProxy() {
     );
     server.middlewares.use('/api/liveuamap', async (req, res) => {
       try {
-          if (req.method === 'OPTIONS') return send(res, 204);
+        if (req.method === 'OPTIONS') return send(res, 204);
 
-          if (req.method === 'POST' && (req.url || '').startsWith('/ingest')) {
-            if ((req.headers['x-liveuamap-token'] || '') !== INGEST_TOKEN) {
-              return send(res, 403, { error: 'bad or missing X-Liveuamap-Token' });
-            }
-            let raw;
-            try {
-              raw = (await readRequestBodyCapped(req, MAX_INGEST_BYTES)).toString();
-            } catch (err) {
-              if (err?.code === 'BODY_TOO_LARGE') return send(res, 413, { error: 'payload too large' });
-              throw err;
-            }
-            const payload = JSON.parse(raw || '{}');
-            const snapshot = normalizeLiveuamapSnapshot(payload);
-            if (!REGION_RE.test(snapshot.region)) return send(res, 400, { error: 'bad region' });
-
-            const file = path.join(CACHE_DIR, `${snapshot.region}.json`);
-            if (!snapshot.events.length && !snapshot.fields.length) {
-              // Don't let an empty tab (still loading / Cloudflare check) wipe a good snapshot.
-              const prev = await readRegion(snapshot.region);
-              if ((prev.events?.length || 0) + (prev.fields?.length || 0) > 0) {
-                return send(res, 200, { region: snapshot.region, kept: true, events: prev.events.length, fields: prev.fields.length });
-              }
-            }
-            await fsp.mkdir(CACHE_DIR, { recursive: true });
-            const tmp = `${file}.${process.pid}.tmp`;
-            await fsp.writeFile(tmp, JSON.stringify(snapshot, null, 2), 'utf8');
-            await fsp.rename(tmp, file);
-            server.config.logger.info(
-              `  \x1b[35m➜\x1b[0m  Liveuamap ${snapshot.region}: ${snapshot.events.length} events, ${snapshot.fields.length} fields`,
-            );
-            return send(res, 200, { region: snapshot.region, events: snapshot.events.length, fields: snapshot.fields.length });
+        if (req.method === 'POST' && (req.url || '').startsWith('/ingest')) {
+          if ((req.headers['x-liveuamap-token'] || '') !== INGEST_TOKEN) {
+            return send(res, 403, {
+              error: 'bad or missing X-Liveuamap-Token',
+            });
           }
-
-          const region = new URL(req.url, 'http://x').searchParams.get('region');
-          if (region) {
-            if (!REGION_RE.test(region)) return send(res, 400, { error: 'bad region' });
-            return send(res, 200, await readRegion(region));
-          }
-          let names = [];
+          let raw;
           try {
-            names = (await fsp.readdir(CACHE_DIR))
-              .filter((f) => f.endsWith('.json'))
-              .map((f) => f.slice(0, -5))
-              .filter((n) => REGION_RE.test(n));
-          } catch {
-            /* dir not created until the first ingest */
+            raw = (
+              await readRequestBodyCapped(req, MAX_INGEST_BYTES)
+            ).toString();
+          } catch (err) {
+            if (err?.code === 'BODY_TOO_LARGE')
+              return send(res, 413, { error: 'payload too large' });
+            throw err;
           }
-          const regions = await Promise.all(names.map(readRegion));
-          return send(res, 200, { regions });
-        } catch (err) {
-          return send(res, 500, { error: String(err?.message || err) });
+          const payload = JSON.parse(raw || '{}');
+          const snapshot = normalizeLiveuamapSnapshot(payload);
+          if (!REGION_RE.test(snapshot.region))
+            return send(res, 400, { error: 'bad region' });
+
+          const file = path.join(CACHE_DIR, `${snapshot.region}.json`);
+          if (!snapshot.events.length && !snapshot.fields.length) {
+            // Don't let an empty tab (still loading / Cloudflare check) wipe a good snapshot.
+            const prev = await readRegion(snapshot.region);
+            if ((prev.events?.length || 0) + (prev.fields?.length || 0) > 0) {
+              return send(res, 200, {
+                region: snapshot.region,
+                kept: true,
+                events: prev.events.length,
+                fields: prev.fields.length,
+              });
+            }
+          }
+          await fsp.mkdir(CACHE_DIR, { recursive: true });
+          const tmp = `${file}.${process.pid}.tmp`;
+          await fsp.writeFile(tmp, JSON.stringify(snapshot, null, 2), 'utf8');
+          await fsp.rename(tmp, file);
+          server.config.logger.info(
+            `  \x1b[35m➜\x1b[0m  Liveuamap ${snapshot.region}: ${snapshot.events.length} events, ${snapshot.fields.length} fields`,
+          );
+          return send(res, 200, {
+            region: snapshot.region,
+            events: snapshot.events.length,
+            fields: snapshot.fields.length,
+          });
         }
-      });
+
+        const region = new URL(req.url, 'http://x').searchParams.get('region');
+        if (region) {
+          if (!REGION_RE.test(region))
+            return send(res, 400, { error: 'bad region' });
+          return send(res, 200, await readRegion(region));
+        }
+        let names = [];
+        try {
+          names = (await fsp.readdir(CACHE_DIR))
+            .filter((f) => f.endsWith('.json'))
+            .map((f) => f.slice(0, -5))
+            .filter((n) => REGION_RE.test(n));
+        } catch {
+          /* dir not created until the first ingest */
+        }
+        const regions = await Promise.all(names.map(readRegion));
+        return send(res, 200, { regions });
+      } catch (err) {
+        return send(res, 500, { error: String(err?.message || err) });
+      }
+    });
   }
   return {
     name: 'liveuamap-proxy',

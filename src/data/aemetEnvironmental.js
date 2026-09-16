@@ -1,5 +1,9 @@
 import * as Cesium from 'cesium';
-import { registerPickOwner, resolvePickId, unregisterPickOwner } from './pickRegistry.js';
+import {
+  registerPickOwner,
+  resolvePickId,
+  unregisterPickOwner,
+} from './pickRegistry.js';
 import {
   clearOverlaySource,
   setOverlayEntries,
@@ -28,12 +32,14 @@ import {
  * report ozone, radiation, or both.
  */
 
-export const AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_ID = 'aemet-environmental-selected';
-export const AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
-  cohortLimit: 1,
-  collisionCapacity: 0,
-  moving: false,
-});
+export const AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_ID =
+  'aemet-environmental-selected';
+export const AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_OPTIONS =
+  Object.freeze({
+    cohortLimit: 1,
+    collisionCapacity: 0,
+    moving: false,
+  });
 
 const DEFAULT_OVERLAY_HOST = Object.freeze({
   setEntries: setOverlayEntries,
@@ -73,7 +79,8 @@ function lerp(a, b, t) {
 function interpolateStops(value, stops, keyName) {
   if (!Number.isFinite(value)) return null;
   if (value <= stops[0][keyName]) return stops[0].rgb;
-  if (value >= stops[stops.length - 1][keyName]) return stops[stops.length - 1].rgb;
+  if (value >= stops[stops.length - 1][keyName])
+    return stops[stops.length - 1].rgb;
   for (let i = 0; i < stops.length - 1; i++) {
     const a = stops[i];
     const b = stops[i + 1];
@@ -114,10 +121,15 @@ function colorFromRgb([r, g, b], alpha = POINT_ALPHA) {
  * @param {number} [alpha]
  * @returns {Cesium.Color}
  */
-export function environmentalStationColor(station, networkType, alpha = POINT_ALPHA) {
-  const rgb = networkType === 'radiation'
-    ? radiationColorRgb(station?.globalRadiationSum)
-    : ozoneColorRgb(station?.ozoneDobson);
+export function environmentalStationColor(
+  station,
+  networkType,
+  alpha = POINT_ALPHA,
+) {
+  const rgb =
+    networkType === 'radiation'
+      ? radiationColorRgb(station?.globalRadiationSum)
+      : ozoneColorRgb(station?.ozoneDobson);
   return colorFromRgb(rgb ?? COLOR_UNKNOWN_RGB, alpha);
 }
 
@@ -131,7 +143,11 @@ export function environmentalStationColor(station, networkType, alpha = POINT_AL
 export function buildAemetEnvironmentalSelectionCopy(station) {
   const title = station?.name || station?.indicativo || 'Station';
   const details = [];
-  details.push(Number.isFinite(station?.ozoneDobson) ? `Ozone ${station.ozoneDobson} DU` : 'Ozone: no data');
+  details.push(
+    Number.isFinite(station?.ozoneDobson)
+      ? `Ozone ${station.ozoneDobson} DU`
+      : 'Ozone: no data',
+  );
   details.push(
     Number.isFinite(station?.globalRadiationSum)
       ? `Radiation ${station.globalRadiationSum} (10·kJ/m²)`
@@ -149,12 +165,18 @@ export function buildAemetEnvironmentalSelectionCopy(station) {
  * @param {'ozone'|'radiation'} networkType
  * @returns {object|null}
  */
-export function createAemetEnvironmentalSelectedOverlayEntry(id, position, station, networkType) {
+export function createAemetEnvironmentalSelectedOverlayEntry(
+  id,
+  position,
+  station,
+  networkType,
+) {
   if (!id || !position) return null;
   const { title, details } = buildAemetEnvironmentalSelectionCopy(station);
-  const rgb = networkType === 'radiation'
-    ? (radiationColorRgb(station?.globalRadiationSum) ?? COLOR_UNKNOWN_RGB)
-    : (ozoneColorRgb(station?.ozoneDobson) ?? COLOR_UNKNOWN_RGB);
+  const rgb =
+    networkType === 'radiation'
+      ? (radiationColorRgb(station?.globalRadiationSum) ?? COLOR_UNKNOWN_RGB)
+      : (ozoneColorRgb(station?.ozoneDobson) ?? COLOR_UNKNOWN_RGB);
   return {
     id: String(id),
     position,
@@ -185,14 +207,22 @@ export function normalizeAemetEnvironmentalPayload(payload) {
   for (const station of payload.stations) {
     const lat = Number(station?.lat);
     const lon = Number(station?.lon);
-    if (!Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lon) || Math.abs(lon) > 180) continue;
+    if (
+      !Number.isFinite(lat) ||
+      Math.abs(lat) > 90 ||
+      !Number.isFinite(lon) ||
+      Math.abs(lon) > 180
+    )
+      continue;
     if (!station?.indicativo || !station?.name) continue;
     rows.push(station);
   }
   return rows;
 }
 
-export function createAemetEnvironmentalLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = {}) {
+export function createAemetEnvironmentalLayer({
+  overlayHost = DEFAULT_OVERLAY_HOST,
+} = {}) {
   let _viewer = null;
   let _dataSource = null;
   let _count = 0;
@@ -212,7 +242,11 @@ export function createAemetEnvironmentalLayer({ overlayHost = DEFAULT_OVERLAY_HO
 
   /** Same RELATIVE_TO_GROUND treatment as `aemetStations.js`/`aemetUvIndex.js` — see their own comments for why. */
   function _stationPosition(station) {
-    return Cesium.Cartesian3.fromDegrees(station.lon, station.lat, POINT_HEIGHT_OFFSET_M);
+    return Cesium.Cartesian3.fromDegrees(
+      station.lon,
+      station.lat,
+      POINT_HEIGHT_OFFSET_M,
+    );
   }
 
   function _recolorAll() {
@@ -221,13 +255,16 @@ export function createAemetEnvironmentalLayer({ overlayHost = DEFAULT_OVERLAY_HO
       if (entity === _selectedEntity) continue;
       const id = String(entity.id || '').slice('aemet-environmental:'.length);
       const station = _stationById.get(id);
-      if (station && entity.point) entity.point.color = environmentalStationColor(station, _networkType);
+      if (station && entity.point)
+        entity.point.color = environmentalStationColor(station, _networkType);
     }
   }
 
   function _clearSelection() {
     if (_selectedId) {
-      const original = _dataSource?.entities.getById(`aemet-environmental:${_selectedId}`);
+      const original = _dataSource?.entities.getById(
+        `aemet-environmental:${_selectedId}`,
+      );
       if (original?.point) original.point.show = true;
     }
     if (_selectedEntity && _viewer) _viewer.entities.remove(_selectedEntity);
@@ -255,7 +292,12 @@ export function createAemetEnvironmentalLayer({ overlayHost = DEFAULT_OVERLAY_HO
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
-    const entry = createAemetEnvironmentalSelectedOverlayEntry(id, position, station, _networkType);
+    const entry = createAemetEnvironmentalSelectedOverlayEntry(
+      id,
+      position,
+      station,
+      _networkType,
+    );
     if (entry) {
       overlayHost.setEntries(
         AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_ID,
@@ -315,23 +357,34 @@ export function createAemetEnvironmentalLayer({ overlayHost = DEFAULT_OVERLAY_HO
       _enabled = false;
       _networkType = 'ozone';
       _stationById = new Map();
-      overlayHost.setVisible(AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_ID, false);
+      overlayHost.setVisible(
+        AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_ID,
+        false,
+      );
       console.log('[Data:AemetEnvironmental] Initialized');
     },
 
     enable(viewer) {
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
-      overlayHost.setVisible(AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_ID, true);
+      overlayHost.setVisible(
+        AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_ID,
+        true,
+      );
       _installClickHandler(viewer);
-      registerPickOwner('aemet-environmental', (pickedId) => String(pickedId).startsWith('aemet-environmental:'));
+      registerPickOwner('aemet-environmental', (pickedId) =>
+        String(pickedId).startsWith('aemet-environmental:'),
+      );
     },
 
     disable() {
       _enabled = false;
       _clearSelection();
       if (_dataSource) _dataSource.show = false;
-      overlayHost.setVisible(AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_ID, false);
+      overlayHost.setVisible(
+        AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_ID,
+        false,
+      );
       _removeClickHandler();
       unregisterPickOwner('aemet-environmental');
     },
@@ -344,7 +397,11 @@ export function createAemetEnvironmentalLayer({ overlayHost = DEFAULT_OVERLAY_HO
      */
     setParams(params = {}) {
       if (params.networkType !== undefined) {
-        if (params.networkType !== 'ozone' && params.networkType !== 'radiation') return false;
+        if (
+          params.networkType !== 'ozone' &&
+          params.networkType !== 'radiation'
+        )
+          return false;
         if (params.networkType !== _networkType) {
           _networkType = params.networkType;
           _recolorAll();
@@ -357,16 +414,18 @@ export function createAemetEnvironmentalLayer({ overlayHost = DEFAULT_OVERLAY_HO
     getRowControls() {
       const isOzone = _networkType === 'ozone';
       return {
-        chips: [{
-          id: 'networkType',
-          label: isOzone ? 'OZONE' : 'RADIATION',
-          active: true,
-          state: 'active',
-          title: isOzone
-            ? 'Coloring by total-column ozone — click to switch to solar radiation'
-            : 'Coloring by daily solar radiation — click to switch to ozone',
-          params: { networkType: isOzone ? 'radiation' : 'ozone' },
-        }],
+        chips: [
+          {
+            id: 'networkType',
+            label: isOzone ? 'OZONE' : 'RADIATION',
+            active: true,
+            state: 'active',
+            title: isOzone
+              ? 'Coloring by total-column ozone — click to switch to solar radiation'
+              : 'Coloring by daily solar radiation — click to switch to ozone',
+            params: { networkType: isOzone ? 'radiation' : 'ozone' },
+          },
+        ],
         legend: [],
       };
     },
@@ -380,7 +439,9 @@ export function createAemetEnvironmentalLayer({ overlayHost = DEFAULT_OVERLAY_HO
         }
         if (!response.ok) {
           _lastError = `AEMET HTTP ${response.status}`;
-          console.warn(`[Data:AemetEnvironmental] API returned ${response.status}`);
+          console.warn(
+            `[Data:AemetEnvironmental] API returned ${response.status}`,
+          );
           return false;
         }
 
@@ -395,22 +456,24 @@ export function createAemetEnvironmentalLayer({ overlayHost = DEFAULT_OVERLAY_HO
         const nextStationById = new Map();
         for (const station of stations) {
           nextStationById.set(station.indicativo, station);
-          nextEntities.push(new Cesium.Entity({
-            id: `aemet-environmental:${station.indicativo}`,
-            position: _stationPosition(station),
-            point: {
-              pixelSize: 9,
-              color: environmentalStationColor(station, _networkType),
-              outlineColor: COLOR_OUTLINE,
-              outlineWidth: 1,
-              heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
-              // Deliberately NOT disableDepthTestDistance — normal depth
-              // testing against the globe hides a station on the far side
-              // of Earth, same as aemetStations.js/aemetUvIndex.js.
-            },
-            name: station.name || station.indicativo,
-            properties: { ...station },
-          }));
+          nextEntities.push(
+            new Cesium.Entity({
+              id: `aemet-environmental:${station.indicativo}`,
+              position: _stationPosition(station),
+              point: {
+                pixelSize: 9,
+                color: environmentalStationColor(station, _networkType),
+                outlineColor: COLOR_OUTLINE,
+                outlineWidth: 1,
+                heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+                // Deliberately NOT disableDepthTestDistance — normal depth
+                // testing against the globe hides a station on the far side
+                // of Earth, same as aemetStations.js/aemetUvIndex.js.
+              },
+              name: station.name || station.indicativo,
+              properties: { ...station },
+            }),
+          );
         }
 
         _dataSource.entities.removeAll();
@@ -424,7 +487,9 @@ export function createAemetEnvironmentalLayer({ overlayHost = DEFAULT_OVERLAY_HO
 
         _count = stations.length;
         _lastUpdate = Date.now();
-        _lastError = payload.stale ? 'Serving stale AEMET data (upstream unavailable)' : null;
+        _lastError = payload.stale
+          ? 'Serving stale AEMET data (upstream unavailable)'
+          : null;
         console.log(`[Data:AemetEnvironmental] Updated: ${_count} stations`);
         return true;
       } catch (e) {
@@ -438,7 +503,10 @@ export function createAemetEnvironmentalLayer({ overlayHost = DEFAULT_OVERLAY_HO
       _clearSelection();
       _removeClickHandler();
       unregisterPickOwner('aemet-environmental');
-      overlayHost.setVisible(AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_ID, false);
+      overlayHost.setVisible(
+        AEMET_ENVIRONMENTAL_SELECTED_OVERLAY_SOURCE_ID,
+        false,
+      );
       if (_dataSource) {
         viewer.dataSources.remove(_dataSource, true);
         _dataSource = null;
@@ -455,7 +523,9 @@ export function createAemetEnvironmentalLayer({ overlayHost = DEFAULT_OVERLAY_HO
       if (!_dataSource || !_dataSource.show) return [];
       const entities = _dataSource.entities.values;
       if (!entities.length) return [];
-      const limit = Number.isFinite(maxCount) ? Math.max(1, Math.floor(maxCount)) : 200;
+      const limit = Number.isFinite(maxCount)
+        ? Math.max(1, Math.floor(maxCount))
+        : 200;
       const now = Cesium.JulianDate.now();
       const result = [];
       for (const entity of entities) {

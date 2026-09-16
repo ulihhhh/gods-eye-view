@@ -80,7 +80,8 @@ export function aemetStationsProxy() {
     diskChecked = true;
     try {
       const parsed = JSON.parse(await fsp.readFile(CACHE_PATH, 'utf8'));
-      if (Number.isFinite(parsed?.at) && Array.isArray(parsed?.stations)) mem = parsed;
+      if (Number.isFinite(parsed?.at) && Array.isArray(parsed?.stations))
+        mem = parsed;
     } catch {
       /* no disk cache yet */
     }
@@ -107,9 +108,13 @@ export function aemetStationsProxy() {
     if (!envelopeRes.ok) throw new Error(`HTTP ${envelopeRes.status}`);
     const envelope = await envelopeRes.json();
     if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
-      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+      throw new Error(
+        `AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`,
+      );
     }
-    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(20_000) });
+    const dataRes = await fetch(envelope.datos, {
+      signal: AbortSignal.timeout(20_000),
+    });
     if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
     const buffer = Buffer.from(await dataRes.arrayBuffer());
     const records = JSON.parse(buffer.toString('latin1'));
@@ -152,7 +157,9 @@ export function aemetStationsProxy() {
           sendJson(200, {
             hasKey: Boolean(key),
             lastFetch: mem ? mem.at : null,
-            count: mem ? filterFreshAemetStations(mem.stations, Date.now()).length : null,
+            count: mem
+              ? filterFreshAemetStations(mem.stations, Date.now()).length
+              : null,
             stale: mem ? Date.now() - mem.at >= TTL_MS : false,
             ttlMs: TTL_MS,
           });
@@ -264,7 +271,8 @@ export function aemetWarningsProxy() {
     diskChecked = true;
     try {
       const parsed = JSON.parse(await fsp.readFile(CACHE_PATH, 'utf8'));
-      if (Number.isFinite(parsed?.at) && Array.isArray(parsed?.zones)) mem = parsed;
+      if (Number.isFinite(parsed?.at) && Array.isArray(parsed?.zones))
+        mem = parsed;
     } catch {
       /* no disk cache yet */
     }
@@ -275,7 +283,10 @@ export function aemetWarningsProxy() {
       await fsp.mkdir(CACHE_DIR, { recursive: true });
       await fsp.writeFile(CACHE_PATH, JSON.stringify(entry), 'utf8');
     } catch (err) {
-      console.warn('[aemet-warnings-proxy] cache write failed:', err?.message || err);
+      console.warn(
+        '[aemet-warnings-proxy] cache write failed:',
+        err?.message || err,
+      );
     }
   }
 
@@ -294,9 +305,13 @@ export function aemetWarningsProxy() {
     if (!envelopeRes.ok) throw new Error(`HTTP ${envelopeRes.status}`);
     const envelope = await envelopeRes.json();
     if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
-      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+      throw new Error(
+        `AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`,
+      );
     }
-    const tarRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(30_000) });
+    const tarRes = await fetch(envelope.datos, {
+      signal: AbortSignal.timeout(30_000),
+    });
     if (!tarRes.ok) throw new Error(`HTTP ${tarRes.status} fetching datos`);
     const buffer = Buffer.from(await tarRes.arrayBuffer());
     const entries = parseAemetCapTar(buffer);
@@ -345,7 +360,9 @@ export function aemetWarningsProxy() {
           sendJson(200, {
             hasKey: Boolean(key),
             lastFetch: mem ? mem.at : null,
-            count: mem ? filterActiveAemetWarnings(mem.zones, Date.now()).length : null,
+            count: mem
+              ? filterActiveAemetWarnings(mem.zones, Date.now()).length
+              : null,
             stale: mem ? Date.now() - mem.at >= TTL_MS : false,
             ttlMs: TTL_MS,
           });
@@ -386,7 +403,9 @@ export function aemetWarningsProxy() {
         } else if (entry) {
           sendJson(200, buildPayload(entry, true)); // upstream down — stale beats empty
         } else {
-          sendJson(502, { error: 'aemet warnings fetch failed and no cache available' });
+          sendJson(502, {
+            error: 'aemet warnings fetch failed and no cache available',
+          });
         }
       } catch (err) {
         console.warn('[aemet-warnings-proxy] error:', err?.message || err);
@@ -461,9 +480,13 @@ export function aemetForecastProxy() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const envelope = await res.json();
     if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
-      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+      throw new Error(
+        `AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`,
+      );
     }
-    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(timeoutMs) });
+    const dataRes = await fetch(envelope.datos, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
     if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
     // Both feeds below are served as ISO-8859-15 despite being JSON, same
     // gotcha as the stations feed (confirmed live) — decode as latin1, never
@@ -473,9 +496,13 @@ export function aemetForecastProxy() {
   }
 
   async function ensureMunicipios(key) {
-    if (municipiosMem && Date.now() - municipiosMem.at < MUNICIPIOS_TTL_MS) return municipiosMem.municipios;
+    if (municipiosMem && Date.now() - municipiosMem.at < MUNICIPIOS_TTL_MS)
+      return municipiosMem.municipios;
     if (!municipiosInflight) {
-      municipiosInflight = fetchEnvelope(aemetMunicipiosEnvelopeUrl(key), 30_000)
+      municipiosInflight = fetchEnvelope(
+        aemetMunicipiosEnvelopeUrl(key),
+        30_000,
+      )
         .then((raw) => {
           const municipios = normalizeAemetMunicipiosSnapshot(raw);
           municipiosMem = { at: Date.now(), municipios };
@@ -492,7 +519,10 @@ export function aemetForecastProxy() {
   }
 
   async function fetchForecastFor(key, municipioId) {
-    const raw = await fetchEnvelope(aemetMunicipioForecastEnvelopeUrl(key, municipioId), 20_000);
+    const raw = await fetchEnvelope(
+      aemetMunicipioForecastEnvelopeUrl(key, municipioId),
+      20_000,
+    );
     const forecast = normalizeAemetHourlyForecast(raw);
     if (!forecast) throw new Error('malformed municipio forecast response');
     return forecast;
@@ -523,7 +553,8 @@ export function aemetForecastProxy() {
       }
       return { forecast, fetchedAt: at, stale: false };
     } catch (err) {
-      if (cached) return { forecast: cached.forecast, fetchedAt: cached.at, stale: true }; // upstream down — stale beats empty
+      if (cached)
+        return { forecast: cached.forecast, fetchedAt: cached.at, stale: true }; // upstream down — stale beats empty
       throw err;
     }
   }
@@ -545,7 +576,9 @@ export function aemetForecastProxy() {
         if (url.pathname === '/status') {
           sendJson(200, {
             hasKey: Boolean(key),
-            municipiosLoaded: municipiosMem ? municipiosMem.municipios.length : 0,
+            municipiosLoaded: municipiosMem
+              ? municipiosMem.municipios.length
+              : 0,
             municipiosLastFetch: municipiosMem ? municipiosMem.at : null,
             cachedForecastCount: forecastByMunicipio.size,
           });
@@ -559,7 +592,12 @@ export function aemetForecastProxy() {
 
         const lat = Number(url.searchParams.get('lat'));
         const lon = Number(url.searchParams.get('lon'));
-        if (!Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lon) || Math.abs(lon) > 180) {
+        if (
+          !Number.isFinite(lat) ||
+          Math.abs(lat) > 90 ||
+          !Number.isFinite(lon) ||
+          Math.abs(lon) > 180
+        ) {
           sendJson(400, { error: 'bad_request' });
           return;
         }
@@ -567,11 +605,16 @@ export function aemetForecastProxy() {
         const municipios = await ensureMunicipios(key);
         const nearest = findNearestAemetMunicipio(municipios, lat, lon);
         if (!nearest) {
-          sendJson(502, { error: 'aemet municipio lookup failed and no cache available' });
+          sendJson(502, {
+            error: 'aemet municipio lookup failed and no cache available',
+          });
           return;
         }
 
-        const { forecast, fetchedAt, stale } = await ensureForecast(key, nearest.municipio.id);
+        const { forecast, fetchedAt, stale } = await ensureForecast(
+          key,
+          nearest.municipio.id,
+        );
 
         sendJson(200, {
           fetchedAt,
@@ -584,11 +627,16 @@ export function aemetForecastProxy() {
             lon: nearest.municipio.lon,
             distanceKm: nearest.distanceKm,
           },
-          hours: filterUpcomingAemetForecastHours(forecast.hours, madridCivilNow()),
+          hours: filterUpcomingAemetForecastHours(
+            forecast.hours,
+            madridCivilNow(),
+          ),
         });
       } catch (err) {
         console.warn('[aemet-forecast-proxy] error:', err?.message || err);
-        sendJson(502, { error: 'aemet forecast fetch failed and no cache available' });
+        sendJson(502, {
+          error: 'aemet forecast fetch failed and no cache available',
+        });
       }
     });
   }
@@ -651,12 +699,18 @@ export function aemetLightningProxy() {
     if (!envelopeRes.ok) throw new Error(`HTTP ${envelopeRes.status}`);
     const envelope = await envelopeRes.json();
     if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
-      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+      throw new Error(
+        `AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`,
+      );
     }
-    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(20_000) });
+    const dataRes = await fetch(envelope.datos, {
+      signal: AbortSignal.timeout(20_000),
+    });
     if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
     const buffer = Buffer.from(await dataRes.arrayBuffer());
-    const contentType = (dataRes.headers.get('content-type') || 'image/gif').split(';')[0].trim();
+    const contentType = (dataRes.headers.get('content-type') || 'image/gif')
+      .split(';')[0]
+      .trim();
     return { at: Date.now(), buffer, contentType };
   }
 
@@ -692,7 +746,10 @@ export function aemetLightningProxy() {
 
         const entry = mem;
         if (entry && Date.now() - entry.at < TTL_MS) {
-          res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' });
+          res.writeHead(200, {
+            'Content-Type': entry.contentType,
+            'Cache-Control': 'no-store',
+          });
           res.end(entry.buffer);
           return;
         }
@@ -715,13 +772,21 @@ export function aemetLightningProxy() {
         const pending = inflight;
         const fresh = await pending;
         if (fresh) {
-          res.writeHead(200, { 'Content-Type': fresh.contentType, 'Cache-Control': 'no-store' });
+          res.writeHead(200, {
+            'Content-Type': fresh.contentType,
+            'Cache-Control': 'no-store',
+          });
           res.end(fresh.buffer);
         } else if (entry) {
-          res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' }); // upstream down — stale beats empty
+          res.writeHead(200, {
+            'Content-Type': entry.contentType,
+            'Cache-Control': 'no-store',
+          }); // upstream down — stale beats empty
           res.end(entry.buffer);
         } else {
-          sendJson(502, { error: 'aemet lightning fetch failed and no cache available' });
+          sendJson(502, {
+            error: 'aemet lightning fetch failed and no cache available',
+          });
         }
       } catch (err) {
         console.warn('[aemet-lightning-proxy] error:', err?.message || err);
@@ -780,16 +845,24 @@ export function aemetFireRiskProxy() {
 
   /** One envelope+datos fetch. Throws on any failure — the caller decides what to try next. */
   async function fetchOne(envelopeUrl, timeoutMs = 20_000) {
-    const envelopeRes = await fetch(envelopeUrl, { signal: AbortSignal.timeout(timeoutMs) });
+    const envelopeRes = await fetch(envelopeUrl, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
     if (!envelopeRes.ok) throw new Error(`HTTP ${envelopeRes.status}`);
     const envelope = await envelopeRes.json();
     if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
-      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+      throw new Error(
+        `AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`,
+      );
     }
-    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(timeoutMs) });
+    const dataRes = await fetch(envelope.datos, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
     if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
     const buffer = Buffer.from(await dataRes.arrayBuffer());
-    const contentType = (dataRes.headers.get('content-type') || 'image/png').split(';')[0].trim();
+    const contentType = (dataRes.headers.get('content-type') || 'image/png')
+      .split(';')[0]
+      .trim();
     return { buffer, contentType };
   }
 
@@ -801,14 +874,20 @@ export function aemetFireRiskProxy() {
    */
   async function fetchUpstream(key) {
     try {
-      const result = await fetchOne(aemetFireRiskEstimadoEnvelopeUrl(key, AREA));
+      const result = await fetchOne(
+        aemetFireRiskEstimadoEnvelopeUrl(key, AREA),
+      );
       return { at: Date.now(), source: 'estimado', ...result };
     } catch (estimadoErr) {
       try {
-        const result = await fetchOne(aemetFireRiskPrevistoEnvelopeUrl(key, AREA, '1'));
+        const result = await fetchOne(
+          aemetFireRiskPrevistoEnvelopeUrl(key, AREA, '1'),
+        );
         return { at: Date.now(), source: 'previsto-1', ...result };
       } catch (previstoErr) {
-        throw new Error(`estimado: ${estimadoErr?.message || estimadoErr}; previsto-1: ${previstoErr?.message || previstoErr}`);
+        throw new Error(
+          `estimado: ${estimadoErr?.message || estimadoErr}; previsto-1: ${previstoErr?.message || previstoErr}`,
+        );
       }
     }
   }
@@ -846,7 +925,10 @@ export function aemetFireRiskProxy() {
 
         const entry = mem;
         if (entry && Date.now() - entry.at < TTL_MS) {
-          res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' });
+          res.writeHead(200, {
+            'Content-Type': entry.contentType,
+            'Cache-Control': 'no-store',
+          });
           res.end(entry.buffer);
           return;
         }
@@ -869,13 +951,21 @@ export function aemetFireRiskProxy() {
         const pending = inflight;
         const fresh = await pending;
         if (fresh) {
-          res.writeHead(200, { 'Content-Type': fresh.contentType, 'Cache-Control': 'no-store' });
+          res.writeHead(200, {
+            'Content-Type': fresh.contentType,
+            'Cache-Control': 'no-store',
+          });
           res.end(fresh.buffer);
         } else if (entry) {
-          res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' }); // upstream down — stale beats empty
+          res.writeHead(200, {
+            'Content-Type': entry.contentType,
+            'Cache-Control': 'no-store',
+          }); // upstream down — stale beats empty
           res.end(entry.buffer);
         } else {
-          sendJson(502, { error: 'aemet fire-risk fetch failed and no cache available' });
+          sendJson(502, {
+            error: 'aemet fire-risk fetch failed and no cache available',
+          });
         }
       } catch (err) {
         console.warn('[aemet-fire-risk-proxy] error:', err?.message || err);
@@ -939,9 +1029,13 @@ export function aemetUvIndexProxy() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const envelope = await res.json();
     if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
-      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+      throw new Error(
+        `AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`,
+      );
     }
-    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(timeoutMs) });
+    const dataRes = await fetch(envelope.datos, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
     if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
     // Same ISO-8859-15-despite-being-JSON gotcha as stations/forecast —
     // decode as latin1, never trust res.json() to guess right.
@@ -950,9 +1044,13 @@ export function aemetUvIndexProxy() {
   }
 
   async function ensureMunicipios(key) {
-    if (municipiosMem && Date.now() - municipiosMem.at < MUNICIPIOS_TTL_MS) return municipiosMem.municipios;
+    if (municipiosMem && Date.now() - municipiosMem.at < MUNICIPIOS_TTL_MS)
+      return municipiosMem.municipios;
     if (!municipiosInflight) {
-      municipiosInflight = fetchEnvelope(aemetMunicipiosEnvelopeUrl(key), 30_000)
+      municipiosInflight = fetchEnvelope(
+        aemetMunicipiosEnvelopeUrl(key),
+        30_000,
+      )
         .then((raw) => {
           const municipios = normalizeAemetMunicipiosSnapshot(raw);
           municipiosMem = { at: Date.now(), municipios };
@@ -982,7 +1080,12 @@ export function aemetUvIndexProxy() {
       if (!municipio) continue; // no coordinates to plot this one — drop it, don't fabricate a position
       cities.push({ ...city, lat: municipio.lat, lon: municipio.lon });
     }
-    return { at: Date.now(), elaborated: snapshot.elaborated, validAt: snapshot.validAt, cities };
+    return {
+      at: Date.now(),
+      elaborated: snapshot.elaborated,
+      validAt: snapshot.validAt,
+      cities,
+    };
   }
 
   function installMiddleware(server) {
@@ -1018,8 +1121,13 @@ export function aemetUvIndexProxy() {
         const entry = mem;
         if (entry && Date.now() - entry.at < UV_TTL_MS) {
           sendJson(200, {
-            fetchedAt: entry.at, stale: false, ttlMs: UV_TTL_MS,
-            count: entry.cities.length, elaborated: entry.elaborated, validAt: entry.validAt, cities: entry.cities,
+            fetchedAt: entry.at,
+            stale: false,
+            ttlMs: UV_TTL_MS,
+            count: entry.cities.length,
+            elaborated: entry.elaborated,
+            validAt: entry.validAt,
+            cities: entry.cities,
           });
           return;
         }
@@ -1044,11 +1152,18 @@ export function aemetUvIndexProxy() {
         const payload = fresh || entry;
         if (payload) {
           sendJson(200, {
-            fetchedAt: payload.at, stale: !fresh, ttlMs: UV_TTL_MS,
-            count: payload.cities.length, elaborated: payload.elaborated, validAt: payload.validAt, cities: payload.cities,
+            fetchedAt: payload.at,
+            stale: !fresh,
+            ttlMs: UV_TTL_MS,
+            count: payload.cities.length,
+            elaborated: payload.elaborated,
+            validAt: payload.validAt,
+            cities: payload.cities,
           });
         } else {
-          sendJson(502, { error: 'aemet uv-index fetch failed and no cache available' });
+          sendJson(502, {
+            error: 'aemet uv-index fetch failed and no cache available',
+          });
         }
       } catch (err) {
         console.warn('[aemet-uv-index-proxy] error:', err?.message || err);
@@ -1111,12 +1226,18 @@ export function aemetSeaSurfaceTempProxy() {
     if (!envelopeRes.ok) throw new Error(`HTTP ${envelopeRes.status}`);
     const envelope = await envelopeRes.json();
     if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
-      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+      throw new Error(
+        `AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`,
+      );
     }
-    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(20_000) });
+    const dataRes = await fetch(envelope.datos, {
+      signal: AbortSignal.timeout(20_000),
+    });
     if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
     const buffer = Buffer.from(await dataRes.arrayBuffer());
-    const contentType = (dataRes.headers.get('content-type') || 'image/gif').split(';')[0].trim();
+    const contentType = (dataRes.headers.get('content-type') || 'image/gif')
+      .split(';')[0]
+      .trim();
     return { at: Date.now(), buffer, contentType };
   }
 
@@ -1152,7 +1273,10 @@ export function aemetSeaSurfaceTempProxy() {
 
         const entry = mem;
         if (entry && Date.now() - entry.at < TTL_MS) {
-          res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' });
+          res.writeHead(200, {
+            'Content-Type': entry.contentType,
+            'Cache-Control': 'no-store',
+          });
           res.end(entry.buffer);
           return;
         }
@@ -1175,16 +1299,27 @@ export function aemetSeaSurfaceTempProxy() {
         const pending = inflight;
         const fresh = await pending;
         if (fresh) {
-          res.writeHead(200, { 'Content-Type': fresh.contentType, 'Cache-Control': 'no-store' });
+          res.writeHead(200, {
+            'Content-Type': fresh.contentType,
+            'Cache-Control': 'no-store',
+          });
           res.end(fresh.buffer);
         } else if (entry) {
-          res.writeHead(200, { 'Content-Type': entry.contentType, 'Cache-Control': 'no-store' }); // upstream down — stale beats empty
+          res.writeHead(200, {
+            'Content-Type': entry.contentType,
+            'Cache-Control': 'no-store',
+          }); // upstream down — stale beats empty
           res.end(entry.buffer);
         } else {
-          sendJson(502, { error: 'aemet sea-surface-temp fetch failed and no cache available' });
+          sendJson(502, {
+            error: 'aemet sea-surface-temp fetch failed and no cache available',
+          });
         }
       } catch (err) {
-        console.warn('[aemet-sea-surface-temp-proxy] error:', err?.message || err);
+        console.warn(
+          '[aemet-sea-surface-temp-proxy] error:',
+          err?.message || err,
+        );
         sendJson(500, { error: 'aemet sea-surface-temp proxy error' });
       }
     });
@@ -1271,9 +1406,12 @@ export function aemetBeachesProxy({
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   async function fetchNomenclator() {
-    if (nomenclatorMem && Date.now() - nomenclatorMem.at < NOMENCLATOR_TTL_MS) return nomenclatorMem.beaches;
+    if (nomenclatorMem && Date.now() - nomenclatorMem.at < NOMENCLATOR_TTL_MS)
+      return nomenclatorMem.beaches;
     if (!nomenclatorInflight) {
-      nomenclatorInflight = fetch(AEMET_BEACHES_NOMENCLATOR_URL, { signal: AbortSignal.timeout(20_000) })
+      nomenclatorInflight = fetch(AEMET_BEACHES_NOMENCLATOR_URL, {
+        signal: AbortSignal.timeout(20_000),
+      })
         .then(async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const beaches = normalizeAemetBeachesNomenclator(await res.json());
@@ -1297,16 +1435,26 @@ export function aemetBeachesProxy({
    *   sweep can cool down specifically for that case.
    */
   async function fetchOneBeachForecast(key, beachId) {
-    const envelopeRes = await fetch(aemetBeachForecastEnvelopeUrl(key, beachId), { signal: AbortSignal.timeout(20_000) });
-    const remainingHeader = envelopeRes.headers.get('remaining-request-endpoint');
+    const envelopeRes = await fetch(
+      aemetBeachForecastEnvelopeUrl(key, beachId),
+      { signal: AbortSignal.timeout(20_000) },
+    );
+    const remainingHeader = envelopeRes.headers.get(
+      'remaining-request-endpoint',
+    );
     const remaining = remainingHeader === null ? null : Number(remainingHeader);
-    if (envelopeRes.status === 429) return { record: null, rateLimited: true, remaining };
+    if (envelopeRes.status === 429)
+      return { record: null, rateLimited: true, remaining };
     if (!envelopeRes.ok) throw new Error(`HTTP ${envelopeRes.status}`);
     const envelope = await envelopeRes.json();
     if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
-      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+      throw new Error(
+        `AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`,
+      );
     }
-    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(20_000) });
+    const dataRes = await fetch(envelope.datos, {
+      signal: AbortSignal.timeout(20_000),
+    });
     if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
     // Same ISO-8859-15-despite-being-JSON gotcha as every other AEMET datos response.
     const buffer = Buffer.from(await dataRes.arrayBuffer());
@@ -1322,22 +1470,39 @@ export function aemetBeachesProxy({
       const nomenclator = await fetchNomenclator();
       for (const beach of nomenclator) {
         try {
-          const { record, rateLimited, remaining } = await fetchOneBeachForecast(key, beach.id);
+          const { record, rateLimited, remaining } =
+            await fetchOneBeachForecast(key, beach.id);
           if (rateLimited) {
-            console.warn(`[aemet-beaches-proxy] rate limited on beach ${beach.id} — cooling down ${throttleCooldownMs}ms`);
+            console.warn(
+              `[aemet-beaches-proxy] rate limited on beach ${beach.id} — cooling down ${throttleCooldownMs}ms`,
+            );
             await sleep(throttleCooldownMs);
             continue; // revisited on the next full sweep rather than retried immediately
           }
-          beachById.set(beach.id, { name: beach.name, lat: beach.lat, lon: beach.lon, forecast: record, updatedAt: Date.now() });
+          beachById.set(beach.id, {
+            name: beach.name,
+            lat: beach.lat,
+            lon: beach.lon,
+            forecast: record,
+            updatedAt: Date.now(),
+          });
           anySuccess = true;
-          await sleep(Number.isFinite(remaining) && remaining <= THROTTLE_FLOOR ? throttleCooldownMs : paceMs);
+          await sleep(
+            Number.isFinite(remaining) && remaining <= THROTTLE_FLOOR
+              ? throttleCooldownMs
+              : paceMs,
+          );
         } catch (err) {
-          console.warn(`[aemet-beaches-proxy] beach ${beach.id} refresh failed (${err?.message || err}) — keeping last-known reading if any`);
+          console.warn(
+            `[aemet-beaches-proxy] beach ${beach.id} refresh failed (${err?.message || err}) — keeping last-known reading if any`,
+          );
           await sleep(paceMs);
         }
       }
     } catch (err) {
-      console.warn(`[aemet-beaches-proxy] sweep failed (${err?.message || err}) — serving cache if any`);
+      console.warn(
+        `[aemet-beaches-proxy] sweep failed (${err?.message || err}) — serving cache if any`,
+      );
     } finally {
       // Advances even when the nomenclator itself is unreachable, so a
       // sustained outage is throttled to one attempt per TTL window rather
@@ -1365,57 +1530,58 @@ export function aemetBeachesProxy({
 
   function installMiddleware(server) {
     server.middlewares.use('/api/aemet/beaches', async (req, res) => {
-        const sendJson = (status, obj) => {
-          if (res.headersSent) return;
-          res.writeHead(status, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'no-store',
-          });
-          res.end(JSON.stringify(obj));
-        };
-        try {
-          const subPath = String(req.url || '').split('?')[0];
-          const key = apiKey();
-          const stale = !lastSuccessAt || Date.now() - lastSuccessAt >= FORECAST_TTL_MS;
+      const sendJson = (status, obj) => {
+        if (res.headersSent) return;
+        res.writeHead(status, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        });
+        res.end(JSON.stringify(obj));
+      };
+      try {
+        const subPath = String(req.url || '').split('?')[0];
+        const key = apiKey();
+        const stale =
+          !lastSuccessAt || Date.now() - lastSuccessAt >= FORECAST_TTL_MS;
 
-          if (subPath === '/status') {
-            sendJson(200, {
-              hasKey: Boolean(key),
-              lastFetch: lastSuccessAt,
-              count: beachById.size,
-              stale,
-              ttlMs: FORECAST_TTL_MS,
-              sweeping,
-            });
-            return;
-          }
-
-          if (!key) {
-            sendJson(503, { error: 'no_key' });
-            return;
-          }
-
-          ensureSweepRunning(key);
-          // Always responds with whatever is cached right now — a cold
-          // start legitimately means an empty array, filled in by later
-          // polls as the background sweep progresses, never a blocked
-          // request or a fabricated reading. `sweeping` lets the frontend
-          // tell "still building the first sweep" apart from "genuinely
-          // stuck on stale data" — both report `stale: true`, but only the
-          // second is actually a problem worth surfacing to the user.
+        if (subPath === '/status') {
           sendJson(200, {
-            fetchedAt: lastSuccessAt,
-            stale,
-            sweeping,
-            ttlMs: FORECAST_TTL_MS,
+            hasKey: Boolean(key),
+            lastFetch: lastSuccessAt,
             count: beachById.size,
-            beaches: snapshot(),
+            stale,
+            ttlMs: FORECAST_TTL_MS,
+            sweeping,
           });
-        } catch (err) {
-          console.warn('[aemet-beaches-proxy] error:', err?.message || err);
-          sendJson(500, { error: 'aemet beaches proxy error' });
+          return;
         }
-      });
+
+        if (!key) {
+          sendJson(503, { error: 'no_key' });
+          return;
+        }
+
+        ensureSweepRunning(key);
+        // Always responds with whatever is cached right now — a cold
+        // start legitimately means an empty array, filled in by later
+        // polls as the background sweep progresses, never a blocked
+        // request or a fabricated reading. `sweeping` lets the frontend
+        // tell "still building the first sweep" apart from "genuinely
+        // stuck on stale data" — both report `stale: true`, but only the
+        // second is actually a problem worth surfacing to the user.
+        sendJson(200, {
+          fetchedAt: lastSuccessAt,
+          stale,
+          sweeping,
+          ttlMs: FORECAST_TTL_MS,
+          count: beachById.size,
+          beaches: snapshot(),
+        });
+      } catch (err) {
+        console.warn('[aemet-beaches-proxy] error:', err?.message || err);
+        sendJson(500, { error: 'aemet beaches proxy error' });
+      }
+    });
   }
   return {
     name: 'aemet-beaches-proxy',
@@ -1462,9 +1628,13 @@ export function aemetEnvironmentalProxy() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const envelope = await res.json();
     if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
-      throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+      throw new Error(
+        `AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`,
+      );
     }
-    const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(timeoutMs) });
+    const dataRes = await fetch(envelope.datos, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
     if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
     // Every other AEMET feed lies and declares ISO-8859-15 while genuinely
     // being ISO-8859-15 (hence the codebase's usual latin1 decode). Ozone
@@ -1474,19 +1644,29 @@ export function aemetEnvironmentalProxy() {
   }
 
   async function ensureStations(key) {
-    if (stationsMem && Date.now() - stationsMem.at < STATIONS_TTL_MS) return stationsMem.stations;
+    if (stationsMem && Date.now() - stationsMem.at < STATIONS_TTL_MS)
+      return stationsMem.stations;
     if (!stationsInflight) {
       stationsInflight = (async () => {
-        const envelopeRes = await fetch(aemetStationsEnvelopeUrl(key), { signal: AbortSignal.timeout(30_000) });
+        const envelopeRes = await fetch(aemetStationsEnvelopeUrl(key), {
+          signal: AbortSignal.timeout(30_000),
+        });
         if (!envelopeRes.ok) throw new Error(`HTTP ${envelopeRes.status}`);
         const envelope = await envelopeRes.json();
         if (envelope?.estado !== 200 || typeof envelope?.datos !== 'string') {
-          throw new Error(`AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`);
+          throw new Error(
+            `AEMET estado ${envelope?.estado ?? 'unknown'}: ${envelope?.descripcion || 'no datos url'}`,
+          );
         }
-        const dataRes = await fetch(envelope.datos, { signal: AbortSignal.timeout(30_000) });
-        if (!dataRes.ok) throw new Error(`HTTP ${dataRes.status} fetching datos`);
+        const dataRes = await fetch(envelope.datos, {
+          signal: AbortSignal.timeout(30_000),
+        });
+        if (!dataRes.ok)
+          throw new Error(`HTTP ${dataRes.status} fetching datos`);
         const buffer = Buffer.from(await dataRes.arrayBuffer());
-        const stations = normalizeAemetStationsSnapshot(JSON.parse(buffer.toString('latin1')));
+        const stations = normalizeAemetStationsSnapshot(
+          JSON.parse(buffer.toString('latin1')),
+        );
         stationsMem = { at: Date.now(), stations };
         return stations;
       })().finally(() => {
@@ -1511,10 +1691,16 @@ export function aemetEnvironmentalProxy() {
       const station = stationById.get(row.indicativo);
       if (!station) continue; // no coordinates to plot this one — drop it, don't fabricate a position
       rowByIndicativo.set(row.indicativo, {
-        indicativo: row.indicativo, name: row.name, lat: station.lat, lon: station.lon,
+        indicativo: row.indicativo,
+        name: row.name,
+        lat: station.lat,
+        lon: station.lon,
         ozoneDobson: row.ozoneDobson,
-        globalRadiationSum: null, diffuseRadiationSum: null, directRadiationSum: null,
-        uvErythemalSum: null, infraredSum: null,
+        globalRadiationSum: null,
+        diffuseRadiationSum: null,
+        directRadiationSum: null,
+        uvErythemalSum: null,
+        infraredSum: null,
       });
     }
     for (const row of normalizeAemetRadiationSnapshot(radiationCsv)) {
@@ -1529,10 +1715,15 @@ export function aemetEnvironmentalProxy() {
         existing.infraredSum = row.infraredSum;
       } else {
         rowByIndicativo.set(row.indicativo, {
-          indicativo: row.indicativo, name: row.name, lat: station.lat, lon: station.lon,
+          indicativo: row.indicativo,
+          name: row.name,
+          lat: station.lat,
+          lon: station.lon,
           ozoneDobson: null,
-          globalRadiationSum: row.globalRadiationSum, diffuseRadiationSum: row.diffuseRadiationSum,
-          directRadiationSum: row.directRadiationSum, uvErythemalSum: row.uvErythemalSum,
+          globalRadiationSum: row.globalRadiationSum,
+          diffuseRadiationSum: row.diffuseRadiationSum,
+          directRadiationSum: row.directRadiationSum,
+          uvErythemalSum: row.uvErythemalSum,
           infraredSum: row.infraredSum,
         });
       }
@@ -1572,7 +1763,13 @@ export function aemetEnvironmentalProxy() {
 
         const entry = mem;
         if (entry && Date.now() - entry.at < ENV_TTL_MS) {
-          sendJson(200, { fetchedAt: entry.at, stale: false, ttlMs: ENV_TTL_MS, count: entry.rows.length, stations: entry.rows });
+          sendJson(200, {
+            fetchedAt: entry.at,
+            stale: false,
+            ttlMs: ENV_TTL_MS,
+            count: entry.rows.length,
+            stations: entry.rows,
+          });
           return;
         }
         if (!inflight) {
@@ -1582,7 +1779,9 @@ export function aemetEnvironmentalProxy() {
               return fresh;
             })
             .catch((err) => {
-              console.warn(`[aemet-environmental-proxy] refresh failed (${err?.message || err}) — serving cache if any`);
+              console.warn(
+                `[aemet-environmental-proxy] refresh failed (${err?.message || err}) — serving cache if any`,
+              );
               return null;
             })
             .finally(() => {
@@ -1593,9 +1792,17 @@ export function aemetEnvironmentalProxy() {
         const fresh = await pending;
         const payload = fresh || entry;
         if (payload) {
-          sendJson(200, { fetchedAt: payload.at, stale: !fresh, ttlMs: ENV_TTL_MS, count: payload.rows.length, stations: payload.rows });
+          sendJson(200, {
+            fetchedAt: payload.at,
+            stale: !fresh,
+            ttlMs: ENV_TTL_MS,
+            count: payload.rows.length,
+            stations: payload.rows,
+          });
         } else {
-          sendJson(502, { error: 'aemet environmental fetch failed and no cache available' });
+          sendJson(502, {
+            error: 'aemet environmental fetch failed and no cache available',
+          });
         }
       } catch (err) {
         console.warn('[aemet-environmental-proxy] error:', err?.message || err);

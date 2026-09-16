@@ -1,5 +1,9 @@
 import * as Cesium from 'cesium';
-import { registerPickOwner, resolvePickId, unregisterPickOwner } from './pickRegistry.js';
+import {
+  registerPickOwner,
+  resolvePickId,
+  unregisterPickOwner,
+} from './pickRegistry.js';
 import {
   clearOverlaySource,
   setOverlayEntries,
@@ -22,7 +26,8 @@ import {
  * belonging to a zone rather than swapping one point for a bigger one.
  */
 
-export const AEMET_WARNINGS_SELECTED_OVERLAY_SOURCE_ID = 'aemet-warnings-selected';
+export const AEMET_WARNINGS_SELECTED_OVERLAY_SOURCE_ID =
+  'aemet-warnings-selected';
 export const AEMET_WARNINGS_SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
   cohortLimit: 1,
   collisionCapacity: 0,
@@ -68,7 +73,11 @@ function fmtTime(ms) {
   return Number.isFinite(ms) ? new Date(ms).toLocaleString() : null;
 }
 
-const LEVEL_LABEL = Object.freeze({ amarillo: 'Amarillo', naranja: 'Naranja', rojo: 'Rojo' });
+const LEVEL_LABEL = Object.freeze({
+  amarillo: 'Amarillo',
+  naranja: 'Naranja',
+  rojo: 'Rojo',
+});
 
 /**
  * One compact line per phenomenon for the click-to-inspect card: level,
@@ -81,10 +90,13 @@ const LEVEL_LABEL = Object.freeze({ amarillo: 'Amarillo', naranja: 'Naranja', ro
 export function buildAemetWarningPhenomenonLine(phenomenon) {
   const level = LEVEL_LABEL[phenomenon?.level] || phenomenon?.level || '—';
   const name = phenomenon?.name || phenomenon?.event || 'Aviso';
-  const window = phenomenon?.inEffect === false
-    ? `from ${fmtTime(phenomenon?.onsetMs) ?? '?'}`
-    : `until ${fmtTime(phenomenon?.expiresMs) ?? '?'}`;
-  const probability = phenomenon?.probability ? ` (${phenomenon.probability})` : '';
+  const window =
+    phenomenon?.inEffect === false
+      ? `from ${fmtTime(phenomenon?.onsetMs) ?? '?'}`
+      : `until ${fmtTime(phenomenon?.expiresMs) ?? '?'}`;
+  const probability = phenomenon?.probability
+    ? ` (${phenomenon.probability})`
+    : '';
   return `${level} ${name}${probability} — ${window}`;
 }
 
@@ -116,7 +128,11 @@ export function buildAemetWarningSelectionCopy(zone) {
  * @param {object} zone
  * @returns {object|null}
  */
-export function createAemetWarningSelectedOverlayEntry(geocode, position, zone) {
+export function createAemetWarningSelectedOverlayEntry(
+  geocode,
+  position,
+  zone,
+) {
   if (!geocode || !position) return null;
   const { title, details } = buildAemetWarningSelectionCopy(zone);
   return {
@@ -174,10 +190,23 @@ export function normalizeAemetWarningsPayload(payload) {
   if (!Array.isArray(payload?.zones)) return null;
   const rows = [];
   for (const zone of payload.zones) {
-    if (!zone?.geocode || !Array.isArray(zone?.polygons) || !zone.polygons.length) continue;
+    if (
+      !zone?.geocode ||
+      !Array.isArray(zone?.polygons) ||
+      !zone.polygons.length
+    )
+      continue;
     const validRings = zone.polygons.filter(
-      (ring) => Array.isArray(ring) && ring.length >= 3
-        && ring.every(([lat, lon]) => Number.isFinite(lat) && Math.abs(lat) <= 90 && Number.isFinite(lon) && Math.abs(lon) <= 180),
+      (ring) =>
+        Array.isArray(ring) &&
+        ring.length >= 3 &&
+        ring.every(
+          ([lat, lon]) =>
+            Number.isFinite(lat) &&
+            Math.abs(lat) <= 90 &&
+            Number.isFinite(lon) &&
+            Math.abs(lon) <= 180,
+        ),
     );
     if (!validRings.length) continue;
     rows.push({ ...zone, polygons: validRings });
@@ -185,7 +214,9 @@ export function normalizeAemetWarningsPayload(payload) {
   return rows;
 }
 
-export function createAemetWarningsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = {}) {
+export function createAemetWarningsLayer({
+  overlayHost = DEFAULT_OVERLAY_HOST,
+} = {}) {
   let _viewer = null;
   let _dataSource = null;
   let _count = 0;
@@ -212,7 +243,9 @@ export function createAemetWarningsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       entity.polygon.material = new Cesium.ColorMaterialProperty(
         levelFill(zone.level, highlighted ? SELECTED_FILL_ALPHA : FILL_ALPHA),
       );
-      entity.polygon.outlineColor = highlighted ? OUTLINE_COLOR_SELECTED : OUTLINE_COLOR;
+      entity.polygon.outlineColor = highlighted
+        ? OUTLINE_COLOR_SELECTED
+        : OUTLINE_COLOR;
       entity.polygon.outlineWidth = highlighted ? 3 : 1;
     }
   }
@@ -231,9 +264,15 @@ export function createAemetWarningsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
     _paintZone(geocode, true);
     const anchor = aemetWarningZoneAnchor(zone.polygons);
     const position = anchor
-      ? Cesium.Cartesian3.fromDegrees(anchor.lon, anchor.lat, SELECTION_ANCHOR_HEIGHT_M)
+      ? Cesium.Cartesian3.fromDegrees(
+          anchor.lon,
+          anchor.lat,
+          SELECTION_ANCHOR_HEIGHT_M,
+        )
       : null;
-    const entry = position ? createAemetWarningSelectedOverlayEntry(geocode, position, zone) : null;
+    const entry = position
+      ? createAemetWarningSelectedOverlayEntry(geocode, position, zone)
+      : null;
     if (entry) {
       overlayHost.setEntries(
         AEMET_WARNINGS_SELECTED_OVERLAY_SOURCE_ID,
@@ -306,7 +345,9 @@ export function createAemetWarningsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       if (_dataSource) _dataSource.show = true;
       overlayHost.setVisible(AEMET_WARNINGS_SELECTED_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer);
-      registerPickOwner('aemet-warnings', (pickedId) => String(pickedId).startsWith('aemet-warning:'));
+      registerPickOwner('aemet-warnings', (pickedId) =>
+        String(pickedId).startsWith('aemet-warning:'),
+      );
     },
 
     disable(viewer) {
@@ -347,23 +388,35 @@ export function createAemetWarningsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
           zone.polygons.forEach((ring, ringIndex) => {
             const id = `aemet-warning:${zone.geocode}:${ringIndex}`;
             ids.push(id);
-            nextEntities.push(new Cesium.Entity({
-              id,
-              name: zone.name || zone.geocode,
-              // No height/perPositionHeight/extrudedHeight: Cesium drapes an
-              // un-heighted polygon on whatever terrain is loaded
-              // (GroundPrimitive), the polygon equivalent of a point's
-              // ground clamp — deliberately checked, not assumed, given
-              // aemetStations.js's own history with this exact class of bug.
-              polygon: {
-                hierarchy: new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(ringToLonLatFlat(ring))),
-                material: new Cesium.ColorMaterialProperty(levelFill(zone.level, FILL_ALPHA)),
-                outline: true,
-                outlineColor: OUTLINE_COLOR,
-                outlineWidth: 1,
-              },
-              properties: { geocode: zone.geocode, name: zone.name, level: zone.level, levelRank: zone.levelRank, phenomena: zone.phenomena },
-            }));
+            nextEntities.push(
+              new Cesium.Entity({
+                id,
+                name: zone.name || zone.geocode,
+                // No height/perPositionHeight/extrudedHeight: Cesium drapes an
+                // un-heighted polygon on whatever terrain is loaded
+                // (GroundPrimitive), the polygon equivalent of a point's
+                // ground clamp — deliberately checked, not assumed, given
+                // aemetStations.js's own history with this exact class of bug.
+                polygon: {
+                  hierarchy: new Cesium.PolygonHierarchy(
+                    Cesium.Cartesian3.fromDegreesArray(ringToLonLatFlat(ring)),
+                  ),
+                  material: new Cesium.ColorMaterialProperty(
+                    levelFill(zone.level, FILL_ALPHA),
+                  ),
+                  outline: true,
+                  outlineColor: OUTLINE_COLOR,
+                  outlineWidth: 1,
+                },
+                properties: {
+                  geocode: zone.geocode,
+                  name: zone.name,
+                  level: zone.level,
+                  levelRank: zone.levelRank,
+                  phenomena: zone.phenomena,
+                },
+              }),
+            );
           });
           nextEntityIdsByZone.set(zone.geocode, ids);
         }
@@ -383,7 +436,9 @@ export function createAemetWarningsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
 
         _count = zones.length;
         _lastUpdate = Date.now();
-        _lastError = payload.stale ? 'Serving stale AEMET data (upstream unavailable)' : null;
+        _lastError = payload.stale
+          ? 'Serving stale AEMET data (upstream unavailable)'
+          : null;
         console.log(`[Data:AemetWarnings] Updated: ${_count} active zones`);
         return true;
       } catch (e) {
@@ -418,7 +473,9 @@ export function createAemetWarningsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
      */
     getAnalystRecords(maxCount = 2000) {
       if (!_dataSource || !_dataSource.show) return [];
-      const limit = Number.isFinite(maxCount) ? Math.max(1, Math.floor(maxCount)) : 2000;
+      const limit = Number.isFinite(maxCount)
+        ? Math.max(1, Math.floor(maxCount))
+        : 2000;
       const now = Cesium.JulianDate.now();
       const result = [];
       const seen = new Set();

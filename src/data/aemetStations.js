@@ -1,5 +1,9 @@
 import * as Cesium from 'cesium';
-import { registerPickOwner, resolvePickId, unregisterPickOwner } from './pickRegistry.js';
+import {
+  registerPickOwner,
+  resolvePickId,
+  unregisterPickOwner,
+} from './pickRegistry.js';
 import {
   clearOverlaySource,
   setOverlayEntries,
@@ -26,7 +30,8 @@ import {
  * both already use, not a DOM sidebar or the disabled Cesium InfoBox.
  */
 
-export const AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID = 'aemet-stations-selected';
+export const AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID =
+  'aemet-stations-selected';
 export const AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
   cohortLimit: 1,
   collisionCapacity: 0,
@@ -106,7 +111,8 @@ export function temperatureColorRgb(temperatureC) {
   if (!Number.isFinite(temperatureC)) return null;
   const stops = TEMPERATURE_COLOR_STOPS;
   if (temperatureC <= stops[0].c) return stops[0].rgb;
-  if (temperatureC >= stops[stops.length - 1].c) return stops[stops.length - 1].rgb;
+  if (temperatureC >= stops[stops.length - 1].c)
+    return stops[stops.length - 1].rgb;
   for (let i = 0; i < stops.length - 1; i++) {
     const a = stops[i];
     const b = stops[i + 1];
@@ -128,7 +134,10 @@ function colorFromRgb([r, g, b], alpha = POINT_ALPHA) {
 }
 
 function temperatureColor(temperatureC, alpha = POINT_ALPHA) {
-  return colorFromRgb(temperatureColorRgb(temperatureC) ?? COLOR_UNKNOWN_RGB, alpha);
+  return colorFromRgb(
+    temperatureColorRgb(temperatureC) ?? COLOR_UNKNOWN_RGB,
+    alpha,
+  );
 }
 
 function fmt(value, unit, digits = 0) {
@@ -145,25 +154,31 @@ export function buildAemetStationDescription(station) {
   const observed = Number.isFinite(station?.observedAtMs)
     ? new Date(station.observedAtMs).toLocaleString()
     : 'unknown';
-  const hasRange = Number.isFinite(station?.temperatureMinC) && Number.isFinite(station?.temperatureMaxC);
+  const hasRange =
+    Number.isFinite(station?.temperatureMinC) &&
+    Number.isFinite(station?.temperatureMaxC);
   return (
-    `<table class="cesium-infoBox-defaultTable">`
-    + `<tbody>`
-    + `<tr><th>Station</th><td>${station?.id ?? '—'}</td></tr>`
-    + `<tr><th>Temperature</th><td>${fmt(station?.temperatureC, '°C', 1)}`
-    + `${hasRange ? ` (${station.temperatureMinC.toFixed(1)}–${station.temperatureMaxC.toFixed(1)}°C)` : ''}</td></tr>`
-    + `<tr><th>Dew point</th><td>${fmt(station?.dewPointC, '°C', 1)}</td></tr>`
-    + `<tr><th>Humidity</th><td>${fmt(station?.humidityPct, '%')}</td></tr>`
-    + `<tr><th>Pressure</th><td>${fmt(station?.pressureHpa, ' hPa', 1)}</td></tr>`
-    + `<tr><th>Sea-level pressure</th><td>${fmt(station?.pressureSeaLevelHpa, ' hPa', 1)}</td></tr>`
-    + `<tr><th>Wind</th><td>${fmt(station?.windSpeedMs, ' m/s', 1)}${atDeg(station?.windDirectionDeg)}`
-    + `${Number.isFinite(station?.windSpeedStdDevMs) || Number.isFinite(station?.windDirectionStdDevDeg)
-      ? ` (σ ${fmt(station?.windSpeedStdDevMs, ' m/s', 1)}${atDeg(station?.windDirectionStdDevDeg)})` : ''}</td></tr>`
-    + `<tr><th>Gust</th><td>${fmt(station?.windGustMs, ' m/s', 1)}${atDeg(station?.windGustDirectionDeg)}</td></tr>`
-    + `<tr><th>Precipitation</th><td>${fmt(station?.precipitationMm, ' mm', 1)}</td></tr>`
-    + `<tr><th>Altitude</th><td>${fmt(station?.altitudeM, ' m')}</td></tr>`
-    + `<tr><th>Observed</th><td>${observed}</td></tr>`
-    + `</tbody></table>`
+    `<table class="cesium-infoBox-defaultTable">` +
+    `<tbody>` +
+    `<tr><th>Station</th><td>${station?.id ?? '—'}</td></tr>` +
+    `<tr><th>Temperature</th><td>${fmt(station?.temperatureC, '°C', 1)}` +
+    `${hasRange ? ` (${station.temperatureMinC.toFixed(1)}–${station.temperatureMaxC.toFixed(1)}°C)` : ''}</td></tr>` +
+    `<tr><th>Dew point</th><td>${fmt(station?.dewPointC, '°C', 1)}</td></tr>` +
+    `<tr><th>Humidity</th><td>${fmt(station?.humidityPct, '%')}</td></tr>` +
+    `<tr><th>Pressure</th><td>${fmt(station?.pressureHpa, ' hPa', 1)}</td></tr>` +
+    `<tr><th>Sea-level pressure</th><td>${fmt(station?.pressureSeaLevelHpa, ' hPa', 1)}</td></tr>` +
+    `<tr><th>Wind</th><td>${fmt(station?.windSpeedMs, ' m/s', 1)}${atDeg(station?.windDirectionDeg)}` +
+    `${
+      Number.isFinite(station?.windSpeedStdDevMs) ||
+      Number.isFinite(station?.windDirectionStdDevDeg)
+        ? ` (σ ${fmt(station?.windSpeedStdDevMs, ' m/s', 1)}${atDeg(station?.windDirectionStdDevDeg)})`
+        : ''
+    }</td></tr>` +
+    `<tr><th>Gust</th><td>${fmt(station?.windGustMs, ' m/s', 1)}${atDeg(station?.windGustDirectionDeg)}</td></tr>` +
+    `<tr><th>Precipitation</th><td>${fmt(station?.precipitationMm, ' mm', 1)}</td></tr>` +
+    `<tr><th>Altitude</th><td>${fmt(station?.altitudeM, ' m')}</td></tr>` +
+    `<tr><th>Observed</th><td>${observed}</td></tr>` +
+    `</tbody></table>`
   );
 }
 
@@ -180,21 +195,30 @@ export function buildAemetStationDescription(station) {
  */
 export function buildAemetStationSelectionCopy(station) {
   const title = station?.name || station?.id || 'Station';
-  const hasRange = Number.isFinite(station?.temperatureMinC) && Number.isFinite(station?.temperatureMaxC);
+  const hasRange =
+    Number.isFinite(station?.temperatureMinC) &&
+    Number.isFinite(station?.temperatureMaxC);
   const details = [
-    `${fmt(station?.temperatureC, '°C', 1)}`
-      + `${hasRange ? ` (${station.temperatureMinC.toFixed(1)}–${station.temperatureMaxC.toFixed(1)})` : ''}`
-      + `${Number.isFinite(station?.dewPointC) ? ` · dew ${station.dewPointC.toFixed(1)}°C` : ''}`
-      + ` · ${fmt(station?.humidityPct, '% RH')}`,
-    `Wind ${fmt(station?.windSpeedMs, ' m/s', 1)}${atDeg(station?.windDirectionDeg)}`
-      + `${Number.isFinite(station?.windSpeedStdDevMs) || Number.isFinite(station?.windDirectionStdDevDeg)
-        ? ` (σ${fmt(station?.windSpeedStdDevMs, ' m/s', 1)}${atDeg(station?.windDirectionStdDevDeg)})` : ''}`
-      + `${Number.isFinite(station?.windGustMs)
-        ? ` · gust ${station.windGustMs.toFixed(1)} m/s${atDeg(station?.windGustDirectionDeg)}` : ''}`,
-    `${fmt(station?.pressureHpa, ' hPa', 1)}`
-      + `${Number.isFinite(station?.pressureSeaLevelHpa) ? ` · MSL ${station.pressureSeaLevelHpa.toFixed(1)} hPa` : ''}`,
-    `${fmt(station?.precipitationMm, ' mm', 1)} precip`
-      + `${Number.isFinite(station?.altitudeM) ? ` · ${station.altitudeM.toFixed(0)} m altitude` : ''}`,
+    `${fmt(station?.temperatureC, '°C', 1)}` +
+      `${hasRange ? ` (${station.temperatureMinC.toFixed(1)}–${station.temperatureMaxC.toFixed(1)})` : ''}` +
+      `${Number.isFinite(station?.dewPointC) ? ` · dew ${station.dewPointC.toFixed(1)}°C` : ''}` +
+      ` · ${fmt(station?.humidityPct, '% RH')}`,
+    `Wind ${fmt(station?.windSpeedMs, ' m/s', 1)}${atDeg(station?.windDirectionDeg)}` +
+      `${
+        Number.isFinite(station?.windSpeedStdDevMs) ||
+        Number.isFinite(station?.windDirectionStdDevDeg)
+          ? ` (σ${fmt(station?.windSpeedStdDevMs, ' m/s', 1)}${atDeg(station?.windDirectionStdDevDeg)})`
+          : ''
+      }` +
+      `${
+        Number.isFinite(station?.windGustMs)
+          ? ` · gust ${station.windGustMs.toFixed(1)} m/s${atDeg(station?.windGustDirectionDeg)}`
+          : ''
+      }`,
+    `${fmt(station?.pressureHpa, ' hPa', 1)}` +
+      `${Number.isFinite(station?.pressureSeaLevelHpa) ? ` · MSL ${station.pressureSeaLevelHpa.toFixed(1)} hPa` : ''}`,
+    `${fmt(station?.precipitationMm, ' mm', 1)} precip` +
+      `${Number.isFinite(station?.altitudeM) ? ` · ${station.altitudeM.toFixed(0)} m altitude` : ''}`,
   ];
   return { title, details };
 }
@@ -212,9 +236,12 @@ export function buildAemetStationSelectionCopy(station) {
  */
 export function buildAemetForecastSummaryLine(hours, take = 4) {
   if (!Array.isArray(hours) || !hours.length) return null;
-  const parts = hours.slice(0, take).map(
-    (h) => `${String(h.hour).padStart(2, '0')}:00 ${fmt(h.temperatureC, '°C', 0)}`,
-  );
+  const parts = hours
+    .slice(0, take)
+    .map(
+      (h) =>
+        `${String(h.hour).padStart(2, '0')}:00 ${fmt(h.temperatureC, '°C', 0)}`,
+    );
   if (!parts.length) return null;
   return `Next hours: ${parts.join(' · ')}`;
 }
@@ -230,7 +257,12 @@ export function buildAemetForecastSummaryLine(hours, take = 4) {
  * @param {string|null} [forecastLine]
  * @returns {object|null}
  */
-export function createAemetStationSelectedOverlayEntry(id, position, station, forecastLine = null) {
+export function createAemetStationSelectedOverlayEntry(
+  id,
+  position,
+  station,
+  forecastLine = null,
+) {
   if (!id || !position) return null;
   const { title, details } = buildAemetStationSelectionCopy(station);
   return {
@@ -244,7 +276,9 @@ export function createAemetStationSelectedOverlayEntry(id, position, station, fo
     priority: Number.MAX_SAFE_INTEGER,
     title,
     details: forecastLine ? [...details, forecastLine] : details,
-    accent: `#${(temperatureColorRgb(station?.temperatureC) ?? COLOR_UNKNOWN_RGB)
+    accent: `#${(
+      temperatureColorRgb(station?.temperatureC) ?? COLOR_UNKNOWN_RGB
+    )
       .map((c) => c.toString(16).padStart(2, '0'))
       .join('')}`,
     interactive: false,
@@ -271,14 +305,22 @@ export function normalizeAemetStationsPayload(payload) {
   for (const station of payload.stations) {
     const lat = Number(station?.lat);
     const lon = Number(station?.lon);
-    if (!Number.isFinite(lat) || Math.abs(lat) > 90 || !Number.isFinite(lon) || Math.abs(lon) > 180) continue;
+    if (
+      !Number.isFinite(lat) ||
+      Math.abs(lat) > 90 ||
+      !Number.isFinite(lon) ||
+      Math.abs(lon) > 180
+    )
+      continue;
     if (!station?.id) continue;
     rows.push(station);
   }
   return rows;
 }
 
-export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } = {}) {
+export function createAemetStationsLayer({
+  overlayHost = DEFAULT_OVERLAY_HOST,
+} = {}) {
   let _viewer = null;
   let _dataSource = null;
   let _count = 0;
@@ -311,12 +353,18 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
    * `scene.sampleHeight()` snapshot (tried first) was wrong for this layer.
    */
   function _stationPosition(station) {
-    return Cesium.Cartesian3.fromDegrees(station.lon, station.lat, POINT_HEIGHT_OFFSET_M);
+    return Cesium.Cartesian3.fromDegrees(
+      station.lon,
+      station.lat,
+      POINT_HEIGHT_OFFSET_M,
+    );
   }
 
   function _clearSelection() {
     if (_selectedId) {
-      const original = _dataSource?.entities.getById(`aemet-station:${_selectedId}`);
+      const original = _dataSource?.entities.getById(
+        `aemet-station:${_selectedId}`,
+      );
       if (original?.point) original.point.show = true;
     }
     if (_selectedEntity && _viewer) _viewer.entities.remove(_selectedEntity);
@@ -352,8 +400,15 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       const hours = normalizeAemetForecastPayload(payload);
       const line = hours ? buildAemetForecastSummaryLine(hours) : null;
       if (!line || !_selectedEntity) return;
-      const position = _selectedEntity.position?.getValue(Cesium.JulianDate.now());
-      const entry = createAemetStationSelectedOverlayEntry(id, position, station, line);
+      const position = _selectedEntity.position?.getValue(
+        Cesium.JulianDate.now(),
+      );
+      const entry = createAemetStationSelectedOverlayEntry(
+        id,
+        position,
+        station,
+        line,
+      );
       if (entry) {
         overlayHost.setEntries(
           AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID,
@@ -475,7 +530,9 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       if (_dataSource) _dataSource.show = true;
       overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer);
-      registerPickOwner('aemet-stations', (pickedId) => String(pickedId).startsWith('aemet-station:'));
+      registerPickOwner('aemet-stations', (pickedId) =>
+        String(pickedId).startsWith('aemet-station:'),
+      );
     },
 
     disable(viewer) {
@@ -511,30 +568,32 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
         const nextStationById = new Map();
         for (const station of stations) {
           nextStationById.set(station.id, station);
-          nextEntities.push(new Cesium.Entity({
-            id: `aemet-station:${station.id}`,
-            position: _stationPosition(station),
-            point: {
-              pixelSize: 7,
-              color: temperatureColor(station.temperatureC),
-              outlineColor: COLOR_OUTLINE,
-              outlineWidth: 1,
-              // RELATIVE_TO_GROUND, not CLAMP_TO_GROUND or a one-time
-              // sampleHeight() snapshot — see POINT_HEIGHT_OFFSET_M's
-              // comment for the full history of why. This keeps the point
-              // continuously clamped against whatever terrain is actually
-              // loaded, with a small real clearance so it doesn't sink into
-              // a slope up close.
-              heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
-              // Deliberately NOT disableDepthTestDistance here: normal depth
-              // testing against the globe is what hides a station on the far
-              // side of Earth. Only the one selected highlight (see
-              // _selectStation) is exempted from that.
-            },
-            name: station.name || station.id,
-            description: buildAemetStationDescription(station),
-            properties: { ...station },
-          }));
+          nextEntities.push(
+            new Cesium.Entity({
+              id: `aemet-station:${station.id}`,
+              position: _stationPosition(station),
+              point: {
+                pixelSize: 7,
+                color: temperatureColor(station.temperatureC),
+                outlineColor: COLOR_OUTLINE,
+                outlineWidth: 1,
+                // RELATIVE_TO_GROUND, not CLAMP_TO_GROUND or a one-time
+                // sampleHeight() snapshot — see POINT_HEIGHT_OFFSET_M's
+                // comment for the full history of why. This keeps the point
+                // continuously clamped against whatever terrain is actually
+                // loaded, with a small real clearance so it doesn't sink into
+                // a slope up close.
+                heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+                // Deliberately NOT disableDepthTestDistance here: normal depth
+                // testing against the globe is what hides a station on the far
+                // side of Earth. Only the one selected highlight (see
+                // _selectStation) is exempted from that.
+              },
+              name: station.name || station.id,
+              description: buildAemetStationDescription(station),
+              properties: { ...station },
+            }),
+          );
         }
 
         _dataSource.entities.removeAll();
@@ -551,7 +610,9 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
 
         _count = stations.length;
         _lastUpdate = Date.now();
-        _lastError = payload.stale ? 'Serving stale AEMET data (upstream unavailable)' : null;
+        _lastError = payload.stale
+          ? 'Serving stale AEMET data (upstream unavailable)'
+          : null;
         console.log(`[Data:AemetStations] Updated: ${_count} stations`);
         return true;
       } catch (e) {
@@ -586,7 +647,9 @@ export function createAemetStationsLayer({ overlayHost = DEFAULT_OVERLAY_HOST } 
       if (!_dataSource || !_dataSource.show) return [];
       const entities = _dataSource.entities.values;
       if (!entities.length) return [];
-      const limit = Number.isFinite(maxCount) ? Math.max(1, Math.floor(maxCount)) : 2000;
+      const limit = Number.isFinite(maxCount)
+        ? Math.max(1, Math.floor(maxCount))
+        : 2000;
       const now = Cesium.JulianDate.now();
       const result = [];
       for (const entity of entities) {
