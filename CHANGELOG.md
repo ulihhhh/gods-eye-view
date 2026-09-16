@@ -1,5 +1,15 @@
 # Changelog
 
+- Distinguish PARTIAL vessel snapshots from STALE data in the layer panel, with
+  accepted-record counts and unchanged retention, freshness and outage safeguards.
+
+- Keep Nepal provider media inside the Pinokio compatibility boundary: use
+  source-linked fallback cards instead of automatic embeds or hidden preloads
+  that launch an external browser. Ordinary browsers retain embedded playback.
+  Source-only timed shots use their authored card dwell and continue normally.
+  Media autoplay now requires a live Play Scene or Play Shot action; passive
+  loading, saved state and seeking do not grant playback authority.
+
 - Add Catalonia (Servei Català de Trànsit) as a keyless CCTV source pack: ~163
   cameras from a WFS/GML feed that aggregates SCT's own highway cameras with
   hotlinked Barcelona, Terrassa and Andorra cameras, each partner named as a
