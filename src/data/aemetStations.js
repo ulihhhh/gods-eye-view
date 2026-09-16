@@ -9,6 +9,13 @@ import {
   setOverlayEntries,
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
+import { TEMPERATURE_COLOR_STOPS, temperatureColorRgb } from './temperatureColorScale.js';
+import { buildTemperatureGradientImages } from './temperatureGradientRaster.js';
+import { getCcaaFeatures } from './spainBoundaries.js';
+import { SPAIN_PROVINCIAL_CAPITALS } from './spainCapitals.js';
+import { buildCapitalTemperatureRecords } from './capitalTemperatures.js';
+
+export { TEMPERATURE_COLOR_STOPS, temperatureColorRgb } from './temperatureColorScale.js';
 
 /**
  * AEMET OpenData live weather station pins — Spain only (~850 stations).
@@ -37,6 +44,22 @@ export const AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
   collisionCapacity: 0,
   moving: false,
 });
+
+/**
+ * Ambient labels for every provincial capital's nearest-station temperature,
+ * shown only in gradient view mode. ~52 capitals — a fixed, small count, so
+ * this budget is comfortable headroom rather than a tight cohort like the
+ * thousands-of-points ambient layers use.
+ */
+export const AEMET_CAPITALS_OVERLAY_SOURCE_ID = 'aemet-capitals';
+export const AEMET_CAPITALS_OVERLAY_SOURCE_OPTIONS = Object.freeze({
+  cohortLimit: 60,
+  collisionCapacity: 60,
+  moving: false,
+});
+
+const CCAA_BORDER_COLOR = Cesium.Color.fromCssColorString('rgba(20, 24, 30, 0.55)');
+const CCAA_BORDER_WIDTH_PX = 1.5;
 
 const DEFAULT_OVERLAY_HOST = Object.freeze({
   setEntries: setOverlayEntries,
@@ -75,59 +98,6 @@ const POINT_ALPHA = 0.92;
  */
 const POINT_HEIGHT_OFFSET_M = 2.0;
 
-/**
- * Smooth temperature gradient, coldest to hottest. Anchor stops chosen for a
- * readable spread across the temperatures AEMET's Spain network actually
- * reports (roughly -10°C mountain lows to 40°C+ summer highs), linearly
- * interpolated between neighbors — a genuinely continuous gradient rather
- * than the small number of visually-identical stepped bands this started
- * with. Exported and pure (plain RGB bytes, no Cesium) so it's testable
- * without a Cesium.Color round-trip.
- */
-export const TEMPERATURE_COLOR_STOPS = Object.freeze([
-  Object.freeze({ c: -10, rgb: [40, 60, 170] }),
-  Object.freeze({ c: 0, rgb: [59, 108, 255] }),
-  Object.freeze({ c: 10, rgb: [59, 182, 255] }),
-  Object.freeze({ c: 18, rgb: [70, 220, 190] }),
-  Object.freeze({ c: 24, rgb: [140, 230, 90] }),
-  Object.freeze({ c: 28, rgb: [255, 210, 60] }),
-  Object.freeze({ c: 33, rgb: [255, 140, 50] }),
-  Object.freeze({ c: 40, rgb: [230, 40, 40] }),
-]);
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-/**
- * Interpolate a temperature (°C) to an [r,g,b] byte triple along
- * TEMPERATURE_COLOR_STOPS. Values outside the range clamp to the nearest
- * end stop rather than extrapolating. Returns `null` for a non-finite input
- * — the caller substitutes a neutral "unknown" color, never a guessed one.
- * @param {number} temperatureC
- * @returns {[number, number, number]|null}
- */
-export function temperatureColorRgb(temperatureC) {
-  if (!Number.isFinite(temperatureC)) return null;
-  const stops = TEMPERATURE_COLOR_STOPS;
-  if (temperatureC <= stops[0].c) return stops[0].rgb;
-  if (temperatureC >= stops[stops.length - 1].c)
-    return stops[stops.length - 1].rgb;
-  for (let i = 0; i < stops.length - 1; i++) {
-    const a = stops[i];
-    const b = stops[i + 1];
-    if (temperatureC >= a.c && temperatureC <= b.c) {
-      const t = (temperatureC - a.c) / (b.c - a.c);
-      return [
-        Math.round(lerp(a.rgb[0], b.rgb[0], t)),
-        Math.round(lerp(a.rgb[1], b.rgb[1], t)),
-        Math.round(lerp(a.rgb[2], b.rgb[2], t)),
-      ];
-    }
-  }
-  return stops[stops.length - 1].rgb; // unreachable, kept for defensiveness
-}
-
 /** RGB bytes → a Cesium.Color at this layer's standard marker alpha. */
 function colorFromRgb([r, g, b], alpha = POINT_ALPHA) {
   return Cesium.Color.fromBytes(r, g, b, Math.round(alpha * 255));
@@ -138,6 +108,13 @@ function temperatureColor(temperatureC, alpha = POINT_ALPHA) {
     temperatureColorRgb(temperatureC) ?? COLOR_UNKNOWN_RGB,
     alpha,
   );
+}
+
+/** Same points-mode temperature→color mapping, as a CSS hex string for overlay `accent` fields. */
+function temperatureAccentHex(temperatureC) {
+  return `#${(temperatureColorRgb(temperatureC) ?? COLOR_UNKNOWN_RGB)
+    .map((c) => c.toString(16).padStart(2, '0'))
+    .join('')}`;
 }
 
 function fmt(value, unit, digits = 0) {
@@ -276,11 +253,7 @@ export function createAemetStationSelectedOverlayEntry(
     priority: Number.MAX_SAFE_INTEGER,
     title,
     details: forecastLine ? [...details, forecastLine] : details,
-    accent: `#${(
-      temperatureColorRgb(station?.temperatureC) ?? COLOR_UNKNOWN_RGB
-    )
-      .map((c) => c.toString(16).padStart(2, '0'))
-      .join('')}`,
+    accent: temperatureAccentHex(station?.temperatureC),
     interactive: false,
     anchorRadiusPx: 9,
     minAnchorGapPx: 11,
@@ -289,6 +262,35 @@ export function createAemetStationSelectedOverlayEntry(
     edgeFade: 'keyhole',
     horizonCull: true,
     terrainOcclusion: false,
+  };
+}
+
+/**
+ * One ambient label for a provincial capital's nearest-station temperature —
+ * same shape as `earthquakes/model.js`'s `createEarthquakeOverlayEntry`, the
+ * established pattern for a small, non-interactive, always-on text label.
+ * @param {object} input
+ * @param {string} input.id
+ * @param {Cesium.Cartesian3} input.position
+ * @param {string} input.name
+ * @param {number} input.temperatureC
+ * @returns {object}
+ */
+export function createCapitalTemperatureOverlayEntry({ id, position, name, temperatureC }) {
+  return {
+    id: String(id),
+    position,
+    variant: 'label',
+    title: `${name} ${temperatureC.toFixed(0)}°`,
+    accent: temperatureAccentHex(temperatureC),
+    collisionGroup: 'ambient-label',
+    paintLane: 'ambient-label',
+    interactive: false,
+    edgeFade: 'keyhole',
+    horizonCull: true,
+    terrainOcclusion: false,
+    verticalOnly: true,
+    placement: 'above',
   };
 }
 
@@ -335,6 +337,30 @@ export function createAemetStationsLayer({
   let _selectedEntity = null;
   /** @type {Cesium.ScreenSpaceEventHandler|null} */
   let _clickHandler = null;
+  /** @type {'points'|'gradient'} which view mode the row's pill has selected */
+  let _viewMode = 'points';
+  /** @type {Cesium.ImageryLayer[]} the mounted IDW gradient overlay layers (one per region — mainland, Canary Islands), empty when not in gradient mode */
+  let _gradientLayers = [];
+  /**
+   * Bumped on every gradient (re)build request so a `buildTemperatureGradientImages()`
+   * that resolves after the user has since switched back to points, disabled
+   * the layer, or triggered a newer rebuild (the next 5-min poll) can
+   * recognize it's stale and silently drop its result instead of mounting an
+   * imagery layer nobody asked for anymore.
+   */
+  let _gradientToken = 0;
+  let _gradientError = null;
+  /** @type {Cesium.CustomDataSource|null} static CCAA border polylines, built once and only toggled show/hide */
+  let _borderDataSource = null;
+  let _bordersBuilt = false;
+  /**
+   * Own token for the capital-label rebuild — deliberately separate from
+   * `_gradientToken`. Both rebuilds can be in flight from the same
+   * enable()/poll tick; sharing one counter would make each call's own
+   * `++token` invalidate the OTHER build in progress even though nothing
+   * about that other build actually changed.
+   */
+  let _capitalLabelsToken = 0;
   /**
    * Bumped on every select/clear so a Phase-A2 forecast fetch that resolves
    * after the user has already moved on (reselected a different station,
@@ -358,6 +384,141 @@ export function createAemetStationsLayer({
       station.lat,
       POINT_HEIGHT_OFFSET_M,
     );
+  }
+
+  function _removeGradientLayer() {
+    if (_viewer) for (const layer of _gradientLayers) _viewer.imageryLayers.remove(layer, true);
+    _gradientLayers = [];
+  }
+
+  /**
+   * Build the CCAA border polylines once and cache them — this geometry is
+   * static (unlike the gradient raster, which is rebuilt from live station
+   * data every poll), so it's built lazily on first entry into gradient mode
+   * and never rebuilt again; only `_borderDataSource.show` toggles after
+   * that. Vector polylines (not baked into the raster canvas) stay crisp at
+   * any zoom — see `temperatureGradientRaster.js`'s module comment for why
+   * the raster approach was dropped.
+   */
+  async function _buildBordersOnce() {
+    if (_bordersBuilt || !_borderDataSource) return;
+    _bordersBuilt = true; // set before the await: one build in flight, not one per rapid toggle
+    let features;
+    try {
+      features = await getCcaaFeatures();
+    } catch (e) {
+      _bordersBuilt = false;
+      console.warn('[Data:AemetStations] CCAA border load error:', e);
+      return;
+    }
+    if (!_borderDataSource) return; // destroyed while loading
+    for (const feature of features) {
+      for (const ring of feature.rings) {
+        _borderDataSource.entities.add({
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArray(ring.flat()),
+            material: CCAA_BORDER_COLOR,
+            width: CCAA_BORDER_WIDTH_PX,
+            clampToGround: true,
+          },
+        });
+      }
+    }
+  }
+
+  /**
+   * (Re)build the capital temperature labels from the current station
+   * snapshot. Independent of `_rebuildGradientLayer` (own token, not
+   * awaited by it) — the raster PNG and these labels are unrelated async
+   * work that both happen to run on gradient-mode entry and each poll.
+   */
+  async function _rebuildCapitalLabels() {
+    if (_viewMode !== 'gradient' || !_enabled || !_viewer) return;
+    const token = ++_capitalLabelsToken;
+    const stations = [..._stationById.values()];
+    const records = buildCapitalTemperatureRecords(SPAIN_PROVINCIAL_CAPITALS, stations);
+    if (token !== _capitalLabelsToken || _viewMode !== 'gradient' || !_enabled || !_viewer) return;
+    const entries = records.map((r) => createCapitalTemperatureOverlayEntry({
+      id: `capital:${r.capitalId}`,
+      position: Cesium.Cartesian3.fromDegrees(r.lon, r.lat),
+      name: r.name,
+      temperatureC: r.temperatureC,
+    }));
+    overlayHost.setEntries(AEMET_CAPITALS_OVERLAY_SOURCE_ID, entries, AEMET_CAPITALS_OVERLAY_SOURCE_OPTIONS);
+  }
+
+  /**
+   * (Re)build the IDW gradient overlay from the current station snapshot and
+   * mount it as Cesium imagery layers (one per region — mainland, Canary
+   * Islands), replacing whatever was mounted before. A no-op whenever the
+   * gradient view isn't actually what should be showing right now (still
+   * 'points', or the layer got disabled/destroyed while this was in flight)
+   * — checked both before starting and again after the async build resolves,
+   * via `_gradientToken`.
+   */
+  async function _rebuildGradientLayer() {
+    if (_viewMode !== 'gradient' || !_enabled || !_viewer) return;
+    const token = ++_gradientToken;
+    const stations = [..._stationById.values()];
+    let results;
+    try {
+      results = await buildTemperatureGradientImages(stations);
+    } catch (e) {
+      if (token !== _gradientToken) return;
+      _gradientError = 'Gradient build error';
+      console.warn('[Data:AemetStations] Gradient build error:', e);
+      return;
+    }
+    if (token !== _gradientToken || _viewMode !== 'gradient' || !_enabled || !_viewer) return;
+    if (!results?.length) {
+      _gradientError = 'No station data for gradient';
+      return;
+    }
+    try {
+      const providers = await Promise.all(results.map((result) => Cesium.SingleTileImageryProvider.fromUrl(
+        result.dataUrl,
+        { rectangle: Cesium.Rectangle.fromDegrees(...result.bbox) },
+      )));
+      if (token !== _gradientToken || _viewMode !== 'gradient' || !_enabled || !_viewer) return;
+      _removeGradientLayer();
+      _gradientLayers = providers.map((provider) => new Cesium.ImageryLayer(provider));
+      for (const layer of _gradientLayers) _viewer.imageryLayers.add(layer);
+      _gradientError = null;
+    } catch (e) {
+      if (token !== _gradientToken) return;
+      _gradientError = 'Gradient imagery error';
+      console.warn('[Data:AemetStations] Gradient imagery error:', e);
+    }
+  }
+
+  function _setViewMode(next) {
+    if (next !== 'points' && next !== 'gradient') return false;
+    if (_viewMode === next) {
+      // Already in this mode — but if a prior gradient build failed, clicking
+      // the (still-active) GRADIENT chip again is the user's obvious retry
+      // gesture, not a no-op.
+      if (next === 'gradient' && _gradientError) void _rebuildGradientLayer();
+      return true;
+    }
+    _viewMode = next;
+    if (next === 'gradient') {
+      if (_dataSource) _dataSource.show = false;
+      void _rebuildGradientLayer();
+      void _buildBordersOnce().then(() => {
+        if (_borderDataSource && _viewMode === 'gradient') _borderDataSource.show = true;
+      });
+      overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, true);
+      void _rebuildCapitalLabels();
+    } else {
+      _gradientToken += 1; // invalidate any in-flight build
+      _removeGradientLayer();
+      _gradientError = null;
+      if (_dataSource && _enabled) _dataSource.show = true;
+      if (_borderDataSource) _borderDataSource.show = false;
+      _capitalLabelsToken += 1; // invalidate any in-flight build
+      overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, false);
+    }
+    return true;
   }
 
   function _clearSelection() {
@@ -516,32 +677,90 @@ export function createAemetStationsLayer({
       _dataSource = new Cesium.CustomDataSource('aemet-stations');
       _dataSource.show = false;
       viewer.dataSources.add(_dataSource);
+      _borderDataSource = new Cesium.CustomDataSource('aemet-ccaa-borders');
+      _borderDataSource.show = false;
+      viewer.dataSources.add(_borderDataSource);
+      _bordersBuilt = false;
       _count = 0;
       _lastUpdate = null;
       _lastError = null;
       _enabled = false;
       _stationById = new Map();
+      _viewMode = 'points';
+      _gradientError = null;
       overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, false);
+      overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, false);
       console.log('[Data:AemetStations] Initialized');
     },
 
     enable(viewer) {
       _enabled = true;
-      if (_dataSource) _dataSource.show = true;
+      if (_dataSource) _dataSource.show = _viewMode === 'points';
       overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer);
       registerPickOwner('aemet-stations', (pickedId) =>
         String(pickedId).startsWith('aemet-station:'),
       );
+      if (_viewMode === 'gradient') {
+        void _rebuildGradientLayer();
+        void _buildBordersOnce().then(() => {
+          if (_borderDataSource && _viewMode === 'gradient' && _enabled) _borderDataSource.show = true;
+        });
+        overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, true);
+        void _rebuildCapitalLabels();
+      }
     },
 
     disable(viewer) {
       _enabled = false;
       _clearSelection();
       if (_dataSource) _dataSource.show = false;
+      _gradientToken += 1;
+      _removeGradientLayer();
+      if (_borderDataSource) _borderDataSource.show = false;
+      _capitalLabelsToken += 1;
       overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, false);
+      overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, false);
       _removeClickHandler();
       unregisterPickOwner('aemet-stations');
+    },
+
+    /**
+     * `{ viewMode: 'points'|'gradient' }` — the two-way pill this layer's
+     * row control adds. Rejects (`false`) any other value.
+     */
+    setParams(params = {}) {
+      if (params.viewMode !== undefined) return _setViewMode(params.viewMode);
+      return true;
+    },
+
+    getRowControls() {
+      const isPoints = _viewMode === 'points';
+      return {
+        chips: [
+          {
+            id: 'points',
+            label: 'PUNTOS',
+            active: isPoints,
+            state: isPoints ? 'active' : 'idle',
+            title: 'Un punto coloreado por estación',
+            params: { viewMode: 'points' },
+          },
+          {
+            id: 'gradient',
+            label: 'GRADIENTE',
+            active: !isPoints,
+            state: !isPoints ? (_gradientError ? 'error' : 'active') : 'idle',
+            title: _gradientError || 'Superficie interpolada (IDW) recortada a España, con fronteras de CCAA y temperaturas de capitales de provincia',
+            params: { viewMode: 'gradient' },
+          },
+        ],
+        legend: isPoints ? [] : TEMPERATURE_COLOR_STOPS.map((stop) => ({
+          label: `${stop.c}°C`,
+          color: `rgb(${stop.rgb.join(',')})`,
+          count: '',
+        })),
+      };
     },
 
     async update(viewer) {
@@ -599,6 +818,14 @@ export function createAemetStationsLayer({
         _dataSource.entities.removeAll();
         for (const entity of nextEntities) _dataSource.entities.add(entity);
         _stationById = nextStationById;
+        // Keep the gradient and capital labels in sync with each poll, same
+        // cadence as the point entities above — fire-and-forget, both rebuilds
+        // are no-ops unless the gradient view is actually active. Borders are
+        // NOT touched here: static geometry, built once by `_buildBordersOnce`.
+        if (_viewMode === 'gradient') {
+          void _rebuildGradientLayer();
+          void _rebuildCapitalLabels();
+        }
 
         // A refresh must not silently drop an open selection — re-resolve it
         // against the fresh data (which also means the card's numbers update
@@ -627,10 +854,21 @@ export function createAemetStationsLayer({
       _removeClickHandler();
       unregisterPickOwner('aemet-stations');
       overlayHost.setVisible(AEMET_STATIONS_SELECTED_OVERLAY_SOURCE_ID, false);
+      _gradientToken += 1;
+      _removeGradientLayer();
+      _gradientError = null;
+      _capitalLabelsToken += 1;
+      overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, false);
+      overlayHost.clearSource(AEMET_CAPITALS_OVERLAY_SOURCE_ID);
       if (_dataSource) {
         viewer.dataSources.remove(_dataSource, true);
         _dataSource = null;
       }
+      if (_borderDataSource) {
+        viewer.dataSources.remove(_borderDataSource, true);
+        _borderDataSource = null;
+      }
+      _bordersBuilt = false;
       _stationById = new Map();
       _count = 0;
       _lastUpdate = null;
@@ -705,6 +943,45 @@ export function createAemetStationsLayer({
     },
     _selectedIdForTest() {
       return _selectedId;
+    },
+    _viewModeForTest() {
+      return _viewMode;
+    },
+    _gradientErrorForTest() {
+      return _gradientError;
+    },
+    _hasGradientLayerForTest() {
+      return _gradientLayers.length > 0;
+    },
+    // Bumped once per _rebuildGradientLayer() call regardless of outcome —
+    // a test can diff this across a setParams() call to prove a rebuild was
+    // actually attempted, not just that the mode flag stayed 'gradient'.
+    _gradientTokenForTest() {
+      return _gradientToken;
+    },
+    // Awaits any in-flight gradient (re)build — a test that switches to
+    // 'gradient' via setParams can't otherwise observe the fire-and-forget
+    // `_rebuildGradientLayer()` promise it kicks off.
+    _rebuildGradientLayerForTest() {
+      return _rebuildGradientLayer();
+    },
+    // Same test-hook shape as the gradient layer's, for the CCAA border data
+    // source and the capital-label rebuild (see those functions' own
+    // comments for why each is a separate build/token from the gradient's).
+    _buildBordersOnceForTest() {
+      return _buildBordersOnce();
+    },
+    _bordersVisibleForTest() {
+      return Boolean(_borderDataSource?.show);
+    },
+    _borderEntityCountForTest() {
+      return _borderDataSource?.entities.values.length ?? 0;
+    },
+    _rebuildCapitalLabelsForTest() {
+      return _rebuildCapitalLabels();
+    },
+    _capitalLabelsTokenForTest() {
+      return _capitalLabelsToken;
     },
   };
   return layer;
