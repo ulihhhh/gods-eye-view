@@ -19,6 +19,7 @@ import {
   loadBilbaoSourcesFromOpenData,
   loadCataloniaSourcesFromOpenData,
   loadCalgarySourcesFromOpenData,
+  loadDelDOTSourcesFromOpenData,
 } from './sources.js';
 
 /** Env kill switch: unset or anything but "0" means enabled. */
@@ -97,6 +98,11 @@ const LIVE_PACKS = [
     name: 'calgary',
     enabled: () => envEnabled('CCTV_CALGARY_ENABLED'),
     load: loadCalgarySourcesFromOpenData,
+  },
+  {
+    name: 'deldot',
+    enabled: () => envEnabled('CCTV_DELDOT_ENABLED'),
+    load: loadDelDOTSourcesFromOpenData,
   },
 ];
 /**

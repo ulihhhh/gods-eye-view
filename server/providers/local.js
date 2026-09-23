@@ -32,7 +32,10 @@ import {
   aemetStationsProxy,
   aemetUvIndexProxy,
   aemetWarningsProxy,
+  weatherProxy,
 } from './weather.js';
+import { cycloneProxy } from './cyclones.js';
+import { windProxy } from './wind.js';
 
 /** Construct the local provider plugins in their established order. */
 function localProviderPlugins() {
@@ -69,6 +72,9 @@ function localProviderPlugins() {
     trackBackfillProxies(),
     openAiRealtimeProxy(),
     googlePlacesContextProxy(),
+    windProxy(),
+    weatherProxy(),
+    cycloneProxy(),
     keySetupEndpoint(),
   ];
 }
