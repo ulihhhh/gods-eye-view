@@ -93,18 +93,86 @@ export function createOpenSkySource({
         complete: false,
       };
     },
-    async getEnrichment(query, { signal } = {}) {
-      if (!['type', 'route'].includes(query.kind))
-        throw new LiveSourceError('unsupported', 'Enrichment unavailable');
+    getEnrichment: adsbdbEnrichment(fetchImpl),
+  };
+}
+
+/** Aircraft type/route lookup shared by every civil-flight source. */
+function adsbdbEnrichment(fetchImpl) {
+  return async function getEnrichment(query, { signal } = {}) {
+    if (!['type', 'route'].includes(query.kind))
+      throw new LiveSourceError('unsupported', 'Enrichment unavailable');
+    const { response, payload } = await readResponse(
+      fetchImpl,
+      `/api/adsbdb/${query.kind}/${encodeURIComponent(query.id)}`,
+      { signal },
+      'adsbdb',
+    );
+    if (!response.ok) throw httpError(response, 'adsbdb');
+    return payload;
+  };
+}
+
+/**
+ * The operator's own dump1090/readsb receiver via the same-origin
+ * /api/local-adsb proxy (docs/plans/local-usb-sdr.md). The proxy serves
+ * readsb-shaped rows, so this reuses the adsb.lol normalization; the receiver
+ * clock (`now`) is the snapshot epoch, and per-aircraft `seen_pos` ages each
+ * position individually.
+ */
+export function createLocalReceiverSource({
+  fetchImpl = defaultFetch,
+  now = () => Date.now(),
+} = {}) {
+  return {
+    label: 'Local receiver',
+    async getSnapshot(_query = {}, { signal } = {}) {
       const { response, payload } = await readResponse(
         fetchImpl,
-        `/api/adsbdb/${query.kind}/${encodeURIComponent(query.id)}`,
-        { signal },
-        'adsbdb',
+        '/api/local-adsb',
+        { signal, cache: 'no-store' },
+        'Local receiver',
       );
-      if (!response.ok) throw httpError(response, 'adsbdb');
-      return payload;
+      if (!response.ok) {
+        const error = httpError(response, 'Local receiver');
+        if (payload?.error === 'unreachable')
+          error.message = 'Local receiver unreachable — is startadsb running?';
+        throw error;
+      }
+      const receiverMs = epoch(payload?.now, 1000);
+      return {
+        ...readsbSnapshot(payload, {
+          observedAtMs: receiverMs ?? now(),
+          source: 'Local receiver',
+          coverage: 'own antenna',
+          now: now(),
+          stale: payload?.stale === true,
+        }),
+        heard: finite(payload?.heard),
+        status: response.status,
+      };
     },
+    async getTrack(reference, { signal } = {}) {
+      const { response, payload } = await readResponse(
+        fetchImpl,
+        '/api/local-adsb/trace?hex=' + encodeURIComponent(reference),
+        { signal },
+        'Local receiver',
+      );
+      if (!response.ok) throw httpError(response, 'Local receiver');
+      const baseTimeMs = epoch(payload?.timestamp, 1000);
+      return {
+        records:
+          baseTimeMs == null
+            ? []
+            : normalizeAircraftTrack(payload?.trace, {
+                baseTimeMs,
+                readsb: true,
+              }),
+        complete: false,
+      };
+    },
+    getEnrichment: adsbdbEnrichment(fetchImpl),
   };
 }
 

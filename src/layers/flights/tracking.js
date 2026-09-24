@@ -65,7 +65,7 @@ export function createTracking({
     if (flightState._trackedEntity)
       flightState._trackedEntity.gevSelectionOrigin = origin;
     _emitAwarenessEvent('gev:awareness-subject-selected', {
-      layerId: 'flights',
+      layerId: flightState.identity.id,
       id: icao24,
       // Canonical display chain (callsign → registration → hex). Publishing a
       // bare `callsign || icao24` here resurrected the pre-enrichment behavior:
@@ -97,8 +97,8 @@ export function createTracking({
         : null;
     return {
       id: icao24,
-      layerId: 'flights',
-      layerName: 'Live Flights',
+      layerId: flightState.identity.id,
+      layerName: flightState.identity.name,
       source: flightState.feed._lastSource,
       label: parts.queries._contactLabel(
         icao24,
@@ -403,7 +403,7 @@ export function createTracking({
       flightState._trailHeadEntity = flightState._viewer.entities.add({
         // 'gev-trail' namespace (round 6): claimed by trailRenderer's pick
         // owner so a click on the head segment never reads as empty space.
-        id: `gev-trail:fl-head-${++flightState._trailHeadSeq}`,
+        id: `gev-trail:${flightState.identity.trailKey}-head-${++flightState._trailHeadSeq}`,
         show: !flightState._cockpitContactMode,
         polyline: {
           positions: new Cesium.CallbackProperty(() => {
@@ -624,11 +624,11 @@ export function createTracking({
     flightState._trackedCameraFrameStop?.();
     flightState._trackedCameraFrameStop = null;
     if (!flightState._trackedIcao) {
-      clearFocusTarget('flights');
+      clearFocusTarget(flightState.identity.id);
       return;
     }
     const clearedIcao = flightState._trackedIcao;
-    clearFocusTarget('flights', clearedIcao);
+    clearFocusTarget(flightState.identity.id, clearedIcao);
 
     // Restore the original billboard appearance. The rotation is re-seeded from
     // the tracked entity's last rendered rotation and a rotation pass is forced
@@ -670,9 +670,9 @@ export function createTracking({
       clearedIcao,
       flightState._billboards.get(clearedIcao),
     );
-    clearTrackedSubjectContext('flights');
+    clearTrackedSubjectContext(flightState.identity.id);
     _emitAwarenessEvent('gev:awareness-subject-cleared', {
-      layerId: 'flights',
+      layerId: flightState.identity.id,
       id: clearedIcao,
       origin,
       reason: evicted ? 'evicted' : 'deliberate',
@@ -997,7 +997,7 @@ export function createTracking({
       },
     });
     flightState._trackedEntity.gevSelectionOrigin = origin;
-    flightState._trackedEntity.gevTrackedId = `flights:${icao24}`;
+    flightState._trackedEntity.gevTrackedId = `${flightState.identity.id}:${icao24}`;
     flightState._trackedEntity.gevLabelModel = trackedLabelModelFromText(
       _trackedLabelText(icao24),
       '#39d0ff',
@@ -1126,6 +1126,24 @@ export function createTracking({
    * @param {Cesium.Viewer} viewer
    */
 
+  /**
+   * The ICAO of a pick on THIS instance's own billboard or fleet model, else null.
+   * Checked by primitive identity, not id alone: sibling civil-flight instances
+   * (Live Flights and the local-receiver layer) key contacts by the same bare
+   * ICAO hex, so an id match would let one click select in both layers.
+   * For BillboardCollection picks the id may surface on picked.primitive or, in
+   * some CesiumJS versions, as a string on picked.id.
+   */
+  function _ownPickedIcao(picked) {
+    const primitive = picked?.primitive;
+    const id = typeof picked?.id === 'string' ? picked.id : primitive?.id;
+    if (typeof id !== 'string' || !flightState._billboards.has(id)) return null;
+    if (!primitive) return id;
+    if (flightState._billboards.get(id) === primitive) return id;
+    if (flightState._models.get(id) === primitive) return id;
+    return null;
+  }
+
   function _installClickHandler(viewer) {
     if (flightState._clickHandler) return; // already installed
 
@@ -1184,25 +1202,10 @@ export function createTracking({
             return;
         }
 
-        // For BillboardCollection picks, the billboard may be at picked.primitive or picked.id
-        const billboard = picked.primitive;
-        if (
-          billboard &&
-          billboard.id &&
-          flightState._billboards.has(billboard.id)
-        ) {
+        const ownIcao = _ownPickedIcao(picked);
+        if (ownIcao) {
           _cancelPendingTrackingRestore();
-          _trackFlight(billboard.id, { origin: 'user' });
-          return;
-        }
-        // Some CesiumJS versions surface the id as a string on picked.id instead
-        if (
-          picked.id &&
-          typeof picked.id === 'string' &&
-          flightState._billboards.has(picked.id)
-        ) {
-          _cancelPendingTrackingRestore();
-          _trackFlight(picked.id, { origin: 'user' });
+          _trackFlight(ownIcao, { origin: 'user' });
           return;
         }
       }
@@ -1214,7 +1217,8 @@ export function createTracking({
       // registry predicates can recognize them (H2).
       if (picked) {
         const pickedId = resolvePickId(picked);
-        if (pickedId && isOwnedByOtherLayer('flights', pickedId)) return;
+        if (pickedId && isOwnedByOtherLayer(flightState.identity.id, pickedId))
+          return;
       }
 
       // Clicked empty space — deselect only for a clean, short click. A slow

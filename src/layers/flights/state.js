@@ -3,9 +3,26 @@ import { createFlightFeed } from './ingestion.js';
 import * as Cesium from 'cesium';
 import { ENRICH_AMBIENT_BUDGET_CEIL } from './policy.js';
 
-export function createFlightState({ source, services }) {
+/** Default identity: the public Live Flights layer. Another instance (e.g. the
+ *  local-receiver layer) supplies its own so pick owners, focus targets, sprite
+ *  order, render holds and trail ids never collide between instances. */
+export const CIVIL_FLIGHT_IDENTITY = Object.freeze({
+  id: 'flights',
+  name: 'Live Flights',
+  icon: '✈️',
+  trailKey: 'fl',
+  updateInterval: 30000,
+});
+
+export function createFlightState({ source, services, identity = {} }) {
   const { createGroundSnap } = services.groundSnap;
   const flightState = { lifetime: new AbortController() };
+  flightState.identity = Object.freeze({
+    ...CIVIL_FLIGHT_IDENTITY,
+    ...identity,
+    trailKey:
+      identity.trailKey || identity.id || CIVIL_FLIGHT_IDENTITY.trailKey,
+  });
   flightState.feed = createFlightFeed(source);
   flightState.records = new FlightRecords({
     ...services.geoid,

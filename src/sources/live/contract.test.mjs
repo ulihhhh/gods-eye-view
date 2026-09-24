@@ -4,6 +4,7 @@ import {
   createOpenSkySource,
   createAdsbLolSource,
   createAisStreamSource,
+  createLocalReceiverSource,
   normalizeReadsbAircraft,
   normalizeVesselObservation,
   openSkySnapshot,
@@ -312,4 +313,72 @@ test('identity lookup validates its response and honors body-parse cancellation'
   await assert.rejects(source.getIdentities({}, { signal: abort.signal }), {
     name: 'AbortError',
   });
+});
+
+test('local receiver snapshots use the receiver clock, per-aircraft position age and a readsb trail', async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    if (url.startsWith('/api/local-adsb/trace'))
+      return response({
+        timestamp: now / 1000 - 60,
+        trace: [
+          [0, 41.1, 2.1, 30000],
+          [30, 41.2, 2.2, 'ground'],
+        ],
+      });
+    return response({
+      now: now / 1000 - 1,
+      heard: 3,
+      stale: false,
+      ac: [
+        {
+          hex: '4CA251',
+          flight: 'RYR40MN',
+          lat: 41.8,
+          lon: 2.99,
+          alt_baro: 37000,
+          gs: 495.7,
+          track: 234.2,
+          category: 'A3',
+          seen: 0.3,
+          seen_pos: 4,
+        },
+        {
+          hex: '4d2242',
+          lat: 42.2,
+          lon: 3.05,
+          alt_baro: 'ground',
+          seen_pos: 0,
+        },
+      ],
+    });
+  };
+  const source = createLocalReceiverSource({ fetchImpl, now: () => now });
+  assert.deepEqual(calls, [], 'construction is inert');
+  const snapshot = await source.getSnapshot();
+  assert.equal(snapshot.source, 'Local receiver');
+  assert.equal(snapshot.observedAtMs, now - 1000);
+  assert.equal(snapshot.freshness, 'current');
+  assert.equal(snapshot.heard, 3);
+  const [ryanair, grounded] = snapshot.records;
+  assert.equal(ryanair.id, '4ca251');
+  assert.equal(ryanair.callsign, 'RYR40MN');
+  assert.equal(ryanair.category, 'A3');
+  assert.equal(ryanair.positionTimeMs, now - 5000);
+  assert.equal(grounded.onGround, true);
+
+  const track = await source.getTrack('4ca251');
+  assert.equal(calls.at(-1), '/api/local-adsb/trace?hex=4ca251');
+  assert.equal(track.records.length, 2);
+  assert.equal(track.records[1].observedAtMs, now - 30000);
+  assert.equal(track.records[1].onGround, true);
+  assert.equal(typeof source.getEnrichment, 'function');
+});
+
+test('an unreachable local receiver names the fix instead of a bare HTTP status', async () => {
+  const source = createLocalReceiverSource({
+    fetchImpl: async () => response({ error: 'unreachable' }, {}, 502),
+  });
+  await assert.rejects(source.getSnapshot(), /startadsb/);
 });

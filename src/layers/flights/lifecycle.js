@@ -45,12 +45,15 @@ export function createLifecycle({
         throw new TypeError('A snapshot source is required');
       if (flightState.lifetime.signal.aborted)
         flightState.lifetime = new AbortController();
-      clearFocusTarget('flights');
+      clearFocusTarget(flightState.identity.id);
       flightState._focusEvidenceIds.clear();
       flightState._viewer = viewer;
       flightState._billboardCollection = new Cesium.BillboardCollection();
       viewer.scene.primitives.add(flightState._billboardCollection);
-      registerSpriteCollection('flights', flightState._billboardCollection);
+      registerSpriteCollection(
+        flightState.identity.id,
+        flightState._billboardCollection,
+      );
       flightState._modelCollection = new Cesium.PrimitiveCollection();
       viewer.scene.primitives.add(flightState._modelCollection);
       // Warm the glTF cache so the tracked plane's model instantiates instantly when first needed
@@ -136,7 +139,7 @@ export function createLifecycle({
     enable(viewer) {
       if (flightState._billboardCollection)
         flightState._billboardCollection.show = true;
-      holdContinuousRender('flights'); // per-frame animator (perf wave 2)
+      holdContinuousRender(flightState.identity.id); // per-frame animator (perf wave 2)
       if (flightState._modelCollection)
         flightState._modelCollection.show = true;
       parts.tracking._setCockpitContactMode(
@@ -156,7 +159,7 @@ export function createLifecycle({
           });
       }
       parts.tracking._installClickHandler(viewer);
-      registerPickOwner('flights', (pickedId) =>
+      registerPickOwner(flightState.identity.id, (pickedId) =>
         flightState._billboards.has(pickedId),
       );
       // Force a fresh rotation pass on the first tick after re-enable
@@ -189,7 +192,7 @@ export function createLifecycle({
           },
         );
       }
-      restoreSpriteOrderOnEnable('flights', viewer);
+      restoreSpriteOrderOnEnable(flightState.identity.id, viewer);
     },
 
     /**
@@ -202,7 +205,7 @@ export function createLifecycle({
       parts.tracking._cancelPendingTrackingRestore();
       if (flightState._billboardCollection)
         flightState._billboardCollection.show = false;
-      releaseContinuousRender('flights');
+      releaseContinuousRender(flightState.identity.id);
       parts.rendering._releaseModels();
       if (flightState._modelCollection)
         flightState._modelCollection.show = false;
@@ -219,7 +222,7 @@ export function createLifecycle({
         flightState._trackedEntityChangedRemove = null;
       }
       document.removeEventListener('keydown', parts.tracking._onKeyDown);
-      unregisterPickOwner('flights');
+      unregisterPickOwner(flightState.identity.id);
       if (flightState._preRenderRemove) {
         flightState._preRenderRemove();
         flightState._preRenderRemove = null;
@@ -244,7 +247,7 @@ export function createLifecycle({
       flightState._enrichActive = 0;
       flightState._enrichLastDispatchMs = 0;
       parts.controller._abortActiveUpdates();
-      releaseContinuousRender('flights'); // direct-destroy path (perf wave 2 fix)
+      releaseContinuousRender(flightState.identity.id); // direct-destroy path (perf wave 2 fix)
       parts.tracking._clearTracking();
       parts.tracking._destroyTrail();
       parts.tracking._cancelPendingTrackingRestore();
@@ -268,7 +271,7 @@ export function createLifecycle({
         );
         flightState._cockpitModeListener = null;
       }
-      unregisterPickOwner('flights');
+      unregisterPickOwner(flightState.identity.id);
       if (flightState._preRenderRemove) {
         flightState._preRenderRemove();
         flightState._preRenderRemove = null;

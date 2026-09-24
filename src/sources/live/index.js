@@ -16,4 +16,5 @@ export {
   createOpenSkySource,
   createAdsbLolSource,
   createAisStreamSource,
+  createLocalReceiverSource,
 } from './standalone.js';

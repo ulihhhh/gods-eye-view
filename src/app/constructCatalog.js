@@ -21,7 +21,6 @@ import { createApplicationCables } from './layers/submarineCables.js';
 import { createInfrastructureLayers } from '../data/infrastructure.js';
 import { localGeoJsonServices } from './localGeojsonServices.js';
 import { createLiveuamapLayer } from '../data/liveuamap.js';
-import { createLocalAdsbLayer } from '../data/localAdsb.js';
 import { createAemetStationsLayer } from '../data/aemetStations.js';
 import { createAemetWarningsLayer } from '../data/aemetWarnings.js';
 import { createAemetWeatherImageryLayer } from '../data/aemetWeatherImagery.js';
@@ -34,6 +33,7 @@ import { createBhoteKoshiLocatorLayer } from '../data/bhoteKoshiLocator.js';
 const SOURCE_METHODS = Object.freeze({
   flights: ['getSnapshot'],
   military: ['getSnapshot'],
+  localReceiver: ['getSnapshot'],
   vessels: ['getSnapshot'],
   cctv: ['getCatalog', 'getHealth', 'getFrameUrl', 'getMediaUrl'],
   radio: ['getDirectory', 'recordClick'],
@@ -99,6 +99,22 @@ export function createApplicationCatalog({
       militaryRegistry,
       resolveAsset,
     });
+    // The operator's own antenna (docs/plans/local-usb-sdr.md): a second
+    // civil-flight engine instance with its own identity, so it gets the
+    // native aircraft icons, click-to-track, trails and enrichment.
+    const localAdsb = createApplicationFlights({
+      surface,
+      source: sources.localReceiver,
+      militaryRegistry,
+      resolveAsset,
+      identity: {
+        id: 'local-adsb',
+        name: 'Local ADS-B (own receiver)',
+        icon: '📡',
+        // The receiver hears live traffic with no aggregator delay.
+        updateInterval: 3000,
+      },
+    });
     const vessels = createApplicationVessels({
       source: sources.vessels,
       options: vesselOptions,
@@ -147,7 +163,7 @@ export function createApplicationCatalog({
           feed: sources.firms,
         }),
         createLiveuamapLayer(),
-        createLocalAdsbLayer(),
+        localAdsb,
         createAemetStationsLayer(),
         createAemetWarningsLayer(),
         createAemetWeatherImageryLayer(),

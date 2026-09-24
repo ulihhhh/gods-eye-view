@@ -41,6 +41,18 @@ test('catalogs construct distinct layers and classification from their supplied 
   });
   assert.equal(first.layers.length, 29);
   assert.ok(first.get('transit'));
+  const flights = first.get('flights');
+  const localAdsb = first.get('local-adsb');
+  assert.notEqual(
+    localAdsb,
+    flights,
+    'own receiver is a separate engine instance',
+  );
+  assert.equal(flights.name, 'Live Flights');
+  assert.equal(flights.updateInterval, 30000);
+  assert.equal(localAdsb.name, 'Local ADS-B (own receiver)');
+  assert.equal(localAdsb.icon, '📡');
+  assert.equal(localAdsb.updateInterval, 3000);
   const order = first.layers.map(({ id }) => id);
   assert.deepEqual(
     order.slice(order.indexOf('traffic'), order.indexOf('directions') + 1),

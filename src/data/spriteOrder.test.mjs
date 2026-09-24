@@ -110,7 +110,10 @@ test('flights, AIS, and FIRMS enable paths are wired through the shared sprite r
   assert.deepEqual(calls, [viewer, viewer, viewer]);
 
   const firmsLayer = createFirmsHeatmapLayer({ id: 'firms', name: 'FIRMS' });
-  assert.match(flightsLayer.enable.toString(), /restoreSpriteOrderOnEnable\('flights', viewer\)/);
+  // The civil-flight engine keys every registration by its instance identity
+  // (Live Flights = 'flights'; the local-receiver instance has its own).
+  assert.equal(flightsLayer.id, 'flights');
+  assert.match(flightsLayer.enable.toString(), /restoreSpriteOrderOnEnable\(flightState\.identity\.id, viewer\)/);
   assert.match(aisLiveVesselsLayer.enable.toString(), /restoreSpriteOrderOnEnable\('ais', activeViewer\)/);
   assert.match(firmsLayer.enable.toString(), /restoreSpriteOrderOnEnable\('firms', viewer\)/);
   assert.match(

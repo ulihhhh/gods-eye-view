@@ -260,11 +260,11 @@ export function createQueries({
   const methods = {
     mapAnalystRecord,
 
-    id: 'flights',
+    id: flightState.identity.id,
 
-    name: 'Live Flights',
+    name: flightState.identity.name,
 
-    icon: '✈️',
+    icon: flightState.identity.icon,
 
     source: flightState.feed._lastSource,
 
@@ -274,7 +274,7 @@ export function createQueries({
       parts.testing._clearDisplayFloorStateForTest,
 
     /** @type {number} Polling interval (ms) between update() calls */
-    updateInterval: 30000,
+    updateInterval: flightState.identity.updateInterval,
 
     /**
      * Live layer params.
@@ -856,7 +856,7 @@ export function createQueries({
       const described = _describeFlight(flightState._trackedIcao);
       if (!described?.position) return null;
       return {
-        layerId: 'flights',
+        layerId: flightState.identity.id,
         id: described.icao24,
         // Same label chain as getNearby/getDetectableObjects: a callsign-less
         // contact reads as its registration, never as the raw ICAO hex.

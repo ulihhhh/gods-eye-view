@@ -14,9 +14,10 @@ import { createQueries } from './queries.js';
 export function createCivilFlightLayer({
   source,
   services,
+  identity,
   resolveAsset = (url) => url,
 } = {}) {
-  const flightState = createFlightState({ source, services });
+  const flightState = createFlightState({ source, services, identity });
   const parts = {};
   const layer = {};
   const context = { flightState, services, parts, layer, resolveAsset };

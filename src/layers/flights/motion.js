@@ -387,7 +387,7 @@ export function createMotion({
     if (!raw) {
       flightState._cachedDRPosition = null;
       flightState._drReconcileValid = false;
-      clearFocusTarget('flights', icao24);
+      clearFocusTarget(flightState.identity.id, icao24);
       return null;
     }
 
@@ -452,7 +452,7 @@ export function createMotion({
     // consumes. Re-running DR from a later frame phase recreates the historical
     // target-vs-camera jitter bug.
     publishFocusTargetFromCachedPosition({
-      ownerLayer: 'flights',
+      ownerLayer: flightState.identity.id,
       id: icao24,
       scene: flightState._viewer?.scene,
       camera: flightState._viewer?.camera,
