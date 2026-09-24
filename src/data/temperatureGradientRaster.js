@@ -60,7 +60,12 @@ function computeBbox(features) {
       }
     }
   }
-  return [minLon - BBOX_PADDING_DEG, minLat - BBOX_PADDING_DEG, maxLon + BBOX_PADDING_DEG, maxLat + BBOX_PADDING_DEG];
+  return [
+    minLon - BBOX_PADDING_DEG,
+    minLat - BBOX_PADDING_DEG,
+    maxLon + BBOX_PADDING_DEG,
+    maxLat + BBOX_PADDING_DEG,
+  ];
 }
 
 /** lon/lat → canvas pixel, top = north (row 0), matching `buildIdwGrid`'s own orientation. */
@@ -126,7 +131,8 @@ function buildRegionImage(features, points, createCanvas) {
 
   const allRings = features.flatMap((f) => f.rings);
   const clipPath = new Path2D();
-  for (const ring of allRings) clipPath.addPath(ringToPath2D(ring, bbox, outputWidth, outputHeight));
+  for (const ring of allRings)
+    clipPath.addPath(ringToPath2D(ring, bbox, outputWidth, outputHeight));
 
   ctx.save();
   ctx.clip(clipPath);
@@ -147,13 +153,25 @@ function buildRegionImage(features, points, createCanvas) {
  *   region with no boundary features (shouldn't happen with the bundled
  *   pack) or no DOM is simply omitted rather than failing the whole call.
  */
-export async function buildTemperatureGradientImages(stations, { createCanvas = defaultCreateCanvas } = {}) {
+export async function buildTemperatureGradientImages(
+  stations,
+  { createCanvas = defaultCreateCanvas } = {},
+) {
   const allFeatures = await getCcaaFeatures();
-  const mainlandFeatures = allFeatures.filter((f) => !CANARY_PROVINCE_IDS.has(f.id));
-  const canaryFeatures = allFeatures.filter((f) => CANARY_PROVINCE_IDS.has(f.id));
+  const mainlandFeatures = allFeatures.filter(
+    (f) => !CANARY_PROVINCE_IDS.has(f.id),
+  );
+  const canaryFeatures = allFeatures.filter((f) =>
+    CANARY_PROVINCE_IDS.has(f.id),
+  );
 
   const points = (stations || [])
-    .filter((s) => Number.isFinite(s?.lat) && Number.isFinite(s?.lon) && Number.isFinite(s?.temperatureC))
+    .filter(
+      (s) =>
+        Number.isFinite(s?.lat) &&
+        Number.isFinite(s?.lon) &&
+        Number.isFinite(s?.temperatureC),
+    )
     .map((s) => ({ lat: s.lat, lon: s.lon, value: s.temperatureC }));
   if (!points.length) return [];
 

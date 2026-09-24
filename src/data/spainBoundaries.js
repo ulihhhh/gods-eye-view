@@ -34,9 +34,15 @@ import { createRetryableLoader } from './retryableLoad.js';
  */
 async function loadPackFile() {
   if (typeof document !== 'undefined' && typeof fetch === 'function') {
-    const url = new URL('./local_data/spain_boundaries/provinces.json', import.meta.url);
+    const url = new URL(
+      './local_data/spain_boundaries/provinces.json',
+      import.meta.url,
+    );
     const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to fetch provinces.json: HTTP ${response.status}`);
+    if (!response.ok)
+      throw new Error(
+        `Failed to fetch provinces.json: HTTP ${response.status}`,
+      );
     return response.json();
   }
   const mod = await import('./local_data/spain_boundaries/provinces.json', {

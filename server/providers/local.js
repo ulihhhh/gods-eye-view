@@ -13,6 +13,7 @@ import { cctvProxy } from './cctv.js';
 import { defaultSourceRoot } from './common/source-root.js';
 import { radioBrowserProxy } from './radio.js';
 import { gbfsProxy } from './gbfs.js';
+import { localReceiversProxy } from './local-receivers.js';
 import { transitProxy } from './transit.js';
 import { adsbLolProxy } from './aircraft/adsb-lol.js';
 import { localAdsbProxy } from './aircraft/local-adsb.js';
@@ -34,6 +35,7 @@ import {
   aemetWarningsProxy,
   weatherProxy,
 } from './weather.js';
+import { firePerimetersProxy } from './firePerimeters.js';
 import { cycloneProxy } from './cyclones.js';
 import { windProxy } from './wind.js';
 
@@ -65,6 +67,7 @@ function localProviderPlugins() {
     cctvProxy({ sourceRoot: defaultSourceRoot }),
     radioBrowserProxy(),
     gbfsProxy(),
+    localReceiversProxy(),
     transitProxy(),
     adsbLolProxy(),
     localAdsbProxy(),
@@ -75,6 +78,7 @@ function localProviderPlugins() {
     windProxy(),
     weatherProxy(),
     cycloneProxy(),
+    firePerimetersProxy(),
     keySetupEndpoint(),
   ];
 }

@@ -9,13 +9,19 @@ import {
   setOverlayEntries,
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
-import { TEMPERATURE_COLOR_STOPS, temperatureColorRgb } from './temperatureColorScale.js';
+import {
+  TEMPERATURE_COLOR_STOPS,
+  temperatureColorRgb,
+} from './temperatureColorScale.js';
 import { buildTemperatureGradientImages } from './temperatureGradientRaster.js';
 import { getCcaaFeatures } from './spainBoundaries.js';
 import { SPAIN_PROVINCIAL_CAPITALS } from './spainCapitals.js';
 import { buildCapitalTemperatureRecords } from './capitalTemperatures.js';
 
-export { TEMPERATURE_COLOR_STOPS, temperatureColorRgb } from './temperatureColorScale.js';
+export {
+  TEMPERATURE_COLOR_STOPS,
+  temperatureColorRgb,
+} from './temperatureColorScale.js';
 
 /**
  * AEMET OpenData live weather station pins — Spain only (~850 stations).
@@ -58,7 +64,9 @@ export const AEMET_CAPITALS_OVERLAY_SOURCE_OPTIONS = Object.freeze({
   moving: false,
 });
 
-const CCAA_BORDER_COLOR = Cesium.Color.fromCssColorString('rgba(20, 24, 30, 0.55)');
+const CCAA_BORDER_COLOR = Cesium.Color.fromCssColorString(
+  'rgba(20, 24, 30, 0.55)',
+);
 const CCAA_BORDER_WIDTH_PX = 1.5;
 
 const DEFAULT_OVERLAY_HOST = Object.freeze({
@@ -276,7 +284,12 @@ export function createAemetStationSelectedOverlayEntry(
  * @param {number} input.temperatureC
  * @returns {object}
  */
-export function createCapitalTemperatureOverlayEntry({ id, position, name, temperatureC }) {
+export function createCapitalTemperatureOverlayEntry({
+  id,
+  position,
+  name,
+  temperatureC,
+}) {
   return {
     id: String(id),
     position,
@@ -387,7 +400,9 @@ export function createAemetStationsLayer({
   }
 
   function _removeGradientLayer() {
-    if (_viewer) for (const layer of _gradientLayers) _viewer.imageryLayers.remove(layer, true);
+    if (_viewer)
+      for (const layer of _gradientLayers)
+        _viewer.imageryLayers.remove(layer, true);
     _gradientLayers = [];
   }
 
@@ -436,15 +451,30 @@ export function createAemetStationsLayer({
     if (_viewMode !== 'gradient' || !_enabled || !_viewer) return;
     const token = ++_capitalLabelsToken;
     const stations = [..._stationById.values()];
-    const records = buildCapitalTemperatureRecords(SPAIN_PROVINCIAL_CAPITALS, stations);
-    if (token !== _capitalLabelsToken || _viewMode !== 'gradient' || !_enabled || !_viewer) return;
-    const entries = records.map((r) => createCapitalTemperatureOverlayEntry({
-      id: `capital:${r.capitalId}`,
-      position: Cesium.Cartesian3.fromDegrees(r.lon, r.lat),
-      name: r.name,
-      temperatureC: r.temperatureC,
-    }));
-    overlayHost.setEntries(AEMET_CAPITALS_OVERLAY_SOURCE_ID, entries, AEMET_CAPITALS_OVERLAY_SOURCE_OPTIONS);
+    const records = buildCapitalTemperatureRecords(
+      SPAIN_PROVINCIAL_CAPITALS,
+      stations,
+    );
+    if (
+      token !== _capitalLabelsToken ||
+      _viewMode !== 'gradient' ||
+      !_enabled ||
+      !_viewer
+    )
+      return;
+    const entries = records.map((r) =>
+      createCapitalTemperatureOverlayEntry({
+        id: `capital:${r.capitalId}`,
+        position: Cesium.Cartesian3.fromDegrees(r.lon, r.lat),
+        name: r.name,
+        temperatureC: r.temperatureC,
+      }),
+    );
+    overlayHost.setEntries(
+      AEMET_CAPITALS_OVERLAY_SOURCE_ID,
+      entries,
+      AEMET_CAPITALS_OVERLAY_SOURCE_OPTIONS,
+    );
   }
 
   /**
@@ -469,19 +499,36 @@ export function createAemetStationsLayer({
       console.warn('[Data:AemetStations] Gradient build error:', e);
       return;
     }
-    if (token !== _gradientToken || _viewMode !== 'gradient' || !_enabled || !_viewer) return;
+    if (
+      token !== _gradientToken ||
+      _viewMode !== 'gradient' ||
+      !_enabled ||
+      !_viewer
+    )
+      return;
     if (!results?.length) {
       _gradientError = 'No station data for gradient';
       return;
     }
     try {
-      const providers = await Promise.all(results.map((result) => Cesium.SingleTileImageryProvider.fromUrl(
-        result.dataUrl,
-        { rectangle: Cesium.Rectangle.fromDegrees(...result.bbox) },
-      )));
-      if (token !== _gradientToken || _viewMode !== 'gradient' || !_enabled || !_viewer) return;
+      const providers = await Promise.all(
+        results.map((result) =>
+          Cesium.SingleTileImageryProvider.fromUrl(result.dataUrl, {
+            rectangle: Cesium.Rectangle.fromDegrees(...result.bbox),
+          }),
+        ),
+      );
+      if (
+        token !== _gradientToken ||
+        _viewMode !== 'gradient' ||
+        !_enabled ||
+        !_viewer
+      )
+        return;
       _removeGradientLayer();
-      _gradientLayers = providers.map((provider) => new Cesium.ImageryLayer(provider));
+      _gradientLayers = providers.map(
+        (provider) => new Cesium.ImageryLayer(provider),
+      );
       for (const layer of _gradientLayers) _viewer.imageryLayers.add(layer);
       _gradientError = null;
     } catch (e) {
@@ -505,7 +552,8 @@ export function createAemetStationsLayer({
       if (_dataSource) _dataSource.show = false;
       void _rebuildGradientLayer();
       void _buildBordersOnce().then(() => {
-        if (_borderDataSource && _viewMode === 'gradient') _borderDataSource.show = true;
+        if (_borderDataSource && _viewMode === 'gradient')
+          _borderDataSource.show = true;
       });
       overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, true);
       void _rebuildCapitalLabels();
@@ -704,7 +752,8 @@ export function createAemetStationsLayer({
       if (_viewMode === 'gradient') {
         void _rebuildGradientLayer();
         void _buildBordersOnce().then(() => {
-          if (_borderDataSource && _viewMode === 'gradient' && _enabled) _borderDataSource.show = true;
+          if (_borderDataSource && _viewMode === 'gradient' && _enabled)
+            _borderDataSource.show = true;
         });
         overlayHost.setVisible(AEMET_CAPITALS_OVERLAY_SOURCE_ID, true);
         void _rebuildCapitalLabels();
@@ -751,15 +800,19 @@ export function createAemetStationsLayer({
             label: 'GRADIENTE',
             active: !isPoints,
             state: !isPoints ? (_gradientError ? 'error' : 'active') : 'idle',
-            title: _gradientError || 'Superficie interpolada (IDW) recortada a España, con fronteras de CCAA y temperaturas de capitales de provincia',
+            title:
+              _gradientError ||
+              'Superficie interpolada (IDW) recortada a España, con fronteras de CCAA y temperaturas de capitales de provincia',
             params: { viewMode: 'gradient' },
           },
         ],
-        legend: isPoints ? [] : TEMPERATURE_COLOR_STOPS.map((stop) => ({
-          label: `${stop.c}°C`,
-          color: `rgb(${stop.rgb.join(',')})`,
-          count: '',
-        })),
+        legend: isPoints
+          ? []
+          : TEMPERATURE_COLOR_STOPS.map((stop) => ({
+              label: `${stop.c}°C`,
+              color: `rgb(${stop.rgb.join(',')})`,
+              count: '',
+            })),
       };
     },
 

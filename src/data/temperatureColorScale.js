@@ -64,7 +64,8 @@ export function temperatureColorRgb(temperatureC) {
   if (!Number.isFinite(temperatureC)) return null;
   const stops = TEMPERATURE_COLOR_STOPS;
   if (temperatureC <= stops[0].c) return stops[0].rgb;
-  if (temperatureC >= stops[stops.length - 1].c) return stops[stops.length - 1].rgb;
+  if (temperatureC >= stops[stops.length - 1].c)
+    return stops[stops.length - 1].rgb;
   for (let i = 0; i < stops.length - 1; i++) {
     const a = stops[i];
     const b = stops[i + 1];

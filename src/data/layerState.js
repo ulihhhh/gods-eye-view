@@ -457,6 +457,11 @@ export const SHARE_TRACKING_RESTORE_POLICIES = Object.freeze({
  * owns stable URL ordering.
  */
 export const LAYER_STATE_REGISTRY = Object.freeze([
+  // '1' collides with upstream's 'recent-imagery' token added the same week;
+  // reassigned to '8' here rather than displacing upstream's grant. Renamed
+  // from 'local-adsb' when upstream's own local-only Local ADS-B layer (#732)
+  // took that id.
+  Object.freeze({ id: 'adsb-tap', token: '8', disposition: 'enabled-only' }),
   // 'o' collides with upstream's 'weather-satellite' token added the same
   // week; reassigned to '4' here rather than displacing upstream's grant.
   Object.freeze({
@@ -473,9 +478,10 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   }),
   // 'h' collides with upstream's 'bhote-koshi-2026' token added the same
   // week; reassigned to '2' here rather than displacing upstream's grant.
+  // '2' then collided with upstream's 'fire-perimeters' (#737); moved to '9'.
   Object.freeze({
     id: 'aemet-stations',
-    token: '2',
+    token: '9',
     disposition: 'enabled-only',
   }),
   Object.freeze({
@@ -534,6 +540,11 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({ id: 'directions', token: 'n', disposition: 'enabled-only' }),
   Object.freeze({ id: 'earthquakes', token: 'e', disposition: 'enabled-only' }),
   Object.freeze({
+    id: 'fire-perimeters',
+    token: '2',
+    disposition: 'enabled-only',
+  }),
+  Object.freeze({
     id: 'flights',
     token: 'f',
     disposition: 'enabled+options',
@@ -547,9 +558,6 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
     disposition: 'enabled+options',
     optionOwner: 'liveuamap',
   }),
-  // '1' collides with upstream's 'recent-imagery' token added the same week;
-  // reassigned to '8' here rather than displacing upstream's grant.
-  Object.freeze({ id: 'local-adsb', token: '8', disposition: 'enabled-only' }),
   Object.freeze({ id: 'local-dams', token: 'q', disposition: 'enabled-only' }),
   Object.freeze({
     id: 'local-datacenters',

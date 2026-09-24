@@ -111,18 +111,28 @@ function idwAt(neighbors, power) {
  *   — the same orientation a canvas's pixel buffer uses. `NaN` marks a cell
  *   with no nearby station data.
  */
-export function buildIdwGrid(points, bbox, {
-  cellsX = 160,
-  cellsY = null,
-  power = DEFAULT_POWER,
-  maxNeighbors = DEFAULT_MAX_NEIGHBORS,
-} = {}) {
+export function buildIdwGrid(
+  points,
+  bbox,
+  {
+    cellsX = 160,
+    cellsY = null,
+    power = DEFAULT_POWER,
+    maxNeighbors = DEFAULT_MAX_NEIGHBORS,
+  } = {},
+) {
   const [west, south, east, north] = bbox;
   const width = east - west;
   const height = north - south;
-  const resolvedCellsY = cellsY ?? Math.max(1, Math.round(cellsX * (height / width)));
+  const resolvedCellsY =
+    cellsY ?? Math.max(1, Math.round(cellsX * (height / width)));
 
-  const clean = points.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon) && Number.isFinite(p.value));
+  const clean = points.filter(
+    (p) =>
+      Number.isFinite(p.lat) &&
+      Number.isFinite(p.lon) &&
+      Number.isFinite(p.value),
+  );
   const values = new Float32Array(cellsX * resolvedCellsY).fill(NaN);
   if (!clean.length) return { values, cellsX, cellsY: resolvedCellsY, bbox };
 
@@ -138,7 +148,8 @@ export function buildIdwGrid(points, bbox, {
     for (let col = 0; col < cellsX; col++) {
       const lon = west + ((col + 0.5) / cellsX) * width;
       const neighbors = findNearestNeighbors(hashGrid, lon, lat, maxNeighbors);
-      if (neighbors.length) values[row * cellsX + col] = idwAt(neighbors, power);
+      if (neighbors.length)
+        values[row * cellsX + col] = idwAt(neighbors, power);
     }
   }
 

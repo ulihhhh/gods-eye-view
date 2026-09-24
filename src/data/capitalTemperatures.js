@@ -18,7 +18,8 @@ import { haversineKm } from './analystEngine.js';
  * @returns {{station: object, distanceKm: number}|null}
  */
 export function findNearestAemetStation(capital, stations) {
-  if (!Number.isFinite(capital?.lat) || !Number.isFinite(capital?.lon)) return null;
+  if (!Number.isFinite(capital?.lat) || !Number.isFinite(capital?.lon))
+    return null;
   if (!Array.isArray(stations) || !stations.length) return null;
   let best = null;
   let bestKm = Infinity;
@@ -40,9 +41,13 @@ export function findNearestAemetStation(capital, stations) {
  */
 export function buildCapitalTemperatureRecords(capitals, stations) {
   const candidates = (stations || []).filter(
-    (s) => Number.isFinite(s?.lat) && Number.isFinite(s?.lon) && Number.isFinite(s?.temperatureC),
+    (s) =>
+      Number.isFinite(s?.lat) &&
+      Number.isFinite(s?.lon) &&
+      Number.isFinite(s?.temperatureC),
   );
-  if (!candidates.length || !Array.isArray(capitals) || !capitals.length) return [];
+  if (!candidates.length || !Array.isArray(capitals) || !capitals.length)
+    return [];
 
   const records = [];
   for (const capital of capitals) {

@@ -24,7 +24,7 @@ const LOCAL_ADSB_POINT_COLOR = Cesium.Color.fromCssColorString('#ff2ec4');
 const LOCAL_ADSB_OUTLINE_COLOR = Cesium.Color.BLACK.withAlpha(0.6);
 
 export function localAdsbEntityId(hex) {
-  return `local-adsb:${hex}`;
+  return `adsb-tap:${hex}`;
 }
 
 /**
@@ -72,7 +72,7 @@ export function buildLocalAdsbEntityOptions(row) {
       flight: row.flight,
       altitudeFt: row.altitudeFt,
       groundSpeedKt: row.groundSpeedKt,
-      source: 'local-adsb',
+      source: 'adsb-tap',
     },
   };
 }
@@ -87,8 +87,10 @@ export function createLocalAdsbLayer() {
   let _baseUrl = null;
 
   const layer = {
-    id: 'local-adsb',
-    name: 'Local ADS-B (own receiver)',
+    // Upstream's browser RTL-SDR layer (#732) owns the `local-adsb` id; this
+    // dump1090/readsb tap keeps a distinct id so both can register.
+    id: 'adsb-tap',
+    name: 'ADS-B Tap (own dump1090)',
     icon: '📡',
     source: 'Local dump1090/readsb',
     // Short poll — the whole point of this layer (per issue #57) is showing
@@ -98,7 +100,7 @@ export function createLocalAdsbLayer() {
     updateInterval: 3000,
 
     init(viewer) {
-      _dataSource = new Cesium.CustomDataSource('local-adsb');
+      _dataSource = new Cesium.CustomDataSource('adsb-tap');
       _dataSource.show = false;
       viewer.dataSources.add(_dataSource);
       _enabled = false;

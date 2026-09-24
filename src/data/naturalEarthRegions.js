@@ -11,12 +11,12 @@
  *
  * PURE data module — no Cesium imports, node-testable. The packs are lazy-
  * loaded on first lookup and cached in module scope (bbox/area computed once
- * at load). In the browser the packs are loaded with `fetch()`; under node
- * the same files are read via a JSON-attributed dynamic import (see
- * `loadPackFile`'s comment for why the two paths differ). A failed load is
- * retried on the next lookup rather than cached (see `createRetryableLoader`).
+ * at load) through `loadBundledJson`, which works in the browser and under
+ * node:test. A failed load is retried on the next lookup rather than cached
+ * (see `createRetryableLoader`).
  */
 
+import { loadBundledJson } from './bundledJson.js';
 import { createRetryableLoader } from './retryableLoad.js';
 
 const EARTH_RADIUS_KM = 6371;
@@ -121,36 +121,22 @@ function suffixVariants(norm) {
 /** @type {Array|null} flat entry list for listRegions() */
 let _entries = null;
 
-/**
- * Browser vs. Node take different paths on purpose: a dynamic
- * `import(..., { with: { type: 'json' } })` for a Vite-transformed
- * `?import`-suffixed specifier throws "Failed to fetch dynamically imported
- * module" when it runs as part of the real module graph in this Vite version
- * (confirmed live — the dev server's own response carries the right
- * `Content-Type: application/json`, and the identical import succeeds when
- * typed standalone in the browser console; it's this exact code path that
- * fails). A plain `fetch()` sidesteps that dynamic-import machinery entirely
- * and is unaffected. Node has no such quirk, but a dynamic import needs the
- * attribute there to recognize the file as JSON at all under `node:test`.
- */
-async function loadPackFile(base) {
-  const file = base === 'regions' ? 'regions.json' : 'marine.json';
-  if (typeof document !== 'undefined' && typeof fetch === 'function') {
-    const url = new URL(`./local_data/natural_earth/${file}`, import.meta.url);
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Failed to fetch ${file}: HTTP ${response.status}`);
-    return response.json();
-  }
-  const mod =
-    base === 'regions'
-      ? await import('./local_data/natural_earth/regions.json', {
-          with: { type: 'json' },
-        })
-      : await import('./local_data/natural_earth/marine.json', {
-          with: { type: 'json' },
-        });
-  return mod.default || mod;
-}
+const PACKS = {
+  regions: {
+    url: new URL('./local_data/natural_earth/regions.json', import.meta.url),
+    importJson: () =>
+      import('./local_data/natural_earth/regions.json', {
+        with: { type: 'json' },
+      }),
+  },
+  marine: {
+    url: new URL('./local_data/natural_earth/marine.json', import.meta.url),
+    importJson: () =>
+      import('./local_data/natural_earth/marine.json', {
+        with: { type: 'json' },
+      }),
+  },
+};
 
 function buildEntries(pack, kind) {
   const out = [];
@@ -192,8 +178,8 @@ function buildEntries(pack, kind) {
  */
 const loadIndex = createRetryableLoader(async () => {
   const [regions, marine] = await Promise.all([
-    loadPackFile('regions'),
-    loadPackFile('marine'),
+    loadBundledJson(PACKS.regions.url, PACKS.regions.importJson),
+    loadBundledJson(PACKS.marine.url, PACKS.marine.importJson),
   ]);
   _entries = [
     ...buildEntries(regions, 'natural'),
