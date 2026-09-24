@@ -16,7 +16,6 @@ import { gbfsProxy } from './gbfs.js';
 import { localReceiversProxy } from './local-receivers.js';
 import { transitProxy } from './transit.js';
 import { adsbLolProxy } from './aircraft/adsb-lol.js';
-import { localAdsbProxy } from './aircraft/local-adsb.js';
 import { aisLiveProxy } from './vessels/ais-live.js';
 import { trackBackfillProxies } from './aircraft/tracks.js';
 import { openAiRealtimeProxy } from './openai.js';
@@ -70,7 +69,6 @@ function localProviderPlugins() {
     localReceiversProxy(),
     transitProxy(),
     adsbLolProxy(),
-    localAdsbProxy(),
     aisLiveProxy(),
     trackBackfillProxies(),
     openAiRealtimeProxy(),

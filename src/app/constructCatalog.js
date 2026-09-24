@@ -28,7 +28,6 @@ import { createApplicationCables } from './layers/submarineCables.js';
 import { createInfrastructureLayers } from '../data/infrastructure.js';
 import { localGeoJsonServices } from './localGeojsonServices.js';
 import { createLiveuamapLayer } from '../data/liveuamap.js';
-import { createLocalAdsbLayer } from '../data/localAdsb.js';
 import { createAemetStationsLayer } from '../data/aemetStations.js';
 import { createAemetWarningsLayer } from '../data/aemetWarnings.js';
 import { createAemetWeatherImageryLayer } from '../data/aemetWeatherImagery.js';
@@ -201,7 +200,6 @@ export function createApplicationCatalog({
           feed: sources.firms,
         }),
         createLiveuamapLayer(),
-        createLocalAdsbLayer(),
         createAemetStationsLayer(),
         createAemetWarningsLayer(),
         createAemetWeatherImageryLayer(),

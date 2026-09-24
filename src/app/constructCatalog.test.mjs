@@ -39,8 +39,7 @@ test('catalogs construct distinct layers and classification from their supplied 
     signal: b.signal,
     surface: fixtureSurface(b.signal),
   });
-  assert.equal(first.layers.length, 37);
-  assert.ok(first.get('adsb-tap'), 'the dump1090 ADS-B tap is registered');
+  assert.equal(first.layers.length, 36);
   assert.ok(first.get('local-adsb'), 'Local ADS-B is registered');
   assert.deepEqual(
     first.metadata.find(({ id }) => id === 'local-adsb'),

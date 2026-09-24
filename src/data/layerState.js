@@ -457,11 +457,6 @@ export const SHARE_TRACKING_RESTORE_POLICIES = Object.freeze({
  * owns stable URL ordering.
  */
 export const LAYER_STATE_REGISTRY = Object.freeze([
-  // '1' collides with upstream's 'recent-imagery' token added the same week;
-  // reassigned to '8' here rather than displacing upstream's grant. Renamed
-  // from 'local-adsb' when upstream's own local-only Local ADS-B layer (#732)
-  // took that id.
-  Object.freeze({ id: 'adsb-tap', token: '8', disposition: 'enabled-only' }),
   // 'o' collides with upstream's 'weather-satellite' token added the same
   // week; reassigned to '4' here rather than displacing upstream's grant.
   Object.freeze({

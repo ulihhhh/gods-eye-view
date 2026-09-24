@@ -485,10 +485,6 @@ of current runtime behavior, see [`docs/CURRENT-STATE.md`](docs/CURRENT-STATE.md
   on-screen slot and only one would render, unpredictably; now there is
   only one slot to begin with.
 
-- Add a local ADS-B receiver tap layer: plots what your own dump1090/readsb
-  instance (fed by an RTL-SDR dongle) hears right now, separate from the
-  public, aggregator-delayed Flights layer.
-
 - Add a local Liveuamap conflict-map prototype layer, fed by a browser
   extension bridge (`extension/liveuamap-bridge/`) that reads your own
   logged-in liveuamap.com tabs and pushes their decoded map state to the
