@@ -305,7 +305,9 @@ Analyst records for loaded satellites, datacenters and dams, with explicit bound
   hotlinked Barcelona, Terrassa and Andorra cameras, each partner named as a
   credit beside the shared provider. Ambient-card refresh paced to 3 minutes,
   matching the empirically observed upstream cadence. `CCTV_CATALONIA_MAX_SOURCES`
-  sets the cap and `CCTV_CATALONIA_ENABLED=0` turns the pack off.
+  sets the cap and `CCTV_CATALONIA_ENABLED=0` turns the pack off. The catalog
+  is fetched over https with redirects refused and a 1 MiB body cap, and frame
+  links carrying userinfo are rejected even on an allowlisted host.
 
 - Add Bilbao (Ayuntamiento de Bilbao, CC BY 4.0) as a keyless CCTV source pack:
   119 municipal cameras with compass headings carried directly in the feed.

@@ -237,10 +237,14 @@ export const BILBAO_CENTER = { lat: 43.263, lon: -2.935 };
  * feed aggregates four publishers under one `font` field — SCT's own highway
  * cameras plus hotlinked municipal/national cameras from Barcelona (IMI),
  * Terrassa, and Andorra — each on its own image host, so frame URLs are
- * validated against a host allowlist rather than one pinned origin.
+ * validated against a host allowlist rather than one pinned origin. Fetched
+ * over https (verified 2026-09-27: same 200 body, no redirect).
  */
 export const CATALONIA_CAMERAS_URL =
-  'http://www.gencat.cat/transit/opendata/cameres.xml';
+  'https://www.gencat.cat/transit/opendata/cameres.xml';
+/** Byte ceiling for the Catalonia catalog read (~90 KB observed 2026-09-27),
+ * so a runaway body cannot be buffered without limit. */
+export const CATALONIA_MAX_CATALOG_BYTES = 1024 * 1024;
 /** Allowed image hosts, one per `font` publisher in the feed. */
 export const CATALONIA_IMAGE_HOSTS = Object.freeze(
   new Set([

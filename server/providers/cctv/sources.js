@@ -55,6 +55,7 @@ import {
   DEFAULT_BILBAO_MAX_SOURCES,
   BILBAO_CENTER,
   CATALONIA_CAMERAS_URL,
+  CATALONIA_MAX_CATALOG_BYTES,
   CATALONIA_IMAGE_HOSTS,
   CATALONIA_FONT_CREDIT,
   CATALONIA_FONT_ELEVATION_M,
@@ -94,7 +95,10 @@ import {
   prioritizeSources,
 } from './normalize.js';
 import { directionToHeading } from '../../../src/data/directionText.js';
-import { readResponseJsonCapped } from '../common/http.js';
+import {
+  readResponseJsonCapped,
+  readResponseTextCapped,
+} from '../common/http.js';
 /**
  * Fetch and parse Austin traffic camera records from the city Open Data portal.
  *
@@ -1548,7 +1552,10 @@ export function parseCataloniaXml(xml) {
 /**
  * Validate and normalize one Catalonia feed `link` against the publisher
  * host allowlist (CATALONIA_IMAGE_HOSTS), upgrading to https. Rejects
- * anything else, including a host that merely resembles an allowed one.
+ * anything else, including a host that merely resembles an allowed one, and
+ * any URL carrying userinfo (`https://user:pass@www.bcn.cat/...`): the
+ * hostname check alone would pass it, letting catalog data inject
+ * credentials into the server-side frame request.
  *
  * SCT's own `RenderService` frame link is a special case, for two stacked
  * reasons (both verified 2026-09-15):
@@ -1578,6 +1585,7 @@ export function normalizeCataloniaImageUrl(rawUrl) {
     return '';
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+  if (parsed.username || parsed.password) return '';
   if (!CATALONIA_IMAGE_HOSTS.has(parsed.hostname)) return '';
 
   if (parsed.hostname === 'mct.gencat.cat') {
@@ -1623,19 +1631,41 @@ export function cataloniaCameraName(carretera, municipi) {
  * every camera takes the id-hash fallback, low-confidence pose (same as TfL
  * and Fintraffic).
  *
+ * The list decides ids, coordinates, labels and which allowlisted frame path
+ * is proxied, so it is fetched over https, redirects are refused (the list
+ * host cannot be steered or downgraded) and the body read is capped at
+ * CATALONIA_MAX_CATALOG_BYTES.
+ *
  * @returns {Promise<Array<object>>} Normalized camera source objects.
  */
 export async function loadCataloniaSourcesFromOpenData() {
   try {
     const resp = await fetch(CATALONIA_CAMERAS_URL, {
       headers: { Accept: 'application/xml,text/xml,*/*' },
+      redirect: 'manual',
       signal: AbortSignal.timeout(CCTV_SOURCE_FETCH_TIMEOUT_MS),
     });
+    // A response this loader will not read still owns its transport until the
+    // body is released, so every rejection path cancels before returning.
+    const discard = async () => {
+      try {
+        await resp.body?.cancel();
+      } catch {
+        /* no-op */
+      }
+      return [];
+    };
+    if (resp.status >= 300 && resp.status < 400) {
+      console.warn(
+        '[CCTV] Catalonia catalog redirected; redirects are not followed',
+      );
+      return discard();
+    }
     if (!resp.ok) {
       console.warn('[CCTV] Catalonia camera download failed:', resp.status);
-      return [];
+      return discard();
     }
-    const xml = await resp.text();
+    const xml = await readResponseTextCapped(resp, CATALONIA_MAX_CATALOG_BYTES);
     const rows = parseCataloniaXml(xml);
     if (!rows.length) return [];
 
