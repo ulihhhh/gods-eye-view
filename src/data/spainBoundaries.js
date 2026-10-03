@@ -16,39 +16,24 @@
  * wants to re-aggregate to CCAA level without a second data source).
  */
 
+import { loadBundledJson } from './bundledJson.js';
 import { createRetryableLoader } from './retryableLoad.js';
 
 /** @typedef {{id: string, name: string, ccaaId: string, ccaaName: string, rings: Array<Array<[number, number]>>}} CcaaFeature */
 
 /**
- * Browser vs. Node take different paths on purpose: a dynamic
- * `import(..., { with: { type: 'json' } })` for a Vite-transformed
- * `?import`-suffixed specifier was found live to throw "Failed to fetch
- * dynamically imported module" in this Vite version (the dev server's own
- * response carries the right `Content-Type: application/json` — confirmed
- * with a direct fetch — but the browser's module loader rejects it anyway),
- * even though the exact same pattern is what `naturalEarthRegions.js` uses.
- * A plain `fetch()` sidesteps that dynamic-import machinery entirely and is
- * unaffected. Node has no such quirk, but a dynamic import needs the
- * attribute there to recognize the file as JSON at all under `node:test`.
+ * Read through the shared `loadBundledJson`: the browser fetches the pack as
+ * plain JSON, Node reads the `file:` URL from disk. Never import the JSON as
+ * a module — that makes the production build emit an unused JavaScript copy
+ * of the pack (enforced by `bundledJson.test.mjs`).
  */
-async function loadPackFile() {
-  if (typeof document !== 'undefined' && typeof fetch === 'function') {
-    const url = new URL(
-      './local_data/spain_boundaries/provinces.json',
-      import.meta.url,
-    );
-    const response = await fetch(url);
-    if (!response.ok)
-      throw new Error(
-        `Failed to fetch provinces.json: HTTP ${response.status}`,
-      );
-    return response.json();
-  }
-  const mod = await import('./local_data/spain_boundaries/provinces.json', {
-    with: { type: 'json' },
-  });
-  return mod.default || mod;
+const PACK_URL = new URL(
+  './local_data/spain_boundaries/provinces.json',
+  import.meta.url,
+);
+
+function loadPackFile() {
+  return loadBundledJson(PACK_URL);
 }
 
 /** @type {CcaaFeature[]|null} */
