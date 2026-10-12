@@ -370,6 +370,8 @@ export function buildTransitSelectionCopy(
     state.push(`Last report: arriving at stop ${record.stopId}`);
   else if (record.status === 'IN_TRANSIT_TO' && record.stopId)
     state.push(`Last report: next stop ${record.stopId}`);
+  // A platform is the operator's own statement, like the stop it belongs to.
+  if (record.platform) state.push(`platform ${record.platform}`);
   if (record.occupancy && record.occupancy !== 'NO_DATA_AVAILABLE') {
     state.push(record.occupancy.toLowerCase().replaceAll('_', ' '));
   }
