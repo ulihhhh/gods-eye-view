@@ -1,362 +1,345 @@
-# Plan — Transit: Renfe (Cercanías/Rodalies + AV/LD/MD) y FGC
+# Hoja de ruta — Transporte en España (Renfe, FGC, TMB) en el fork
 
-Estado: plan cerrado, sin pendientes de investigación (2026-10-12). Destino: PR(s) a
-`bilawalsidhu/gods-eye-view`. Todo se ha comprobado contra los feeds en vivo (incluida una
-observación de 10 min, 21 sondeos cada 30 s) y contra el código de `upstream/main` (591f299).
+Estado: plan de trabajo **solo para el fork** (`mi-main`), reescrito el 2026-10-12.
+Todo lo técnico se ha comprobado contra los feeds en vivo (incluida una observación de
+10 min) y contra el código de `upstream/main` (591f299). No quedan pendientes de
+investigación.
 
----
+## 0. Decisiones de partida
 
-## 1. Qué queremos implementar y cómo validarlo
-
-### Objetivo
-
-Que la capa **Transit** muestre en España, con posiciones GPS reales y sin clave:
-
-| Feed | Qué es | Vehículos (12-oct, ~13:20) |
-| --- | --- | --- |
-| Renfe Cercanías | Todos los núcleos de Cercanías, **incluido Rodalies de Catalunya** (R1, R2N, R2S, R3, R4, R7, R8, R11, R15, R16, RL4…) | 222 (51 en el área de Barcelona) |
-| Renfe AV/LD/MD | Alta Velocidad, Larga y Media Distancia, en todo el país | 121 |
-| FGC (Geotren) | Barcelona‑Vallès y Llobregat‑Anoia: L6, L7, L8, L12, S1–S9, R5/R6, RL… | 34 |
-
-### Reparto en PRs (recomendado)
-
-- **PR A — Renfe.** Dos filas de registro GTFS‑RT más un pequeño enganche para
-  deducir la línea de la etiqueta. Sin fontanería nueva: riesgo bajo y revisión rápida.
-- **PR B — FGC.** Necesita un adaptador JSON para Geotren (su GTFS‑RT no trae la línea
-  y a ratos llega vacío; ver §5) que sigue el patrón `format` del PR abierto #944. Además
-  necesita un intervalo mínimo por feed por la cuota de la API. Va después de #944 o
-  encima de él.
-
-Separarlos evita que FGC, que depende de #944, bloquee a Renfe, que es inmediato.
-
-### Validación (según CONTRIBUTING y MAINTAINER_WORKFLOW actuales)
-
-1. **Unit tests deterministas y sin red**, con fixtures recortados de los feeds reales:
-   - Registro: sin clave, https, licencia, `terms` con cita (lo hace cumplir `transitFeeds.test.mjs`).
-   - Cobertura: Madrid, Barcelona, Sevilla, Bilbao y Portbou dentro; Helsinki fuera.
-   - Modo y línea: `C4-23631-PLATF.(8)` → línea `C4`, andén `8`, modo `rail`.
-     Para FGC, `L6` → `subway`, `S1` → `rail`.
-   - Decodificador FGC: coordenadas, línea, parada, ocupación, `en_hora`, línea desconocida (`M1`).
-     Rechaza respuestas malformadas o truncadas y aplica los límites de tamaño.
-2. `npm run doctor -- --json`, `format:check`, `check:boundaries`, `npm test` y `npm run build`.
-3. `npm run test:track` contra un servidor de la rama: 109/109.
-4. **Gate de la funcionalidad:** `npm run qa:transit`, añadiendo Barcelona (y Madrid
-   para Renfe) a `LIVE_CITIES` en `scripts/qa-transit-controls.mjs`.
-   Hay que anotar que `budgets` y `matrix` ya fallan igual en `main` (lo cuenta el PR #944).
-5. **Prueba en vivo vía proxy**, con recuento por feed en `/api/transit/vehicles/<id>`
-   y capturas en Barcelona (Rodalies y FGC juntos) y Madrid.
-6. **Observación de 10 minutos ✅ (hecha 2026-10-12; resultados en §4 y §5).** Repetirla
-   en el PR con la rama corriendo, en hora punta, y adjuntar los números.
+- **Todo se hace y se integra en `mi-main`.** No hay PRs intermedios a upstream.
+- **Fases en orden**, cada una en su rama `feat/transit-es-<fase>`. Una fase se fusiona en
+  `mi-main` cuando cumple su "hecho cuando", con commit y push.
+- **Calidad de PR desde el primer día.** Cada fase sigue la guía de contribución de
+  upstream: tests, docs y gates. Así, si en el futuro hay suficientes integraciones de
+  datos de España, el PR conjunto a upstream (Fase 7) es una tarea de **montaje**, no de
+  reescritura.
+- **Lo que no puede ir nunca a upstream va marcado como `solo fork`.** Ejemplo: TMB, por
+  su licencia ligada a la aplicación.
 
 ---
 
-## 2. Cómo están hechas las regiones actuales (referencia)
+## 1. Reglas de trabajo en el fork
 
-Cadena completa (7 feeds hoy: MBTA, CapMetro, Metro Transit, HSL, OVapi, Entur y TransLink):
+1. **Mínima superficie de conflicto con los syncs diarios de upstream.**
+   - Las filas de España van en un módulo propio, `src/data/transitFeedsSpain.js`, que
+     `transitFeeds.js` concatena con **una sola línea** (`...SPAIN_TRANSIT_FEEDS`).
+   - Los adaptadores van en ficheros nuevos (`src/data/fgcGeotren.js`, …).
+   - Los cambios a módulos compartidos (servicio, proxy, ficha) se limitan a enganches
+     pequeños y genéricos (Fase 2).
+2. **Mensajes de commit sin `#NNN`** ni menciones a cosas solo del fork (regla de
+   memoria): GitHub los enlazaría en los PRs de upstream.
+3. **Valores fijados en tests y docs.** Si una fase cambia recuentos fijados en tests
+   (número de feeds, tamaño del esquema de voz…), se anota en la lista de "pins del fork"
+   que se repasa en cada sync.
+4. **PRs de upstream en vuelo.** No los esperamos, pero diseñamos compatible con ellos:
+   - **#944** (Entur Vehicles): campo `format` por feed más un decodificador JSON propio.
+     Nuestra Fase 2 usa **el mismo nombre de campo y la misma forma**. Si #944 se fusiona,
+     en el sync nos quedamos con su implementación y adaptamos la nuestra.
+   - **#634** (Ontario): modo y nombre de línea por feed. Si se fusiona, nuestro
+     `deriveRoute` (Fase 1) pasa a usar su mecanismo.
+   - **#733** (MBTA rutas y alertas): patrón para la Fase 5.
+5. **Ninguna fase añade capa nueva** (son filas de la capa Transit existente), así que no
+   hacen falta tokens de share-link. TMB (Fase 6) sí podría necesitar una capa, y usaría
+   el bloque `z*` del fork.
+
+---
+
+## 2. Referencia: cómo funciona hoy la capa Transit
 
 1. **Registro** — `src/data/transitFeeds.js`. Cada fila es un objeto congelado con:
    - `id`, `name`, `operator`, `region`;
    - `center` y `loadRadiusKm` (solo se consulta si la cámara cae dentro del círculo);
    - `url`, opcionalmente `headers`, y `license`, `licenseUrl`, `attribution`;
    - `defaultEnabled` y `terms: {quote, note}` (cita literal de las condiciones);
-   - `defaultMode`, opcionalmente `routeMode(routeId)`, y `historyRetention` (solo MBTA).
+   - `defaultMode`, opcionalmente `routeMode(routeId)`, y `historyRetention`.
 
    Reglas de admisión: sin clave, licencia abierta con atribución y coordenadas reales.
+
 2. **Servicio** — `src/sources/transitService.js`.
-   - Admisión por feed y global, caché de 15 s y una sola petición en vuelo por feed.
-   - Sirve datos viejos hasta 10 min si falla el origen, y retrocede 5 s → 5 min tras fallos.
-   - Peticiones condicionales (ETag / Last-Modified) y redirecciones solo dentro del mismo origen https.
-3. **Proxy puro** — `src/data/transitProxy.js` (`buildTransitSnapshot`): decodifica,
-   rechaza feeds diferenciales y repara la hora con la escalera vehículo → cabecera → fetch.
-4. **Decodificador** — `src/data/gtfsRealtime.js` (`decodeVehiclePositions`).
-   - Registro normalizado `{id, lat, lon, bearing, speedMps, timestamp, routeId, tripId, directionId, label, stopId, status, occupancy}`.
-   - Deduplica por `id` y se queda con el más reciente.
-5. **Capa** — `src/layers/transit/`. `ingestion` asigna el modo con `transitModeFor`;
-   `movement` y `rendering` reproducen con retraso entre reportes; `selection` y
-   `policy.buildTransitSelectionCopy` montan la ficha; `queries` sirve detección y analista.
-6. **Créditos** — automáticos: `transitFeedCredit(feed)` en `src/data/dataCredits.js`
-   usa `attribution` del registro la primera vez que se pinta un vehículo del feed.
-7. **Rutas HTTP** — `/api/transit/feeds` (catálogo público, sin URL) y `/api/transit/vehicles/<id>`.
+   - Admisión por feed y global, caché de 15 s **global** y una sola petición en vuelo.
+   - Sirve datos viejos hasta 10 min, backoff de 5 s a 5 min.
+   - ETag / Last-Modified, y redirecciones solo dentro del mismo origen https.
+3. **Proxy** — `src/data/transitProxy.js` (`buildTransitSnapshot`): decodifica, rechaza
+   feeds diferenciales y repara la hora con la escalera vehículo → cabecera → fetch.
+4. **Decodificador** — `src/data/gtfsRealtime.js`: registro normalizado
+   `{id, lat, lon, bearing, speedMps, timestamp, routeId, tripId, directionId, label, stopId, status, occupancy}`,
+   deduplicado por `id`.
+5. **Capa** — `src/layers/transit/`.
+   - `ingestion` asigna el modo con `transitModeFor`.
+   - `movement` y `rendering` reproducen con retraso e interpolan.
+   - `policy.buildTransitSelectionCopy` monta la ficha.
+   - El metro se dibuja a nivel de calle, con un aviso en la ficha.
+6. **Créditos** — automáticos (`transitFeedCredit`), a partir de `attribution`.
+7. **Rutas** — `/api/transit/feeds` y `/api/transit/vehicles/<id>`.
 
 ---
 
-## 3. PRs abiertos de transit (hay que coordinarse)
+## 3. Fases
 
-| PR | Qué hace | Cómo nos afecta |
-| --- | --- | --- |
-| #944 Entur Vehicles API (MERGEABLE) | Añade `format` por feed, petición fija (POST), un decodificador JSON propio (`enturVehicles.js`) y `reportedMode` por vehículo que manda sobre `routeMode` | **Es exactamente el patrón que necesita FGC.** PR B se construye encima: `format: 'fgc-geotren'` |
-| #634 Nueve feeds de Ontario (CONFLICTING) | Modo y nombre de línea por feed ("vocabulario", `vocabulary.test.mjs`) | Solapa con el enganche de línea de Renfe. Mirar su API antes de inventar la nuestra |
-| #733 MBTA líneas y alertas (CONFLICTING) | `/api/transit/routes` y `/api/transit/alerts`, fichas de línea | Patrón para una fase 2 con alertas de Renfe/FGC y trazados |
-| #635 Live Trains (Amtrak) | Capa aparte `trains/`, no Transit | Sin conflicto directo |
+### Fase 1 — Renfe: Cercanías/Rodalies y AV/LD/MD
 
-Puntos de conflicto seguros: `transitFeeds.js` (filas nuevas), la fila de Transit en
-`docs/CURRENT-STATE.md` ("7 keyless regions"), el párrafo de DATA_SOURCES ("All seven
-registered regions") y los tests que cuentan feeds.
+**Objetivo.** Trenes de Renfe en vivo en toda España: Cercanías, incluido Rodalies
+(89–222 trenes según la hora), y AV/LD/MD (~110).
 
----
+**Cambios.**
 
-## 4. Renfe: traer los datos y adaptarlos
+- `src/data/transitFeedsSpain.js` con dos filas:
+  - `renfe-cercanias` → `https://gtfsrt.renfe.com/vehicle_positions.pb`;
+  - `renfe-ld` → `https://gtfsrt.renfe.com/vehicle_positions_LD.pb`;
+  - ambas con `defaultMode: 'rail'`, centro (40.0, −3.7), r ≈ 650 km (Cercanías) y
+    ≈ 750 km (LD).
+- Una línea en `transitFeeds.js` para concatenarlas.
+- **`deriveRoute(record)` por feed**, en el servidor (`buildTransitSnapshot`):
+  - Cercanías: `C4-23631-PLATF.(8)` → `routeId: 'C4'`, `platform: '8'`; si falla, la
+    línea se toma del sufijo del `tripId`;
+  - LD: `routeId` vacío, y la etiqueta es el número de tren.
+- La ficha pasa a mostrar "Línea C4 · andén 8". Es el primer campo genérico opcional;
+  ver Fase 4.
+- `terms`:
+  - quote: _"Las presentes condiciones generales permiten la reutilización de los
+    documentos sometidos a ellas para fines comerciales y no comerciales."_
+  - attribution: `Renfe Operadora — datos abiertos (CC BY 4.0)`;
+  - note: no sugerir respaldo de Renfe; y Lisboa cae dentro del círculo (aceptado, como
+    Estocolmo en Entur).
 
-**Fuentes.** CC BY 4.0, sin clave, https, con `ETag`/`Last-Modified` y `Cache-Control: max-age=30`.
+**Validación.**
 
-| Dataset (data.renfe.com) | URL |
-| --- | --- |
-| `ubicacion-vehiculos` (Cercanías) | `https://gtfsrt.renfe.com/vehicle_positions.pb` (19 KB) |
-| `posicion-vehiculos-av-ld-md` | `https://gtfsrt.renfe.com/vehicle_positions_LD.pb` |
-| extras: `horarios-viaje-cercanias`, `…-alta-velocidad…`, `incidencias-avisos` | `trip_updates(.pb/_LD.pb)`, `alerts.pb` |
+- Unit tests con fixtures `.pb` recortados de los dos feeds: decodificación,
+  `deriveRoute`, cobertura (Madrid, Barcelona, Sevilla, Bilbao y Portbou dentro;
+  Helsinki fuera) y `terms` presente.
+- Gates comunes (§5), `qa:transit` con Barcelona y Madrid en `LIVE_CITIES`, y la
+  observación de 10 min repetida en hora punta.
 
-**Qué trae el GTFS-RT**, pasado por nuestro propio decodificador:
+**Hecho cuando** en Barcelona se ven los Rodalies y en Madrid los Cercanías y los AVE,
+con línea y andén en la ficha, todos los gates pasan, y DATA_SOURCES y CURRENT-STATE
+están actualizados.
 
-| Campo | Cercanías | AV/LD/MD |
-| --- | --- | --- |
-| lat/lon | ✅ 222/222 | ✅ 121/121 |
-| hora por vehículo | ✅ (igual a la cabecera) | ❌ → se usa la de cabecera; la ficha dice "(feed time)" |
-| `routeId` | ❌ | ❌ |
-| línea | dentro de `label`: `C4-23631-PLATF.(8)`, y sufijo del `tripId` `…C4` | ❌ (`label` = nº de tren `02101`) |
-| andén | en `label`: `PLATF.(8)` | ❌ |
-| `stopId` + `status` | ✅ (INCOMING_AT/STOPPED_AT/IN_TRANSIT_TO) | ✅ 115/121 |
-| rumbo / velocidad / ocupación | ❌ | ❌ |
+### Fase 2 — Enganches compartidos: `format` e intervalo mínimo por feed
 
-**Ajustes:**
+**Objetivo.** Preparar el servicio para fuentes que no son GTFS-RT y para APIs con
+cuota. FGC (Fase 3) lo necesita.
 
-1. Dos filas de registro: `renfe-cercanias` y `renfe-ld`, ambas con `defaultMode: 'rail'`.
-   - Cobertura: centro aprox. (40.0, −3.7) y r ≈ 650 km para Cercanías (Portbou está a unos 610 km).
-   - Para LD el mismo centro con r ≈ 750 km: los trenes que van a Francia se siguen
-     pintando mientras el feed esté activo.
-   - **Lisboa ✅ decidido:** queda dentro de cualquier círculo que alcance Portbou y
-     A Coruña desde el centro peninsular, y se acepta. Solo supone consultar un feed de
-     unos 20 KB sin trenes en pantalla, y en Portugal no hay otro feed con el que solaparse.
-     Hay que documentarlo en la fila del registro, como hace Entur con Estocolmo.
-2. **Línea y andén.** Una función por feed (p. ej. `deriveRoute(record)`) que, en el
-   servidor, rellena `routeId = 'C4'` desde la etiqueta (y si falla, desde el sufijo del
-   `tripId`) y separa el andén. Encajarlo con el "vocabulario" de #634 si se fusiona antes.
-3. **Observación de 10 min ✅** (21 sondeos, 30 s):
-   - **Cercanías:** cabecera y ETag nuevos en **cada** sondeo, así que actualiza cada
-     ≤ 30 s (la ficha dice 20 s). La flota bajó de 183 a 89 al cerrar el servicio de la
-     noche. De los 55 trenes presentes los 10 min, 12 no se movieron, 9 de ellos en
-     `STOPPED_AT`: trenes parados, no datos congelados.
-   - **AV/LD/MD:** también cabecera nueva en cada sondeo y flota estable (104–112). Solo
-     5 de 92 no se movieron, 4 en `STOPPED_AT`. No hay indicios de posiciones caducadas a
-     pesar de no tener hora por vehículo; basta con la hora de cabecera (`timestampSource: 'header'`).
-4. **Duplicados en LD.** Un mismo tren aparece en varias entidades (un viaje por tramo,
-   misma posición), y el deduplicado por `id` existente lo resuelve. 102 de 157 viajes
-   llevan fecha de ayer y también se mueven: es la fecha de servicio, no un dato caducado.
-5. **Términos ✅ (resuelto 2026-10-12).**
-   - Las fichas de los datasets declaran `license_id: CC-BY-4.0`.
-   - La página de condiciones (`https://data.renfe.com/legal`) añade las condiciones
-     generales de reutilización del sector público (Ley 37/2007). Cita para
-     `terms.quote`: *"Las presentes condiciones generales permiten la reutilización de
-     los documentos sometidos a ellas para fines comerciales y no comerciales."*
-   - Obligaciones:
-     - citar la fuente (la página sugiere *"Origen de los datos: Renfe Operadora"*);
-     - mencionar la fecha de última actualización si viene en el documento: en GTFS-RT es
-       el timestamp de cabecera, que la ficha ya muestra como antigüedad del reporte;
-     - no desnaturalizar los datos;
-     - no sugerir que Renfe "participa, patrocina o apoya" la reutilización.
-   - No hay nada sobre logos ni límites de peticiones. No piden nombrar Rodalies de Catalunya.
-   - Propuesta: `attribution: 'Renfe Operadora — datos abiertos (CC BY 4.0)'`, y en
-     `terms.note` la regla de no sugerir respaldo (como TransLink).
-   - La ficha del dataset documenta el andén en `label` (*"La información del andén
-     (Platform) … se informa dentro del atributo label"*) y que *"se actualiza cada 20
-     segundos"*. Así que extraer línea y andén de `label` se apoya en un formato
-     documentado, no en uno deducido.
+**Cambios.**
 
----
+- **`format` por feed**, compatible con #944: `'gtfs-rt'` por defecto, o un id de
+  decodificador. `buildTransitSnapshot` elige el decodificador. Cada decodificador JSON
+  produce el mismo registro normalizado, con límites de tamaño, número de registros y
+  cadenas, y un JSON malformado es un fallo, nunca un mapa vacío "válido".
+- **`minIntervalMs` por feed**: la caché y el sondeo del navegador lo respetan, y un
+  `429` es fallo con backoff. Hoy el TTL de 15 s es global.
 
-## 5. FGC: traer los datos y adaptarlos
+**Validación.** Tests del selector de decodificador, del intervalo mínimo y del `429`, y
+regresión de los 7 feeds de upstream sin cambios.
 
-**El GTFS-RT de posiciones de FGC no sirve como fuente principal ✅ (comprobado 2026-10-12).**
-`vehicle-positions-gtfs_realtime` (CC BY 4.0) sirve `vehicleposition.pb` por una URL de
-fichero de id estable.
-- **Es intermitente:** dio 0 bytes en 7 intentos seguidos a mediodía, y por la tarde,
-  durante los 10 min de observación, 2,3–2,5 KB.
-- **Cuando trae datos, son los mismos trenes que Geotren:** su `vehicle.id` es la `ut`
-  de Geotren y su `tripId` es el `id` de Geotren. Trae `stopId`, `status` y `occupancy`
-  (enum GTFS), pero **ningún `routeId`**: no se puede saber la línea ni separar metro
-  (L6/L7/L8/L12) de tren.
-- La cabecera llegaba con unos 133 s de antigüedad: el mismo lote que Geotren.
+**Hecho cuando** un feed falso en JSON pasa de punta a punta en los tests y los feeds
+existentes se comportan igual.
 
-Conclusión: fuente principal Geotren. El GTFS-RT queda anotado en DATA_SOURCES por si FGC
-le añade el `routeId` y lo estabiliza; se podría avisar a FGC de las dos cosas.
+### Fase 3 — FGC (Geotren)
 
-**Fuente real: Geotren** (`posicionament-dels-trens`, CC BY 4.0, sin clave). ~34 trenes con GPS real.
+**Objetivo.** Trenes de FGC en vivo (~26–34): metro (L6, L7, L8, L12) y Rodalies/Regional
+(S1–S9, R5/R6, RL…).
 
-- URL fija recomendada: API v1 de Opendatasoft,
-  `https://dadesobertes.fgc.cat/api/records/1.0/search/?dataset=posicionament-dels-trens&rows=200`.
-  Se prefiere a la v2.1 porque trae `record_timestamp` (hora de proceso del lote, unos
-  30 s de retraso), que hace de hora de cabecera.
-- Sin `ETag` ni `Last-Modified` (`no-cache`), así que las peticiones condicionales no sirven.
-- **Cadencia ✅:** `record_timestamp` cambió 6 veces en 10 min, así que Geotren se
-  regenera **cada ~2 min**. Hay que tenerlo en cuenta en la reproducción:
-  - entre reportes la capa interpola, pero el tren "va por detrás" hasta unos 2 min;
-  - la ficha ya dice "shown N s behind", y el PR lo tiene que explicar en DATA_SOURCES.
-- **Cuota ✅ (resuelto 2026-10-12).** Las cabeceras de la API dicen
-  `X-RateLimit-Limit: 5000` y `X-RateLimit-Reset: <medianoche UTC>`: **5.000 peticiones
-  al día por IP**, en anónimo. Con la caché global de 15 s, un proceso consultando sin
-  parar haría 5.760 al día y agotaría la cuota por la tarde. Por eso hace falta un **TTL
-  por feed** (`minIntervalMs`, que el registro hoy no tiene):
-  - con 60 s salen 1.440 al día, margen de sobra para varias pestañas y recargas. Más
-    rápido no aporta nada, porque Geotren se regenera cada ~2 min. Medido: 77 peticiones
-    gastadas en los 10 min de observación (4 por sondeo entre las dos APIs), sin tocar el límite;
-  - el servicio debe tratar un `429` como fallo con backoff y servir el último snapshot
-    marcado como viejo.
+**Cambios.**
 
-**Campos:**
+- Fila `fgc-geotren`:
+  - URL fija `https://dadesobertes.fgc.cat/api/records/1.0/search/?dataset=posicionament-dels-trens&rows=200`;
+  - `format: 'fgc-geotren'` y `minIntervalMs: 60000`.
+- Decodificador `src/data/fgcGeotren.js`:
+  - `id` = `ut` (la unidad física, estable entre viajes) y `tripId` = `id` de Geotren;
+  - `routeId` = `lin`, y el modo con `routeMode` desde el GTFS de rutas de FGC:
+    `route_type` 1 → `subway`; 2 y 7 → `rail`; líneas desconocidas (M1/M2) → `rail`;
+  - `status`/`stopId`: con `estacionat_a`, `STOPPED_AT` en esa estación; si no,
+    `IN_TRANSIT_TO` la primera de `properes_parades`;
+  - `occupancy`: el nivel máximo por coche mapeado al enum GTFS
+    (1 → MANY_SEATS, 2 → FEW_SEATS, 3 → STANDING_ROOM);
+  - hora: `record_timestamp` del lote como hora de cabecera.
 
-| Campo | Significado |
-| --- | --- |
-| `id` | id del tren |
-| `ut` | unidad (hash) |
-| `lin` | línea |
-| `geo_point_2d` | posición |
-| `dir` | dirección (A–D) |
-| `origen` / `desti` | códigos de estación |
-| `properes_parades` | próximas paradas, como JSON incrustado |
-| `estacionat_a` | estación donde está parado |
-| `en_hora` | si va dentro del horario (booleano) |
-| `tipus_unitat` | serie del tren (112, 113…) |
-| `ocupacio_{mi,ri,m1,m2}_{percent,tram}` | ocupación por coche, en % y en nivel 1/2/3 |
+**Validación.** Tests con un fixture de Geotren (líneas conocidas y desconocidas,
+parado/en marcha, JSON malformado), los gates comunes, y comprobar en vivo que en
+10 min no se pasa de ~10 peticiones a la API de FGC.
 
-**Adaptador** — siguiendo #944, `format: 'fgc-geotren'` y `src/data/fgcGeotren.js`:
+**Hecho cuando** en Barcelona se ven a la vez Rodalies (Renfe) y FGC, los L6/L7 aparecen
+como metro con el aviso de "a nivel de calle", y la ficha explica que el dato llega cada
+~2 min.
 
-- **Identificador ✅:** `id` de vehículo = **`ut`** (la unidad física) y `tripId` = `id` de Geotren.
-  - En 10 min hubo 34 `id` distintos (22 presentes en todos los sondeos) frente a 29 `ut`
-    (26 presentes en todos).
-  - 4 unidades cambiaron de `id`: empezaron un viaje nuevo. Solo 1 cambió de línea.
-  - Ningún duplicado dentro de un mismo lote.
-  - Usar `ut` mantiene la interpolación y el rastro de cada tren al pasar de un viaje al
-    siguiente. Coincide con lo que hace el propio GTFS-RT de FGC.
-- `routeId = lin`, con modo desde el GTFS de rutas de FGC:
-  - `route_type` 1 (L6, L7, L8, L12) → `subway`;
-  - 2 (S*, R*, RL*) → `rail`;
-  - 7 (FV, MM, cremallera de Núria) → `rail` (no hay modo funicular);
-  - líneas desconocidas (`M1`, `M2`) → `rail` por defecto.
-- `status`/`stopId`: si hay `estacionat_a`, `STOPPED_AT` en esa estación; si no,
-  `IN_TRANSIT_TO` la primera de `properes_parades`.
-- `occupancy`: el nivel máximo por coche mapeado al enum GTFS (1 → MANY_SEATS_AVAILABLE,
-  2 → FEW_SEATS_AVAILABLE, 3 → STANDING_ROOM_ONLY).
-- Límites: tamaño de la respuesta, número de registros y cadenas, como hace `enturVehicles.js`.
-  Un JSON malformado es un fallo, nunca un mapa vacío "válido".
+### Fase 4 — Ficha enriquecida (datos que llegan y no se muestran)
 
----
+**Objetivo.** Aprovechar los datos extra con **campos genéricos opcionales** del
+registro normalizado, para que cualquier feed pueda rellenarlos:
 
-## 6. Funciones compartidas y forma de mostrar los datos
+| Campo genérico   | Renfe            | FGC                                        | En la ficha                            |
+| ---------------- | ---------------- | ------------------------------------------ | -------------------------------------- |
+| `platform`       | `label` (Fase 1) | —                                          | "andén 8"                              |
+| `destination`    | —                | `desti` + `codigo-estaciones`              | "→ Terrassa Nacions Unides"            |
+| `nextStops[]`    | —                | `properes_parades`                         | "próx.: Rubí, Les Planes…"             |
+| `onTime`         | —                | `en_hora`                                  | "En hora / Fuera de horario"           |
+| `occupancyPct[]` | —                | `ocupacio_*_percent`                       | "Ocupación: 15 % · 32 % · 28 % · 15 %" |
+| `vehicleType`    | —                | `tipus_unitat`                             | "Unidad serie 112"                     |
+| nombre de parada | (fase posterior) | `codigo-estaciones`, pequeño, se empaqueta | "parado en Sarrià" en vez de "stop SR" |
 
-**Se reutiliza sin tocar:**
-- admisión, caché, backoff y redirecciones;
-- reproducción con retraso y suavizado (`movement`);
-- marcadores por modo;
-- metro dibujado a nivel de calle, con el aviso en la ficha (aplica a L6, L7, L8 y L12);
-- créditos automáticos y catálogo público;
-- registros para el analista.
+**Validación.** Tests de `buildTransitSelectionCopy` con y sin cada campo (los feeds de
+upstream no cambian), y capturas de la ficha.
 
-Varios feeds a la vez en Barcelona (Rodalies, LD y FGC) ya está soportado:
-`transitFeedsInRange` devuelve todos los feeds en rango.
+**Hecho cuando** una ficha de FGC muestra destino, próximas paradas, puntualidad y
+ocupación, y una de Renfe muestra línea y andén.
 
-**Hay que tocar:**
-1. Enganche de línea por feed (Renfe). Opción mínima: normalizar en el servidor dentro de `buildTransitSnapshot`.
-2. `format` y decodificador alternativo (FGC), reutilizando #944.
-3. Opcionalmente `reportedMode` por vehículo (#944), si FGC necesita un modo distinto por tren.
-   No hace falta: el modo sale de `lin`, vía `routeMode`.
-4. **Intervalo mínimo por feed** (`minIntervalMs` en el registro, 60 s para FGC). Lo
-   respetan la caché del servicio y el sondeo del navegador. Un `429` cuenta como fallo
-   con backoff. Hoy el TTL de 15 s es global.
-5. **Ficha.** Hoy muestra `stop 51003` (id crudo) y "Route C4" en vez de "Línea C4".
-   - Los nombres de parada necesitan el GTFS estático: FGC tiene el dataset
-     `codigo-estaciones`, pequeño y empaquetable; el de Renfe tiene miles de paradas.
-   - Propuesta para v1: nombres solo para FGC; Renfe con el id, o fase 2.
+### Fase 5 — Retrasos e incidencias
+
+**Objetivo.** Mostrar si el tren va con retraso y los avisos de servicio.
+
+- Retraso: los `trip_updates` de Renfe (Cercanías y LD) y el `trip-updates` de FGC,
+  cruzados por `tripId`, dan "+3 min" en la ficha.
+- Incidencias: `alerts` de Renfe y `alerts-gtfs_realtime` de FGC, siguiendo el patrón de
+  #733 (`/api/transit/alerts/<feed>`, texto acotado y sin enlaces al navegador).
+- Fuera de esta fase: nombres de parada y tipo de servicio (AVE/Alvia/MD) de Renfe, que
+  necesitan su GTFS estático (pesado). Se dejan como posible fase posterior.
+
+**Hecho cuando** un tren con retraso lo dice en la ficha y una incidencia activa se ve
+en la capa.
+
+### Fase 6 — TMB (metro y bus de Barcelona) — `solo fork`
+
+**Requisito previo:** registrarte en developer.tmb.cat y dar de alta una aplicación.
+La clave (`TMB_APP_ID`/`TMB_APP_KEY`) va en el servidor y se ofrece en POWER UP, como
+la de AEMET.
+
+**Por qué es solo para el fork.**
+
+- La licencia obliga a "reutilizar los contenidos única y exclusivamente para la
+  aplicación y/o servicio indicado en la solicitud".
+- Solo hay predicciones de llegada: no hay coordenadas.
+
+**Orden dentro de la fase:**
+
+1. **Panel de próximas llegadas** al pulsar una estación de metro (iMetro) o una parada
+   de bus (iBus). Bajo demanda, honesto y barato.
+2. **Geometría oficial** de líneas, estaciones y accesos de metro (`/v1/transit`, GeoJSON)
+   como contexto.
+3. **Experimento: metro "estimado".** Se interpola cada `codi_servei` entre estaciones a
+   partir de sus llegadas, sobre `linies/metro/{l}/trams`. Siempre etiquetado como
+   _posición estimada a partir de predicciones_, con estilo propio, y desactivable.
+
+**Hecho cuando** (1) y (2) funcionan con la clave del usuario y, sin clave, la capa dice
+claramente que necesita una.
+
+### Fase 7 — (Futuro) PR conjunto a upstream con las integraciones de España
+
+Se abre solo cuando haya suficientes integraciones de datos de España terminadas en el fork.
+
+**Candidatos:**
+
+| Integración                                                      | ¿Apta para upstream?                                                                                              |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Fases 1–5 (Renfe, enganches, FGC, ficha, retrasos e incidencias) | ✅ sin clave, CC BY 4.0, con coordenadas reales                                                                   |
+| Capas AEMET (`docs/plans/weather-data-integrations.md`)          | ✅ probablemente: piden clave gratuita, como otras capas de upstream (TomTom, Mapillary). Revisar sus tokens `z*` |
+| CCTV Bilbao y extras del pack de Cataluña                        | Revisar uno a uno (Andorra da 404)                                                                                |
+| Fase 6 TMB                                                       | ❌ licencia ligada a la aplicación: se queda en el fork                                                           |
+
+**Cómo montarlo:**
+
+1. Rama nueva desde `upstream/main` de ese momento.
+2. Traer el código de cada integración apta: cherry-pick de los commits de fase, o copia
+   de ficheros si los syncs lo han mezclado demasiado. Ordenarlo en **commits revisables
+   por integración**.
+3. Comprobar qué ha pasado con #944, #634 y #733 y adaptarse.
+4. Gates completos, y descripción con validación y hosts salientes por integración.
 
 ---
 
-## 7. Dónde documentar
+## 4. Datos técnicos verificados
 
-| Sitio | Qué |
-| --- | --- |
-| `src/data/transitFeeds.js` | filas con `license`, `licenseUrl`, `attribution` y `terms.quote/note` |
-| `DATA_SOURCES.md` | una fila por operador en la tabla, y el párrafo "Transit (GTFS-Realtime)" ("All seven registered regions" → nueve). Notas: Geotren en JSON, cadencia de ~2 min, cuota de 5.000/día con intervalo mínimo de 60 s, y por qué no se usa el GTFS-RT de FGC (intermitente y sin línea) |
-| `docs/CURRENT-STATE.md` | fila Transit (≈l. 3148, "7 keyless regions") y la sección del servicio si cambia `format` |
-| `CHANGELOG.md` | entrada en `[Unreleased]` |
-| `README.md` | fila 🚌 Transit, lista de ciudades (+ España / Barcelona) |
-| `scripts/package-boundaries.json`, `scripts/format-scope.json` | módulo nuevo (`fgcGeotren.js`) y sus tests |
-| `scripts/qa-transit-controls.mjs` | Barcelona y Madrid en `LIVE_CITIES` |
-| Descripción del PR | gates ejecutados, hosts salientes (`gtfsrt.renfe.com`, `dadesobertes.fgc.cat`) y limitaciones |
+### Renfe (data.renfe.com)
 
-Los créditos dentro de la app no requieren cambios.
+- **Licencia:** CC BY 4.0 en la ficha de cada dataset, más las condiciones de
+  `https://data.renfe.com/legal` (Ley 37/2007):
+  - citar _"Origen de los datos: Renfe Operadora"_;
+  - mencionar la fecha de actualización si viene en el documento;
+  - no desnaturalizar ni sugerir patrocinio;
+  - uso comercial permitido; nada sobre logos ni cuotas.
+- **Feeds** (sin clave, https, ETag/Last-Modified, `max-age=30`):
+  - `vehicle_positions.pb` (Cercanías);
+  - `vehicle_positions_LD.pb` (AV/LD/MD);
+  - `trip_updates.pb` y `trip_updates_LD.pb`;
+  - `alerts.pb`.
+
+| Campo                         | Cercanías                                                                  | AV/LD/MD                  |
+| ----------------------------- | -------------------------------------------------------------------------- | ------------------------- |
+| lat/lon                       | ✅                                                                         | ✅                        |
+| hora por vehículo             | ✅ (igual a la cabecera)                                                   | ❌, se usa la de cabecera |
+| `routeId`                     | ❌: línea en `label` (formato documentado por Renfe) y sufijo del `tripId` | ❌: `label` = nº de tren  |
+| andén                         | `label` → `PLATF.(8)`                                                      | ❌                        |
+| `stopId` + `status`           | ✅                                                                         | ✅ (95 %)                 |
+| rumbo / velocidad / ocupación | ❌                                                                         | ❌                        |
+
+- **Observación de 10 min (21 sondeos):**
+  - cabecera nueva en cada sondeo en los dos feeds, así que actualizan cada ≤ 30 s;
+  - Cercanías: 12 de 55 trenes quietos, 9 parados en estación;
+  - LD: 5 de 92 quietos, 4 parados;
+  - no hay indicios de datos congelados.
+- **LD repite el mismo tren** en varias entidades (un viaje por tramo, misma posición):
+  el deduplicado por `id` lo resuelve. La fecha del `tripId` es la de servicio, no indica
+  dato caducado.
+
+### FGC (dadesobertes.fgc.cat, Opendatasoft)
+
+- **Licencia:** CC BY 4.0 en todos los datasets.
+- **Cuota:** 5.000 peticiones al día por IP (`X-RateLimit-*`), que se reinicia a
+  medianoche UTC. De ahí `minIntervalMs` de 60 s, que son 1.440 al día.
+- **Geotren** (`posicionament-dels-trens`): ~26–34 trenes, se regenera **cada ~2 min**,
+  sin ETag. Campos:
+  - `id`, `ut`, `lin`, `geo_point_2d`, `dir`, `origen`/`desti`;
+  - `properes_parades` (JSON incrustado), `estacionat_a`, `en_hora`, `tipus_unitat`;
+  - `ocupacio_{mi,ri,m1,m2}_{percent,tram}`.
+  - En 10 min, `ut` se mantuvo estable (26 de 29 en todos los sondeos); `id` cambia en
+    cada viaje.
+- **GTFS-RT de posiciones de FGC: no sirve como fuente principal.** Es intermitente
+  (0 bytes a mediodía, ~2,4 KB por la tarde) y, aunque son los mismos trenes que Geotren,
+  **no trae `routeId`**. `trip-updates` (13 KB) y `alerts` (6 KB) sí son útiles para la
+  Fase 5.
+- **Modo por línea** (GTFS `gtfs_routes`): L6, L7, L8 y L12 son `route_type` 1 (metro);
+  S\*, R\* y RL\* son 2; FV, MM y la cremallera de Núria son 7.
+
+### TMB (developer.tmb.cat)
+
+Especificaciones públicas en `/assets/api-docs/v1/<servicio>/swagger.json`.
+
+| Servicio | Base                                       | Qué da                                                                                             |
+| -------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| Transit  | `api.tmb.cat/v1/transit`                   | ~40 endpoints GeoJSON: líneas, recorridos, tramos, estaciones, accesos, paradas, horarios teóricos |
+| iMetro   | `/v1/itransit/metro/estacions?estacions=…` | Próximos trenes por estación/vía: `codi_servei`, `temps_arribada` (epoch ms), destino. ≥ 10–15 s   |
+| iBus     | `/v1/itransit/bus/parades/{parada}`        | Próximos buses con `id_bus`, precisión de minuto, incluye líneas AMB                               |
+| Planner  | `/v1/planner/plan`                         | Rutas (OpenTripPlanner)                                                                            |
+| Static   | `/v1/static/datasets/gtfs.zip`             | GTFS estático                                                                                      |
+
+- Sin GTFS-RT ni posiciones de vehículos. El AMB tampoco publica GTFS-RT de buses.
+- Todo pide `app_id` + `app_key`.
+- Licencia gratuita, pero ligada a la aplicación declarada; obliga a citar la fuente y la
+  fecha. TMB puede cambiar la API o cortar la licencia sin aviso.
 
 ---
 
-## 8. Datos que llegan y no se muestran: propuestas
+## 5. Validación común (en cada fase)
 
-**Ya decodificados pero no mostrados (todas las regiones):** `directionId`, `tripId`,
-`startTime` y `licensePlate`. `stopId` se muestra crudo.
+1. Tests deterministas sin red, con fixtures recortados de los feeds reales.
+2. `npm run doctor -- --json`, `format:check`, `check:boundaries`, `npm test` y `npm run build`.
+3. `npm run test:track` contra un servidor de la rama, en otro puerto si está corriendo
+   tu servidor del 4173.
+4. `npm run qa:transit` con las ciudades de la fase. `budgets` y `matrix` ya fallan igual
+   en `main`: comparar con la base.
+5. Prueba en vivo vía proxy (`/api/transit/vehicles/<id>`), con recuentos y capturas.
+6. Resultados anotados en el commit de cierre de la fase y en la sección de la fase de
+   este documento.
 
-| Dato extra | Fuente | Propuesta | Fase |
-| --- | --- | --- | --- |
-| Línea y andén (`C4`, `PLATF.(8)`) | Renfe `label` | "Línea C4 · andén 8" en la ficha | PR A |
-| Ocupación por coche en % y nivel | FGC | Nivel GTFS en el campo existente, más una línea "Ocupación: 15 % · 32 % · …" | PR B |
-| Va en hora | FGC `en_hora` | "En hora / Fuera de horario" | PR B |
-| Destino y próximas paradas | FGC `desti`, `properes_parades` + `codigo-estaciones` | "→ Terrassa Nacions Unides · próx.: Rubí, …" | PR B |
-| Serie del tren | FGC `tipus_unitat` | "Unidad serie 112" | PR B |
-| Retraso por viaje | Renfe `trip_updates(.pb/_LD.pb)`, FGC `trip-updates` | "+3 min" por cruce con `tripId` | fase 2 |
-| Avisos e incidencias | Renfe `alerts`, FGC `alerts-gtfs_realtime` | patrón de #733 | fase 2 |
-| Tipo de servicio (AVE/Alvia/MD) y nombres de parada Renfe | GTFS estático de Renfe | Join estático (pesado) | fase 2 |
-| Color oficial de línea | GTFS de rutas | Hoy se colorea por modo; cambiarlo es una decisión de producto | discutir |
+## 6. Dónde documentar (en cada fase)
 
-Para PR A y PR B, lo nuevo en la ficha debería salir de campos genéricos opcionales
-del registro normalizado (p. ej. `platform`, `destination`, `onTime`, `occupancyPct[]`),
-no de código específico por operador. Así otros feeds los pueden rellenar.
-
----
-
-## 9. TMB (metro y bus de Barcelona) — revisión de APIs (2026-10-12)
-
-Fuente: portal `developer.tmb.cat`, leído en navegador porque es una SPA. Las
-especificaciones Swagger son públicas en `https://developer.tmb.cat/assets/api-docs/v1/<servicio>/swagger.json`.
-
-| Servicio | Base | Qué da | ¿Tiempo real? |
-| --- | --- | --- | --- |
-| Transit | `api.tmb.cat/v1/transit` | ~40 endpoints GeoJSON: líneas de metro y bus, recorridos (`recs`), tramos entre estaciones (`trams`), estaciones, accesos, paradas, intercambiadores, mobiliario, horarios teóricos, correspondencias | No (estático) |
-| iMetro | `api.tmb.cat/v1/itransit/metro/estacions?estacions=…` | Por estación, vía y sentido: próximos trenes con `codi_servei` (el número del frontal del tren) y `temps_arribada` (epoch ms), `desti_trajecte` y `color_linia`. Actualización ≥ 10–15 s | Sí: **predicción de llegada** |
-| iBus | `api.tmb.cat/v1/itransit/bus/parades/{codi_parada}` | Por parada: próximos buses con `id_bus` y `temps_arribada`, precisión de minuto. Incluye líneas AMB de otros operadores (`transit_namespace`) | Sí: **predicción de llegada** |
-| Planner | `api.tmb.cat/v1/planner/plan` | Rutas (OpenTripPlanner) | — |
-| Static | `api.tmb.cat/v1/static/datasets/gtfs.zip` | GTFS estático (semanal) | No |
-
-**No existe** GTFS-Realtime ni posiciones de vehículos (ni de metro ni de bus).
-El AMB tampoco publica GTFS-RT de autobuses: solo GTFS estático
-(Mobility Database `mdb-892`) y AMBtempsbus, que da minutos a parada.
-
-**Autenticación y licencia.** Todo, incluido el GTFS estático, pide
-`app_id` + `app_key` (registro en el portal y alta de una "aplicación").
-Condiciones (`/docs/terms-conditions`):
-- licencia gratuita, no exclusiva, mundial e indefinida, que permite "la reproducción, la
-  distribución y la comunicación pública, así como la creación y la explotación de obras
-  derivadas", sobre GTFS y tiempo real;
-- obliga a citar la fuente y la fecha de última actualización y a no desnaturalizar;
-- y a **"reutilizar los contenidos única y exclusivamente para la aplicación y/o servicio
-  indicado en la solicitud"**.
-
-TMB puede cambiar la API o cortar la licencia sin aviso. No hay límites de peticiones publicados.
-
-**Encaje con upstream: no.** Incumple las tres reglas de admisión de la capa Transit:
-- pide clave;
-- la licencia va ligada a una aplicación concreta;
-- solo hay predicciones de llegada, no coordenadas. El caso es exactamente el de NYCT
-  subway, que el registro excluye a propósito.
-
-**Opciones solo para nuestro fork** (clave del usuario en POWER UP, como AEMET):
-
-1. **Metro "estimado".** Una llamada a iMetro con todas las estaciones devuelve, por cada
-   `codi_servei`, sus próximas llegadas en cada estación. Entre la última estación
-   pasada y la siguiente se interpola sobre la geometría de `linies/metro/{l}/trams`.
-   - Marcado siempre como *posición estimada a partir de predicciones de llegada*, con su
-     propio modo y estilo, nunca como GPS.
-   - Riesgos: trenes que "saltan" cuando cambia la predicción, ambigüedad del
-     `codi_servei` entre líneas, y lagunas en terminales.
-   - Coste: una petición cada 15–30 s.
-2. **Panel de llegadas por estación/parada** al hacer clic en una estación de metro o
-   parada de bus (iMetro/iBus bajo demanda). Es honesto, barato y útil, sin animación.
-3. **Geometría oficial** (líneas, estaciones y accesos de metro en GeoJSON) como capa
-   estática de contexto. Hay que valorar si compensa frente a OSM.
-
-Recomendación: empezar por (2) y (3) en el fork. (1) solo como experimento y siempre
-etiquetado como estimación. Requiere que el usuario se registre en developer.tmb.cat.
+| Sitio                                                          | Qué                                                                                                                                                             |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/data/transitFeedsSpain.js`                                | filas con `license`, `licenseUrl`, `attribution` y `terms.quote/note`                                                                                           |
+| `DATA_SOURCES.md`                                              | fila por operador y el párrafo "Transit (GTFS-Realtime)" (número de regiones, Geotren en JSON, cadencia de ~2 min, cuota y por qué no se usa el GTFS-RT de FGC) |
+| `docs/CURRENT-STATE.md`                                        | fila Transit ("7 keyless regions") y la sección del servicio (`format`, `minIntervalMs`)                                                                        |
+| `CHANGELOG.md`                                                 | entrada en `[Unreleased]`                                                                                                                                       |
+| `README.md`                                                    | fila 🚌 Transit, con ciudades (España)                                                                                                                          |
+| `scripts/package-boundaries.json`, `scripts/format-scope.json` | módulos nuevos y sus tests                                                                                                                                      |
+| `scripts/qa-transit-controls.mjs`                              | Barcelona y Madrid en `LIVE_CITIES`                                                                                                                             |
+| Este documento                                                 | estado de cada fase (✅ fecha y commit) y pins del fork que cambian                                                                                             |
