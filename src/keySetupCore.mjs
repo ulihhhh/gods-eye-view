@@ -92,6 +92,15 @@ export const KEY_SETUP_KEYS = Object.freeze([
     validityDays: 90,
   }),
   Object.freeze({
+    id: 'tmb',
+    title: 'TMB',
+    unlocks:
+      'Barcelona metro and bus arrival times. Free: register an application at developer.tmb.cat and paste its app_id and app_key',
+    getUrl: 'https://developer.tmb.cat/',
+    envVars: Object.freeze(['TMB_APP_ID', 'TMB_APP_KEY']),
+    tier: 'free',
+  }),
+  Object.freeze({
     id: 'tomtom',
     title: 'TOMTOM',
     unlocks: 'Real live traffic (keyless runs a simulation)',

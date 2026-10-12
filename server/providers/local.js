@@ -23,6 +23,7 @@ import { googlePlacesContextProxy } from './places.js';
 import { mapillaryProxy } from './mapillary.js';
 import { keySetupEndpoint } from '../standalone/key-setup.js';
 import { liveuamapProxy } from './liveuamap.js';
+import { tmbProxy } from './tmb.js';
 import {
   aemetBeachesProxy,
   aemetEnvironmentalProxy,
@@ -72,6 +73,7 @@ function localProviderPlugins({ realtime } = {}) {
     gbfsProxy(),
     localReceiversProxy(),
     transitProxy(),
+    tmbProxy(),
     adsbLolProxy(),
     aisLiveProxy(),
     trackBackfillProxies(),
