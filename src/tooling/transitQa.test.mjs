@@ -88,17 +88,29 @@ function pageFixture(t) {
   return { page, elements, document };
 }
 
+test('named live cities override the operating-hours choice', () => {
+  const night = new Date('2026-09-15T02:00:00Z');
+  assert.deepEqual(
+    chooseLiveCities(night, 'barcelona, madrid').map((c) => c.id),
+    ['barcelona', 'madrid'],
+  );
+  assert.deepEqual(
+    chooseLiveCities(night, 'nowhere,madrid').map((c) => c.id),
+    ['madrid'],
+  );
+});
+
 test('live visual cities follow local operating hours in summer and winter', () => {
   for (const date of ['2026-09-15T06:30:00Z', '2026-01-15T06:30:00Z']) {
-    assert.equal(chooseLiveCities(new Date(date))[0].id, 'helsinki');
+    assert.equal(chooseLiveCities(new Date(date), '')[0].id, 'helsinki');
   }
   assert.deepEqual(
-    chooseLiveCities(new Date('2026-09-15T17:00:00Z')).map((c) => c.id),
+    chooseLiveCities(new Date('2026-09-15T17:00:00Z'), '').map((c) => c.id),
     ['boston', 'austin'],
   );
   for (let hour = 0; hour < 24; hour++) {
     const now = new Date(`2026-09-15T${String(hour).padStart(2, '0')}:00:00Z`);
-    const cities = chooseLiveCities(now);
+    const cities = chooseLiveCities(now, '');
     assert.ok(cities.length >= 1);
     for (const city of cities) {
       const local = Number(
@@ -656,11 +668,11 @@ test('public transit documentation uses courtesy attribution and the approved gr
   const rows = data
     .split('\n')
     .filter((line) =>
-      /^\| \*\*(MBTA|CapMetro|Metro Transit|OVapi|Entur|TransLink|HSL)/.test(
+      /^\| \*\*(MBTA|CapMetro|Metro Transit|OVapi|Entur|TransLink|HSL|Renfe)/.test(
         line,
       ),
     );
-  assert.equal(rows.length, 7);
+  assert.equal(rows.length, 8);
   for (const row of rows) {
     assert.doesNotMatch(
       row,

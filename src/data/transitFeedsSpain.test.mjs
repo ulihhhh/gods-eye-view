@@ -18,7 +18,9 @@ import {
   TRANSIT_DERIVED_CODE_MAX_CHARS,
   applyDerivedRoutes,
   buildTransitSnapshot,
+  excludeYieldedVehicles,
 } from './transitProxy.js';
+import { createTransitService } from '../sources/transitService.js';
 import { MODE_MAX_SPEED_MPS } from '../layers/transit/movement.js';
 import { buildTransitSelectionCopy } from '../layers/transit/policy.js';
 
@@ -295,4 +297,105 @@ test('the vehicle card shows the platform next to the reported stop', () => {
     copy.details.includes('Last report: arriving at stop 51003 · platform 8'),
     copy.details.join(' | '),
   );
+});
+
+test('a feed yields the vehicles its preferred feed already reports', () => {
+  const snapshot = {
+    count: 3,
+    vehicles: [{ id: '15064' }, { id: '02101' }, { id: '18135' }],
+  };
+  const kept = excludeYieldedVehicles(snapshot, [
+    { id: '15064' },
+    { id: '18135' },
+    { id: '99999' },
+  ]);
+  assert.deepEqual(
+    kept.vehicles.map((v) => v.id),
+    ['02101'],
+  );
+  assert.equal(kept.count, 1);
+  assert.equal(kept.yielded, 2);
+  const untouched = excludeYieldedVehicles(snapshot, null);
+  assert.equal(untouched.count, 3);
+  assert.equal(untouched.yielded, 0);
+});
+
+test('the long-distance feed drops trains Cercanías publishes under one number', async () => {
+  const regional = {
+    vehicleId: '15064',
+    status: 2,
+    stopId: '71801',
+    lat: 41.29,
+    lon: 1.25,
+  };
+  const cercanias = renfeFeed([
+    {
+      ...regional,
+      entityId: 'VP_R17-15064',
+      label: 'R17-15064',
+      tripId: '5183L15064R17',
+      timestamp: 1_791_803_923,
+    },
+  ]);
+  const ld = renfeFeed([
+    {
+      ...regional,
+      entityId: 'VP_15064',
+      label: '15064',
+      tripId: '1506412026-10-11',
+      lat: 41.3,
+    },
+    {
+      entityId: 'VP_02101',
+      vehicleId: '02101',
+      label: '02101',
+      tripId: '0210112026-10-12',
+      lat: 39.2,
+      lon: -3.86,
+      status: 2,
+      stopId: '60000',
+    },
+  ]);
+  const bodies = {
+    'https://gtfsrt.renfe.com/vehicle_positions.pb': cercanias,
+    'https://gtfsrt.renfe.com/vehicle_positions_LD.pb': ld,
+  };
+  const service = createTransitService({
+    fetchImpl: async (url) => new Response(bodies[url], { status: 200 }),
+  });
+  try {
+    const get = async (id) =>
+      (
+        await service.handle({
+          url: `http://localhost/api/transit/vehicles/${id}`,
+          method: 'GET',
+        })
+      ).json();
+    const shared = await get('renfe-cercanias');
+    assert.deepEqual(
+      shared.vehicles.map((v) => [v.id, v.routeId]),
+      [['15064', 'R17']],
+    );
+    const long = await get('renfe-ld');
+    assert.deepEqual(
+      long.vehicles.map((v) => v.id),
+      ['02101'],
+      'the regional train is shown once, by Cercanías',
+    );
+    assert.equal(long.yielded, 1);
+  } finally {
+    service.close();
+  }
+});
+
+test('yieldsTo names a registered feed', () => {
+  for (const feed of TRANSIT_FEED_REGISTRY) {
+    if (!feed.yieldsTo) continue;
+    assert.notEqual(feed.yieldsTo, feed.id);
+    assert.ok(
+      TRANSIT_FEED_REGISTRY.some((other) => other.id === feed.yieldsTo),
+      `${feed.id} yields to a registered feed`,
+    );
+  }
+  assert.equal(getTransitFeed('renfe-ld').yieldsTo, 'renfe-cercanias');
 });

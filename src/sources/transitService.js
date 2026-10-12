@@ -20,6 +20,7 @@ import {
   TRANSIT_PROXY_TTL_MS,
   TransitFeedShapeError,
   buildTransitSnapshot,
+  excludeYieldedVehicles,
   isAcceptableTransitUpstreamUrl,
   isTransitRedirectStatus,
   nextTransitBackoffMs,
@@ -140,6 +141,28 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
     return wait;
   }
 
+  /**
+   * Apply the registry's `yieldsTo`: drop vehicles the preferred feed reported
+   * in its latest cached snapshot (fresh or serve-stale). Before that feed has
+   * been fetched there is nothing to yield to, and both feeds show the train.
+   */
+  function yieldShared(feed, snapshot) {
+    if (!feed.yieldsTo) return snapshot;
+    const preferred = cache.get(feed.yieldsTo);
+    if (
+      !preferred ||
+      transitCacheState(preferred, snapshot.fetchedAt) === 'expired'
+    )
+      return excludeYieldedVehicles(snapshot, null);
+    let vehicles = null;
+    try {
+      vehicles = JSON.parse(preferred.body).vehicles;
+    } catch {
+      vehicles = null;
+    }
+    return excludeYieldedVehicles(snapshot, vehicles);
+  }
+
   async function refresh(feed, now) {
     const controller = new AbortController();
     controllers.add(controller);
@@ -188,7 +211,10 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
         response,
         TRANSIT_PROXY_MAX_BODY_BYTES,
       );
-      const snapshot = buildTransitSnapshot(feed, bytes, now);
+      const snapshot = yieldShared(
+        feed,
+        buildTransitSnapshot(feed, bytes, now),
+      );
       if (closed) throw new Error('Transit provider closed');
       history.ingest(feed, snapshot.vehicles, Date.now());
       const entry = {

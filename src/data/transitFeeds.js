@@ -127,6 +127,7 @@ function metroTransitRouteMode(routeId) {
  *   license: string, licenseUrl: string, attribution: string,
  *   defaultMode: string, routeMode?: (routeId: string|null) => string,
  *   deriveRoute?: (record: object) => {routeId?: string, platform?: string},
+ *   yieldsTo?: string,
  * }>>}
  */
 export const TRANSIT_FEED_REGISTRY = Object.freeze([

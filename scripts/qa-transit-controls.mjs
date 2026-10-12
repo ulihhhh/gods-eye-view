@@ -41,8 +41,47 @@ const LIVE_CITIES = [
     heading: 0,
     zone: 'Europe/Oslo',
   },
+  {
+    id: 'barcelona',
+    label: 'Barcelona (Renfe Rodalies)',
+    lat: 41.3809,
+    lon: 2.1399,
+    heading: 0,
+    zone: 'Europe/Madrid',
+  },
+  {
+    id: 'madrid',
+    label: 'Madrid (Renfe Cercanías, AV/LD/MD)',
+    lat: 40.4065,
+    lon: -3.6895,
+    heading: 0,
+    zone: 'Europe/Madrid',
+    // Ground height above the ellipsoid (~620 m elevation + ~50 m geoid);
+    // the street-level shot is placed this much higher.
+    groundM: 670,
+  },
 ];
-export function chooseLiveCities(now = new Date()) {
+/**
+ * The two live cities a run drives: the first in list order whose local time
+ * is within operating hours. `only` (`QA_CITIES=barcelona,madrid`) names the
+ * cities instead, in that order and at any hour.
+ * @param {Date} [now]
+ * @param {string} [only] Comma-separated city ids.
+ * @returns {object[]}
+ */
+export function chooseLiveCities(
+  now = new Date(),
+  only = process.env.QA_CITIES,
+) {
+  if (only) {
+    const ids = only
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    return ids
+      .map((id) => LIVE_CITIES.find((city) => city.id === id))
+      .filter(Boolean);
+  }
   return LIVE_CITIES.filter((city) => {
     const hour = Number(
       new Intl.DateTimeFormat('en-US', {

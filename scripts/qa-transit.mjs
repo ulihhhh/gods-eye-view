@@ -24,6 +24,7 @@ import {
  *
  *   npm run qa:transit                       (defaults to http://localhost:4173)
  *   QA_BASE_URL=http://localhost:4305 node scripts/qa-transit.mjs
+ *   QA_CITIES=barcelona,madrid npm run qa:transit   (name the live cities)
  *
  * Drives the real layer toggle and the real CONTEXT chooser, watches the real
  * /api/transit traffic, proves vehicles move between polls in the SCENE (not
@@ -386,7 +387,11 @@ try {
       const Cartographic = camera.positionCartographic.constructor;
       camera.setView({
         destination: Cartographic.toCartesian(
-          Cartographic.fromDegrees(c.lon, c.lat - 0.03, 3_500),
+          Cartographic.fromDegrees(
+            c.lon,
+            c.lat - 0.03,
+            3_500 + (c.groundM || 0),
+          ),
         ),
         orientation: { heading: 0, pitch: (-40 * Math.PI) / 180, roll: 0 },
       });
@@ -433,7 +438,8 @@ try {
           best = { d, lat: entry.to.lat, lon: entry.to.lon, key: entry.key };
       }
       if (!best) return null;
-      // Camera 600 m back along the heading, 600 m up, looking 45 degrees down:
+      // Camera 600 m back along the heading, 600 m above the city's ground
+      // (Madrid's is ~670 m above the ellipsoid), looking 45 degrees down:
       // the vehicle lands in the middle of the frame.
       const heading = (c.heading * Math.PI) / 180;
       const lat = best.lat - (600 * Math.cos(heading)) / 111_320;
@@ -443,7 +449,7 @@ try {
           (111_320 * Math.cos((best.lat * Math.PI) / 180));
       camera.setView({
         destination: Cartographic.toCartesian(
-          Cartographic.fromDegrees(lon, lat, 600),
+          Cartographic.fromDegrees(lon, lat, 600 + (c.groundM || 0)),
         ),
         orientation: { heading, pitch: (-45 * Math.PI) / 180, roll: 0 },
       });

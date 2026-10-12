@@ -104,5 +104,9 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     terms: RENFE_TERMS,
     defaultMode: 'rail',
     routeMode: railOnly,
+    // Catalan regional trains (R15, R16, R17…) are published in both feeds
+    // under one train number, at positions up to kilometres apart. Cercanías
+    // keeps them: it adds the line, the platform and the train's own time.
+    yieldsTo: 'renfe-cercanias',
   }),
 ]);
