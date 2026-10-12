@@ -3145,7 +3145,7 @@ its criteria cannot be silently ignored.
 | Traffic | Selectable TomTom / OpenStreetMap / Hybrid roads; optional TomTom flow (BYOK) | `src/data/traffic.js` | browser-direct OpenFreeMap tiles; `/api/tomtom` for flow | viewport-driven; capped tile cache |
 | CCTV                   | Austin + Caltrans (CA) + TfL London + Ontario 511 + Fintraffic (FI) + DriveBC (BC) + TxDOT (TX) + Estonia (Tallinn, Tarktee) + Live Traffic NSW + Open Calgary Open Data + Statens vegvesen (NO, stills + live HLS) + Street View fallback | `src/data/cctv.js`                                    | `/api/cctv`                                              | 10s (active)                                                                      |
 | Radio                  | Radio Browser (public-domain station directory)                                                                                                                                                 | `src/data/radio.js`                                   | `/api/radio/stations`, `/api/radio/click/:uuid`          | 45 min directory refresh                                                          |
-| Transit 🚌             | Operator GTFS-Realtime VehiclePositions (9 keyless feeds, `src/data/transitFeeds.js` + `transitFeedsSpain.js`)                                                                                                         | `src/layers/transit/` via `src/app/layers/transit.js` | `/api/transit`                                           | 15s (poll + delayed playback)                                                     |
+| Transit 🚌             | Operator GTFS-Realtime VehiclePositions (10 keyless feeds, `src/data/transitFeeds.js` + `transitFeedsSpain.js`)                                                                                                         | `src/layers/transit/` via `src/app/layers/transit.js` | `/api/transit`                                           | 15s (poll + delayed playback)                                                     |
 | Bikeshare 🚲           | GBFS (Lyft + BCycle)                                                                                                                                                                            | `src/data/bikeshare.js`                               | `/api/gbfs`                                              | 60s                                                                               |
 | Directions 🧭          | OSRM on FOSSGIS servers (OpenStreetMap)                                                                                                                                                         | `src/data/directions.js`                              | `/api/route` (`steps=1`)                                 | on placement / mode change                                                        |
 | Datacenters ▣          | OSM extract (bundled)                                                                                                                                                                           | `src/data/localLayers.js`                             | —                                                        | static                                                                            |
@@ -3311,9 +3311,12 @@ Transit is off by default, and share links use token `j`. The movement panel ord
 places Transit directly after Street Traffic and before Bike Share. Cameras and
 utilities retain their own groups. The layer polls
 registered feeds near the camera every 15 seconds, below a 3,000 km altitude
-gate. Nine keyless feeds are available: Boston, Austin, Minneapolis–St Paul,
+gate. Ten keyless feeds are available: Boston, Austin, Minneapolis–St Paul,
 Helsinki, the Netherlands, Norway, South East Queensland and, in Spain, Renfe
-Cercanías / Rodalies and Renfe high-speed, long and medium distance. Renfe
+Cercanías / Rodalies, Renfe high-speed, long and medium distance, and FGC's
+Barcelona metropolitan lines (Geotren, decoded by `fgcGeotren.js`, polled
+upstream at most once a minute; L6, L7, L8 and L12 are subway, the rest rail).
+Renfe
 leaves the route empty, so a per-feed `deriveRoute` hook reads the line and
 platform from the vehicle label; the card shows the platform beside the
 reported stop. A train both Renfe feeds publish under one number is drawn
@@ -3323,7 +3326,12 @@ may also name a `format` (the proxy's `TRANSIT_FORMATS` table maps it to an
 Accept header and a decoder returning the GTFS-Realtime record shape; an
 unknown format is a shape fault) and a `minIntervalMs` that lengthens that
 feed's cache window for operators with a daily quota. An upstream `429` waits
-what its Retry-After asks, at least one minute and at most fifteen. Mode silhouettes
+what its Retry-After asks, at least one minute and at most fifteen. A feed
+whose operator publishes sparsely declares `reportIntervalMs`;
+`transitFeedTiming` then lets its vehicles play further behind real time
+(FGC: up to 225 s instead of 120 s) and calls them NO FIX only after 315 s
+instead of 90 s, so they move between batches instead of stalling. Other
+feeds keep the defaults. Mode silhouettes
 identify buses, trams, subways, trains, ferries and unclassified vehicles.
 
 Retained transit history uses the same outlier quarantine as live observations and

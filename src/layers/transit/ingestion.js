@@ -11,6 +11,7 @@ import {
   MISSED_POLLS_TO_DROP,
   TRANSIT_POLL_MS,
   isStaleVehicleFix,
+  transitFeedTiming,
   transitVehicleKey,
   vehicleReportTimeMs,
 } from './policy.js';
@@ -335,7 +336,12 @@ export function createIngestion({ state, services, parts, source }) {
           fetchedAt,
           pollSeq,
         };
-        initializePlayback(entry, state._historyBudget, status.lag);
+        initializePlayback(
+          entry,
+          state._historyBudget,
+          status.lag,
+          transitFeedTiming(feed),
+        );
         const first = recordFix(entry, fix, {
           receivedAt: now,
           monoNowMs: monoNow,

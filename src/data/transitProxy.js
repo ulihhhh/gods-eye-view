@@ -19,6 +19,7 @@ import {
   decodeVehiclePositions,
 } from './gtfsRealtime.js';
 import { getTransitFeed } from './transitFeeds.js';
+import { decodeFgcGeotren } from './fgcGeotren.js';
 
 /** Fresh window: a snapshot younger than this is served without refetching. */
 export const TRANSIT_PROXY_TTL_MS = 15_000;
@@ -240,6 +241,11 @@ export const TRANSIT_FORMATS = Object.freeze({
   'gtfs-rt': Object.freeze({
     accept: GTFS_RT_ACCEPT,
     decode: decodeVehiclePositions,
+  }),
+  // FGC's Geotren positions, Opendatasoft v1 JSON (see fgcGeotren.js).
+  'fgc-geotren': Object.freeze({
+    accept: 'application/json',
+    decode: decodeFgcGeotren,
   }),
 });
 

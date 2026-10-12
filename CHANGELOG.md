@@ -95,6 +95,13 @@
 
 ## [Unreleased]
 
+- Add FGC to the Transit layer: live trains on Barcelona's FGC lines
+  (Barcelona–Vallès and Llobregat–Anoia), with the metro lines L6, L7, L8 and
+  L12 shown as subway. Positions come from FGC's Geotren open data, which
+  names each train's line; the proxy asks it at most once a minute, inside
+  the portal's daily allowance, and the card shows the next or current stop
+  and how crowded the busiest car is.
+
 - Offer a TMB (Barcelona metro and bus) developer key in the POWER UP panel:
   `TMB_APP_ID` and `TMB_APP_KEY`, both required, kept server-side only.
   `/api/tmb/status` checks the pair against TMB with one small request,

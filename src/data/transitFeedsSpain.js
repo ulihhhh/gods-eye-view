@@ -70,6 +70,27 @@ const RENFE_TERMS = Object.freeze({
  */
 const SPAIN_CENTER = Object.freeze({ lat: 40.0, lon: -3.7 });
 
+/** FGC lines that run as metro (GTFS `route_type` 1 in FGC's own routes). */
+const FGC_METRO_LINES = new Set(['L6', 'L7', 'L8', 'L12']);
+
+/**
+ * Mode for an FGC line. Metro lines are subway; everything else FGC runs on
+ * these networks is rail (S and R services, and the rack railways). Every
+ * vehicle is resolved, never a guess: an unknown line is still an FGC train.
+ * @param {string|null} routeId
+ * @returns {string}
+ */
+export function fgcRouteMode(routeId) {
+  return FGC_METRO_LINES.has(routeId) ? 'subway' : 'rail';
+}
+
+/** FGC's open-data terms, as the dataset's own metadata states them. */
+const FGC_TERMS = Object.freeze({
+  quote:
+    'Creative Commons Attribution License 4.0 (cc-by 4.0) — attributions: Ferrocarrils de la Generalitat de Catalunya',
+  note: 'Quoted from the dataset metadata of posicionament-dels-trens on dadesobertes.fgc.cat. The anonymous API allows 5,000 requests a day per IP (X-RateLimit-* headers, reset at midnight UTC); minIntervalMs keeps one process polling all day near 1,440. Geotren regenerates about every two minutes, so asking more often gains nothing.',
+});
+
 /** Spanish registry rows, in presentation order. */
 export const SPAIN_TRANSIT_FEEDS = Object.freeze([
   Object.freeze({
@@ -108,5 +129,30 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     // under one train number, at positions up to kilometres apart. Cercanías
     // keeps them: it adds the line, the platform and the train's own time.
     yieldsTo: 'renfe-cercanias',
+  }),
+  Object.freeze({
+    id: 'fgc-geotren',
+    name: 'FGC',
+    operator: 'Ferrocarrils de la Generalitat de Catalunya',
+    region: 'Barcelona metropolitan lines (FGC)',
+    // Holds Barcelona, the Vallès, Manresa and Igualada: every line Geotren
+    // publishes (Barcelona–Vallès and Llobregat–Anoia).
+    center: Object.freeze({ lat: 41.5, lon: 1.95 }),
+    loadRadiusKm: 60,
+    url: 'https://dadesobertes.fgc.cat/api/records/1.0/search/?dataset=posicionament-dels-trens&rows=200',
+    format: 'fgc-geotren',
+    minIntervalMs: 60_000,
+    // Geotren regenerates about every two minutes; the layer plays its
+    // trains further behind real time instead of stalling them between
+    // batches (see transitFeedTiming).
+    reportIntervalMs: 120_000,
+    license: 'CC BY 4.0',
+    licenseUrl:
+      'https://dadesobertes.fgc.cat/explore/dataset/posicionament-dels-trens/',
+    attribution: 'Ferrocarrils de la Generalitat de Catalunya',
+    defaultEnabled: true,
+    terms: FGC_TERMS,
+    defaultMode: 'rail',
+    routeMode: fgcRouteMode,
   }),
 ]);

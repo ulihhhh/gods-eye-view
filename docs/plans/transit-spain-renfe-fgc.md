@@ -196,7 +196,7 @@ existentes se comportan igual.
 - Validación: format, boundaries, `npm test` (6499 OK) y build pasan. En vivo, Renfe,
   MBTA y HSL siguen igual (MISS y luego HIT, `max-age=15`).
 
-### Fase 3 — FGC (Geotren)
+### Fase 3 — FGC (Geotren) — ✅ hecha 2026-10-13
 
 **Objetivo.** Trenes de FGC en vivo (~26–34): metro (L6, L7, L8, L12) y Rodalies/Regional
 (S1–S9, R5/R6, RL…).
@@ -223,6 +223,45 @@ parado/en marcha, JSON malformado), los gates comunes, y comprobar en vivo que e
 **Hecho cuando** en Barcelona se ven a la vez Rodalies (Renfe) y FGC, los L6/L7 aparecen
 como metro con el aviso de "a nivel de calle", y la ficha explica que el dato llega cada
 ~2 min.
+
+**Resultado (2026-10-13, rama `feat/transit-es-fgc`):**
+
+- Implementado como estaba planeado:
+  - `src/data/fgcGeotren.js`: decodificador JSON de la API v1 de Opendatasoft, con
+    `geo_point_2d` como `[lat, lon]` y `geometry` de respaldo;
+  - `id` = `ut` y `tripId` = `id`;
+  - estado y parada desde `estacionat_a` o la primera de `properes_parades`;
+  - ocupación del coche más lleno, mapeada al enum GTFS;
+  - hora de cabecera desde `record_timestamp`;
+  - un JSON malformado da error, no flota vacía.
+- Formato `fgc-geotren` en `TRANSIT_FORMATS` y fila `fgc-geotren` en
+  `transitFeedsSpain.js`: centro (41.5, 1.95), r = 60 km, `minIntervalMs` 60 s.
+- `fgcRouteMode` vive en el módulo del registro, no en el decodificador, para que el
+  registro no arrastre `pbf` (fallaba `check:boundaries` en el paquete `tools`).
+- **Ajuste que salió al validar: feeds de cadencia lenta.** La reproducción tenía dos
+  topes fijos: retraso ≤ 120 s y "NO FIX" a partir de 90 s. Con datos de hasta ~3 min,
+  los trenes de FGC se quedaban congelados y marcados "No recent fix".
+  - Nuevo campo `reportIntervalMs` (120 s en FGC).
+  - Nueva función `transitFeedTiming(feed)` en `policy.js`: para FGC, umbral de 315 s
+    y retraso máximo de 225 s.
+  - `contactPlayback` lee el tope de la política de cada pista (`maxDelayMs`) y
+    `displayMotion` usa el `staleMs` de la pista.
+  - Los demás feeds conservan 90 s y 120 s.
+- Completada la prueba pendiente de la fase 2: con el reloj simulado, durante 59 s todas
+  las peticiones son HIT y Geotren solo recibe 2 peticiones.
+- **Validación:**
+  - format, boundaries, `doctor`, `npm test` (6508 OK) y build pasan;
+  - `test:track`: 109/109;
+  - `qa:transit` en Barcelona (Pl. Catalunya) pasa la ficha, DETECT, los sprites y el
+    movimiento, con FGC, Cercanías y LD a la vez. Ficha: "🚆 Route S1 · FGC · Last
+    report: stopped at stop TT · many seats available · shown 27 s behind".
+  - El check de flota (≥ 20 vehículos) falló a las 00:45 por la hora: había 19.
+  - Proxy en vivo: MISS y luego HIT con `max-age=60`.
+  - Cuota consumida en todo el día de pruebas: ~150 de 5.000.
+- **Pendiente:** repetir `qa:transit` con Barcelona en hora punta, y ver de día una
+  ficha de metro (L6/L7) con su aviso de "a nivel de calle".
+- **Pins del fork que cambian:** `transitQa.test.mjs` cuenta 9 filas de Transit en
+  DATA_SOURCES (antes 8).
 
 ### Fase 4 — TMB: clave y llamadas a la API — `solo fork`
 
