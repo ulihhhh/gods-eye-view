@@ -5,7 +5,12 @@
  */
 
 import { TRANSIT_MODE_ICON } from '../../data/transitFeeds.js';
-import { displayMotion, playbackPosition } from './movement.js';
+import {
+  MOTION_UNKNOWN_AFTER_MS,
+  displayMotion,
+  playbackPosition,
+} from './movement.js';
+import { PLAYBACK_MAX_DELAY_MS } from '../../data/contactPlayback.js';
 
 export const TRANSIT_SELECTED_OVERLAY_SOURCE_ID = 'transit-selected';
 export const TRANSIT_SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
@@ -49,6 +54,44 @@ export const MISSED_POLLS_TO_DROP = 2;
 export const VEHICLE_MAX_FIX_AGE_MS = 10 * 60_000;
 /** A feed with no successful poll for this long reads as stale in the panel. */
 export const FEED_STALE_AFTER_MS = 90_000;
+
+/**
+ * Playback limits for one feed's vehicles. Most operators report every few
+ * seconds and keep the defaults: play at most two minutes behind, and stop
+ * calling a vehicle "en route" ninety seconds after its newest report.
+ *
+ * A feed whose operator publishes less often declares `reportIntervalMs`
+ * (FGC's Geotren regenerates about every two minutes). A report then reaches
+ * the browser up to that interval, plus the proxy's own `minIntervalMs`, plus
+ * one poll, after it was made; held to the defaults, every such vehicle would
+ * stall at its newest fix and read NO FIX for much of each cycle. Its limits
+ * grow with that expected age, never beyond the age at which a fix is dropped.
+ * @param {object|null} feed Registry entry.
+ * @returns {{staleMs: number, maxDelayMs: number}}
+ */
+export function transitFeedTiming(feed) {
+  const report = Number(feed?.reportIntervalMs);
+  if (!Number.isFinite(report) || report <= 0)
+    return {
+      staleMs: MOTION_UNKNOWN_AFTER_MS,
+      maxDelayMs: PLAYBACK_MAX_DELAY_MS,
+    };
+  const proxy = Number(feed?.minIntervalMs);
+  const expectedAgeMs =
+    report +
+    (Number.isFinite(proxy) && proxy > 0 ? proxy : 0) +
+    TRANSIT_POLL_MS;
+  return {
+    staleMs: Math.min(
+      VEHICLE_MAX_FIX_AGE_MS,
+      Math.max(MOTION_UNKNOWN_AFTER_MS, expectedAgeMs + report),
+    ),
+    maxDelayMs: Math.min(
+      VEHICLE_MAX_FIX_AGE_MS,
+      Math.max(PLAYBACK_MAX_DELAY_MS, expectedAgeMs + 30_000),
+    ),
+  };
+}
 /**
  * A feed with no successful poll for this long has its vehicles dropped. It is
  * deliberately shorter than VEHICLE_MAX_FIX_AGE_MS so a dead feed empties even

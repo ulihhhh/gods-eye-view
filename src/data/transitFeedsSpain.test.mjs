@@ -200,8 +200,12 @@ test('a long-distance snapshot keeps the train number and uses the feed time', (
 });
 
 test('Renfe feeds are registered, enabled, credited and keyless', () => {
-  const ids = SPAIN_TRANSIT_FEEDS.map((feed) => feed.id);
-  assert.deepEqual(ids, ['renfe-cercanias', 'renfe-ld']);
+  const ids = ['renfe-cercanias', 'renfe-ld'];
+  for (const id of ids)
+    assert.ok(
+      SPAIN_TRANSIT_FEEDS.some((feed) => feed.id === id),
+      id,
+    );
   for (const id of ids) {
     const feed = getTransitFeed(id);
     assert.ok(feed, `${id} is routable`);

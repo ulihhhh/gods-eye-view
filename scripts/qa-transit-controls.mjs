@@ -43,9 +43,9 @@ const LIVE_CITIES = [
   },
   {
     id: 'barcelona',
-    label: 'Barcelona (Renfe Rodalies)',
-    lat: 41.3809,
-    lon: 2.1399,
+    label: 'Barcelona (Renfe Rodalies, FGC)',
+    lat: 41.387,
+    lon: 2.17,
     heading: 0,
     zone: 'Europe/Madrid',
   },

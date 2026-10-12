@@ -139,13 +139,22 @@ export function displacementPlausible(mode, meters, seconds, inferred = false) {
   return meters / seconds <= ceiling;
 }
 
-export function initializePlayback(entry, budget, feedLag) {
+/**
+ * Give a new vehicle its playback track.
+ * @param {object} entry
+ * @param {object|null} budget
+ * @param {object} feedLag The feed's shared lag reservoir.
+ * @param {{staleMs?: number, maxDelayMs?: number}} [timing] Per-feed limits
+ *   (`transitFeedTiming`); omitted values keep the defaults.
+ */
+export function initializePlayback(entry, budget, feedLag, timing = {}) {
   entry.track = createTrack({
     budget,
     policy: {
       feedLag,
       courseMinTravelM: COURSE_MIN_TRAVEL_M,
-      staleMs: MOTION_UNKNOWN_AFTER_MS,
+      staleMs: timing.staleMs ?? MOTION_UNKNOWN_AFTER_MS,
+      ...(timing.maxDelayMs ? { maxDelayMs: timing.maxDelayMs } : {}),
       accept: (a, b) =>
         displacementPlausible(
           b.admissionMode ?? entry.mode,
@@ -305,7 +314,8 @@ export function displayMotion(entry, nowMs) {
   if (!entry) return { moving: false, word: '' };
   const sample = entry.sample;
   if (!sample) return { moving: false, word: 'WAITING' };
-  if (sample.latestReportAgeMs > MOTION_UNKNOWN_AFTER_MS)
+  const staleMs = entry.track?.policy?.staleMs ?? MOTION_UNKNOWN_AFTER_MS;
+  if (sample.latestReportAgeMs > staleMs)
     return { moving: false, word: 'NO FIX' };
   if (sample.phase !== 'playing') return { moving: false, word: 'WAITING' };
   if (sample.motion === 'stopped') return { moving: false, word: 'STOPPED' };

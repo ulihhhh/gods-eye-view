@@ -668,11 +668,11 @@ test('public transit documentation uses courtesy attribution and the approved gr
   const rows = data
     .split('\n')
     .filter((line) =>
-      /^\| \*\*(MBTA|CapMetro|Metro Transit|OVapi|Entur|TransLink|HSL|Renfe)/.test(
+      /^\| \*\*(MBTA|CapMetro|Metro Transit|OVapi|Entur|TransLink|HSL|Renfe|FGC)/.test(
         line,
       ),
     );
-  assert.equal(rows.length, 8);
+  assert.equal(rows.length, 9);
   for (const row of rows) {
     assert.doesNotMatch(
       row,

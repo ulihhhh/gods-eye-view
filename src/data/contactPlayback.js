@@ -8,7 +8,10 @@ export const FIX_FLAGS = Object.freeze({
   BREAK: 16,
   LIVE: 32,
 });
-const clampDelay = (n) => Math.max(25_000, Math.min(120_000, n));
+/** Default ceiling on how far behind real time a track may play. */
+export const PLAYBACK_MAX_DELAY_MS = 120_000;
+const clampDelay = (n, max = PLAYBACK_MAX_DELAY_MS) =>
+  Math.max(25_000, Math.min(max, n));
 
 export function createLagReservoir(capacity = 256) {
   return { values: new Float64Array(capacity), count: 0, cursor: 0 };
@@ -295,10 +298,12 @@ export function insertFix(track, fix, observation = {}) {
             percentile(track.lag, 0.95),
             percentile(track.policy.feedLag, 0.9),
           ) + 5000,
+          track.policy.maxDelayMs,
         );
       } else if (!last)
         track.targetDelayMs = clampDelay(
           Math.max(0, receivedAt - fix.t) + 20_000,
+          track.policy.maxDelayMs,
         );
     }
     track.acceptedAt = receivedAt;
