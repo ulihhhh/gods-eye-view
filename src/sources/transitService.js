@@ -17,7 +17,6 @@ import {
   TRANSIT_MAX_REDIRECTS,
   TRANSIT_PROXY_MAX_BODY_BYTES,
   TRANSIT_PROXY_TIMEOUT_MS,
-  TRANSIT_PROXY_TTL_MS,
   TransitFeedShapeError,
   buildTransitSnapshot,
   excludeYieldedVehicles,
@@ -26,6 +25,8 @@ import {
   nextTransitBackoffMs,
   resolveTransitRoute,
   transitCacheState,
+  transitFeedTtlMs,
+  transitRetryAfterMs,
   transitRedirectDecision,
   transitResponseHeaders,
   transitUpstreamHeaders,
@@ -127,16 +128,15 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
     max: TRANSIT_ADMISSION_MAX_PER_FEED,
     globalMax: TRANSIT_ADMISSION_MAX_GLOBAL,
   });
-  const ttlSeconds = Math.ceil(TRANSIT_PROXY_TTL_MS / 1000);
 
   function reply(status, body, headers) {
     return new Response(body, { status, headers });
   }
 
-  function noteFailure(feedId, reason, now) {
+  function noteFailure(feedId, reason, now, minWaitMs = 0) {
     const previous = cooldown.get(feedId);
     const failures = (previous?.failures || 0) + 1;
-    const wait = nextTransitBackoffMs(failures);
+    const wait = Math.max(nextTransitBackoffMs(failures), minWaitMs);
     cooldown.set(feedId, { failures, nextAttemptAt: now + wait, reason });
     return wait;
   }
@@ -205,6 +205,9 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
       if (!response.ok) {
         const error = new Error(`upstream HTTP ${response.status}`);
         error.upstreamStatus = response.status;
+        error.retryAfterMs = transitRetryAfterMs(
+          response.headers?.get?.('retry-after'),
+        );
         throw error;
       }
       const bytes = await readResponseBytesCapped(
@@ -292,12 +295,14 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
       );
     }
     const cached = cache.get(feed.id);
-    const state = transitCacheState(cached, now);
+    const ttlMs = transitFeedTtlMs(feed);
+    const feedTtlSeconds = Math.ceil(ttlMs / 1000);
+    const state = transitCacheState(cached, now, ttlMs);
     if (state === 'fresh') {
       return reply(
         200,
         cached.body,
-        transitResponseHeaders('HIT', cached.host, cached.contactedAt),
+        transitResponseHeaders('HIT', cached.host, cached.contactedAt, ttlMs),
       );
     }
 
@@ -343,7 +348,7 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
       );
     }
     if (!inFlight.has(feed.id) && !admit(feed.id)) {
-      return answerWithoutUpstream('rate-limited', ttlSeconds);
+      return answerWithoutUpstream('rate-limited', feedTtlSeconds);
     }
 
     const request = coalesceProxyRequest(inFlight, feed.id, () =>
@@ -358,6 +363,7 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
           request.shared ? 'INFLIGHT' : 'MISS',
           fresh.host,
           fresh.contactedAt,
+          ttlMs,
         ),
       );
     } catch (error) {
@@ -368,10 +374,16 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
       // the very next request serve it back as a 200.
       if (differential) cache.delete(feed.id);
       if (!request.shared) {
+        // A 429 is the operator asking us to slow down: wait what it asks
+        // (at least a minute, at most fifteen) rather than the short first
+        // rungs of the outage ladder, which would spend more of its quota.
         const wait = noteFailure(
           feed.id,
           error?.message || String(error),
           Date.now(),
+          error?.upstreamStatus === 429
+            ? Math.max(60_000, error.retryAfterMs || 0)
+            : 0,
         );
         console.warn(
           `[transit-proxy] ${feed.id} unavailable: ${error?.message || error} — next attempt in ${Math.round(wait / 1000)}s`,
@@ -396,7 +408,7 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
       const pending = cooldown.get(feed.id);
       const retryAfterS = pending
         ? Math.max(1, Math.ceil((pending.nextAttemptAt - Date.now()) / 1000))
-        : ttlSeconds;
+        : feedTtlSeconds;
       return reply(
         differential ||
           error?.code === 'RESPONSE_TOO_LARGE' ||

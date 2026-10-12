@@ -114,7 +114,7 @@ export function transitUpstreamHeaders(feed, validators = null) {
   return {
     'User-Agent':
       'gods-eye-view-transit-proxy/1.0 (+https://github.com/bilawalsidhu/gods-eye-view)',
-    Accept: 'application/x-protobuf, application/octet-stream;q=0.9, */*;q=0.1',
+    Accept: transitFormatFor(feed).accept,
     'Accept-Encoding': 'gzip',
     ...(validators?.etag ? { 'If-None-Match': validators.etag } : {}),
     ...(validators?.lastModified
@@ -224,6 +224,61 @@ export function repairVehicleTimestamps(vehicles, headerTimestamp, fetchedAtS) {
   });
 }
 
+/** Accept header for GTFS-Realtime protobuf feeds. */
+const GTFS_RT_ACCEPT =
+  'application/x-protobuf, application/octet-stream;q=0.9, */*;q=0.1';
+
+/**
+ * Upstream formats by the registry's optional `format` field, each with the
+ * Accept header it is asked with and a decoder returning the shape
+ * `decodeVehiclePositions` returns (`{version, timestamp, incrementality,
+ * entityCount, truncated, vehicles}`). A feed without `format` is
+ * GTFS-Realtime protobuf. A new non-GTFS source adds one entry here and one
+ * decoder module, and the rest of the proxy does not change.
+ */
+export const TRANSIT_FORMATS = Object.freeze({
+  'gtfs-rt': Object.freeze({
+    accept: GTFS_RT_ACCEPT,
+    decode: decodeVehiclePositions,
+  }),
+});
+
+/**
+ * The format entry for a feed. An unknown format is a shape fault, never a
+ * silent fallback to protobuf: decoding JSON as protobuf yields garbage.
+ * @param {object|null} feed Registry entry.
+ * @returns {{accept: string, decode: (bytes: Uint8Array) => object}}
+ */
+export function transitFormatFor(feed) {
+  const id = feed?.format || 'gtfs-rt';
+  const format = Object.hasOwn(TRANSIT_FORMATS, id)
+    ? TRANSIT_FORMATS[id]
+    : null;
+  if (!format) {
+    throw new TransitFeedShapeError(`unknown feed format ${id}`, 'format');
+  }
+  return format;
+}
+
+/** Longest per-feed minimum interval honoured: past it a feed is not live. */
+export const TRANSIT_MAX_MIN_INTERVAL_MS = 10 * 60_000;
+
+/**
+ * How long one snapshot of this feed answers before the operator is asked
+ * again: the proxy TTL, or the feed's own `minIntervalMs` when it is longer.
+ * Operators with a daily quota (FGC's open-data API allows 5,000 requests a
+ * day per IP) set it so a session polling all day stays inside the quota;
+ * browsers still poll every 15 s and get the cached snapshot.
+ * @param {object|null} feed Registry entry.
+ * @returns {number} ms.
+ */
+export function transitFeedTtlMs(feed) {
+  const own = Number(feed?.minIntervalMs);
+  if (!Number.isFinite(own) || own <= TRANSIT_PROXY_TTL_MS)
+    return TRANSIT_PROXY_TTL_MS;
+  return Math.min(own, TRANSIT_MAX_MIN_INTERVAL_MS);
+}
+
 /**
  * Decode upstream bytes into the JSON snapshot the browser consumes.
  *
@@ -240,7 +295,7 @@ export function repairVehicleTimestamps(vehicles, headerTimestamp, fetchedAtS) {
  *   version: string|null, entityCount: number, truncated: boolean, count: number, vehicles: object[] }}
  */
 export function buildTransitSnapshot(feed, bytes, now = Date.now()) {
-  const decoded = decodeVehiclePositions(bytes);
+  const decoded = transitFormatFor(feed).decode(bytes);
   if (decoded.incrementality !== GTFS_INCREMENTALITY_FULL_DATASET) {
     throw new TransitFeedShapeError(
       `feed is differential (incrementality ${decoded.incrementality})`,
@@ -327,17 +382,36 @@ export function applyDerivedRoutes(feed, vehicles) {
   });
 }
 
+/** Longest Retry-After honoured from an operator. */
+export const TRANSIT_MAX_RETRY_AFTER_MS = 15 * 60_000;
+
+/**
+ * Parse a Retry-After header (delay seconds or an HTTP date) into ms from
+ * `now`, capped so a hostile or broken value cannot park a feed for hours.
+ * @param {string|null|undefined} value Header value.
+ * @param {number} [now=Date.now()]
+ * @returns {number} ms, 0 when absent or unparsable.
+ */
+export function transitRetryAfterMs(value, now = Date.now()) {
+  const text = String(value ?? '').trim();
+  if (!text) return 0;
+  const ms = /^\d+$/.test(text) ? Number(text) * 1000 : Date.parse(text) - now;
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return Math.min(ms, TRANSIT_MAX_RETRY_AFTER_MS);
+}
+
 /**
  * Classify a cache entry for the request policy.
  * @param {{ at: number }|null|undefined} entry Cached snapshot (`at` = fetch ms).
  * @param {number} now
+ * @param {number} [ttlMs] Fresh window for this feed (`transitFeedTtlMs`).
  * @returns {'none'|'fresh'|'stale'|'expired'}
  */
-export function transitCacheState(entry, now) {
+export function transitCacheState(entry, now, ttlMs = TRANSIT_PROXY_TTL_MS) {
   if (!entry || !Number.isFinite(entry.at)) return 'none';
   const age = now - entry.at;
   if (age < 0) return 'fresh';
-  if (age < TRANSIT_PROXY_TTL_MS) return 'fresh';
+  if (age < ttlMs) return 'fresh';
   if (age < TRANSIT_PROXY_STALE_MAX_MS) return 'stale';
   return 'expired';
 }
@@ -353,13 +427,14 @@ export function transitResponseHeaders(
   cacheState,
   upstreamHost = '',
   contactedAt = null,
+  ttlMs = TRANSIT_PROXY_TTL_MS,
 ) {
   return {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control':
       cacheState === 'STALE-ERROR'
         ? 'no-store'
-        : `public, max-age=${Math.floor(TRANSIT_PROXY_TTL_MS / 1000)}`,
+        : `public, max-age=${Math.floor(ttlMs / 1000)}`,
     'X-GEV-Cache': cacheState,
     ...(upstreamHost ? { 'X-Transit-Upstream': upstreamHost } : {}),
     // When the operator last ANSWERED, which is not when the body was fetched.

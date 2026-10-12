@@ -733,6 +733,7 @@
   "src/data/transitFeeds.test.mjs",
   "src/data/transitFeedsSpain.js",
   "src/data/transitFeedsSpain.test.mjs",
+  "src/data/transitFeedHooks.test.mjs",
   "src/data/transitProxy.js",
   "src/data/transitProxy.test.mjs",
   "src/data/gtfsRealtime.js",

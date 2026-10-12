@@ -156,7 +156,7 @@ están actualizados.
 - **Pins del fork que cambian:** `transitQa.test.mjs` cuenta 8 filas de Transit en
   DATA_SOURCES (antes 7).
 
-### Fase 2 — Enganches compartidos: `format` e intervalo mínimo por feed
+### Fase 2 — Enganches compartidos: `format` e intervalo mínimo por feed — ✅ hecha 2026-10-13
 
 **Objetivo.** Preparar el servicio para fuentes que no son GTFS-RT y para APIs con
 cuota. FGC (Fase 3) lo necesita.
@@ -175,6 +175,26 @@ regresión de los 7 feeds de upstream sin cambios.
 
 **Hecho cuando** un feed falso en JSON pasa de punta a punta en los tests y los feeds
 existentes se comportan igual.
+
+**Resultado (2026-10-13, rama `feat/transit-es-hooks`):**
+
+- `TRANSIT_FORMATS` en `transitProxy.js` asocia cada `format` a su `Accept` y su
+  decodificador. Por ahora solo hay `gtfs-rt`, que es el valor por defecto.
+  - `transitFormatFor` rechaza un formato desconocido como fallo de forma; no cae a protobuf.
+  - Compatible con #944: el mismo campo `format`. Si se fusiona, `entur-vehicles` será
+    una entrada más de la tabla en lugar de su `if`.
+  - No se ha traído `request` (POST) ni `reportedMode` de #944, porque FGC no los necesita.
+- `minIntervalMs` por feed, mediante `transitFeedTtlMs`: alarga la ventana de caché, con
+  un tope de 10 min. `transitCacheState` y `transitResponseHeaders` reciben el TTL del
+  feed. El navegador sigue sondeando cada 15 s y recibe la caché: la capa considera
+  viejo un feed a partir de 90 s, así que no hace falta cambiarla.
+- `429`: espera lo que pida `Retry-After` (`transitRetryAfterMs`, segundos o fecha), con
+  un mínimo de 60 s y un máximo de 15 min, en vez de los primeros escalones del backoff.
+- Tests en `src/data/transitFeedHooks.test.mjs`, incluido un servicio que recibe un 429
+  y no vuelve a preguntar al operador.
+  - La prueba de punta a punta del intervalo mínimo con un feed real queda para la Fase 3.
+- Validación: format, boundaries, `npm test` (6499 OK) y build pasan. En vivo, Renfe,
+  MBTA y HSL siguen igual (MISS y luego HIT, `max-age=15`).
 
 ### Fase 3 — FGC (Geotren)
 
