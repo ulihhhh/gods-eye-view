@@ -20,6 +20,7 @@ import { aisLiveProxy } from './vessels/ais-live.js';
 import { trackBackfillProxies } from './aircraft/tracks.js';
 import { openAiRealtimeProxy } from './openai.js';
 import { googlePlacesContextProxy } from './places.js';
+import { mapillaryProxy } from './mapillary.js';
 import { keySetupEndpoint } from '../standalone/key-setup.js';
 import { liveuamapProxy } from './liveuamap.js';
 import {
@@ -79,6 +80,7 @@ function localProviderPlugins({ realtime } = {}) {
     windProxy(),
     weatherProxy(),
     cycloneProxy(),
+    mapillaryProxy(),
     firePerimetersProxy(),
     keySetupEndpoint(),
   ];
