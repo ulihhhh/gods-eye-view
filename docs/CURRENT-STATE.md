@@ -3318,7 +3318,12 @@ leaves the route empty, so a per-feed `deriveRoute` hook reads the line and
 platform from the vehicle label; the card shows the platform beside the
 reported stop. A train both Renfe feeds publish under one number is drawn
 once: the long-distance feed names Cercanías in `yieldsTo`, and the proxy
-drops the vehicles Cercanías last reported from its snapshot. Mode silhouettes
+drops the vehicles Cercanías last reported from its snapshot. A registry row
+may also name a `format` (the proxy's `TRANSIT_FORMATS` table maps it to an
+Accept header and a decoder returning the GTFS-Realtime record shape; an
+unknown format is a shape fault) and a `minIntervalMs` that lengthens that
+feed's cache window for operators with a daily quota. An upstream `429` waits
+what its Retry-After asks, at least one minute and at most fifteen. Mode silhouettes
 identify buses, trams, subways, trains, ferries and unclassified vehicles.
 
 Retained transit history uses the same outlier quarantine as live observations and
