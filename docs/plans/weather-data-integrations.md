@@ -1517,7 +1517,88 @@ missing to add); GIBS remains the one real, ready-to-build option for
 broader satellite coverage, now live-confirmed rather than merely designed,
 whenever the owner decides to lift the AEMET-only scope restriction.
 
-### Deliberately excluded (AEMET side)
+### Phase A18 — unused AEMET products re-reviewed (maps & satellite first) — **reviewed 2026-10-12**
+
+Re-checked against the live public spec
+(`https://opendata.aemet.es/AEMET_OpenData_specification.json`, v2.0, 64 paths,
+15 tags) and with real pulls using the app's own key. We use 12 of the 64
+paths (`avisos_cap/ultimoelaborado`, both `incendios/mapasriesgo`,
+`maestro/municipios`, `observacion/convencional/todas`,
+`prediccion/especifica/{municipio/horaria,playa,uvi}`,
+`red/especial/{ozono,radiacion}`, `red/rayos/mapa`, `satelites/producto/sst`).
+
+**Spec drift since A3/A17.** The `modelos-numericos` and
+`predicciones-georreferenciadas` tags and the `red/radar/raster/*` paths
+are **no longer in the public spec**. `red/radar/raster/nacional` still
+answers, though, and its `metadatos` now describe the product precisely:
+- GeoTIFF in **EPSG:4326**, shipped as a `tar.gz` with the **three latest
+  images** of each product, every **30 min**.
+- National Península+Baleares reflectivity composite.
+- For the **15 regional radars**: reflectivity, ECHOTOP, and 1 h and 6 h
+  accumulated precipitation.
+- An `ESCALA` field maps RGBA to values.
+
+That removes A3's open "GeoTIFF hypothesis" question.
+
+**Radar raster pull (2026-10-12).** The download is **still blocked**:
+- `raster/nacional`: the envelope returns `estado 200`, but its `datos` link answers
+  `HTTP 500` wrapping a `429` ("Se ha alcanzado uno de los límites de uso"). This
+  happened even when that was the only request of the minute, after a 70 s pause:
+  the same server-side failure A3 recorded in September, not our quota.
+- `raster/regional/{radar}`: now **404** (the path is gone).
+
+Verdict: A3 stays blocked. The format is now known (GeoTIFF 4326, `tar.gz` of 3
+frames), so if `datos` ever resolves, the build is: server-side untar plus GeoTIFF
+decode, then a PNG on a lat/lon rectangle through the shell surface (see the
+rendering note). Re-test occasionally with a single spaced request. For a Spain
+radar overlay that works today, the realistic alternative is still the
+EUMETNET OPERA composite noted under A3 (needs its own verification pass).
+
+Map/satellite products, live-pulled today:
+
+| Product | Endpoint | Result 2026-10-12 | Shape | Verdict |
+| --- | --- | --- | --- | --- |
+| Regional radar PPI | `red/radar/regional/{radar}` (15 codes: am, sa, pm, **ba**, cc, co, **ma**, ml, mu, vd, ca, se, va, ss, za) | ✅ 200, GIF 480×530, ~9–11 KB, every 10 min | Radar-centred image with borders, legend and text strip baked in; **not** georeferenced | Usable only as a PiP thumbnail (4th pill in `aemet-weather-imagery`, picking the radar nearest the camera). For an on-globe overlay use the raster GeoTIFF instead |
+| National radar composite (plain) | `red/radar/nacional` | ❌ `estado 404` "Error al obtener los datos" (2 tries) — same as A3 | — | Still broken |
+| Radar raster (georeferenced) | `red/radar/raster/{nacional,regional/{radar}}` (unlisted) | ❌ national: envelope OK, `datos` 500/429; regional path 404 | GeoTIFF EPSG:4326 | Best format, still blocked AEMET-side (A3) |
+| NDVI vegetation | `satelites/producto/nvdi` | ✅ 200, GIF 1000×773, weekly (refreshed Thursdays, 7-day composite, NOAA-19) | Iberia + Canarias inset, legend and frame baked in | Not weather (A17 exclusion stands for overlays). Cheap win: a 5th PiP pill "Vegetation (NDVI)" |
+| Surface analysis chart | `mapasygraficos/analisis` | ✅ 200, GIF 1400×2000, twice a day | Rotated polar-stereographic chart (fronts, isobars, A/B) | PiP thumbnail only. Fronts make a good "why is it raining" companion to the radar pill |
+| Significant-weather maps | `mapasygraficos/mapassignificativos/...` | ❌ 404 for today; spec says data only **"Hasta el 22/01/2020"** | — | Discontinued: drop |
+| Station shapefiles | `productos/climatologicos/capasshape/{automaticas,completas,pluviometricas,termometricas}` | ✅ zip (~60 KB) for `automaticas` | Shapefile of station inventory | Only useful for a station-metadata join, not a layer |
+
+Non-map data worth a follow-up (not pulled today, descriptions from spec):
+- **Climatological normals 1991–2020 and extremes per station**
+  (`valores/climatologicos/normales|valoresextremos`). Extends A13: the station card
+  could say "today 31 °C, normal for October 24 °C, record 36 °C (1997)".
+- **Daily forecast for all municipalities** (`municipio/diaria/todos`, new). Bulk
+  alternative to per-municipality calls for the A2 tooltip.
+- **Mountain forecast** (`montaña/pasada/area/{area}/dia/{dia}`) and **nivological
+  bulletin** (`nivologica/{area}`). Text, seasonal: today's pull of area 0 (Catalan
+  Pyrenees) says the avalanche campaign ended on 4 May. A winter-only card at most.
+- **Background pollution EMEP/VAG/CAMP** (`contaminacionfondo/estacion/{name}`).
+  10-minute O3/SO2/NO/NO2/PM10 plus meteorology, but in **FINN** format (a ministry
+  format, needs a parser). Natural extension of `aemet-environmental`.
+- **Coastal and high-seas maritime forecasts.** Still blocked on zone geometry (A6).
+- **Warnings archive** (`avisos_cap/archivo`, since 18-06-2018). Enables a "warnings
+  over the last N days" replay of `aemet-warnings`.
+- **SYNOP/TEMP messages** (`observacion/convencional/mensajes`, tar.gz of JSON+BUFR).
+  TEMP gives radiosonde profiles: niche.
+
+**Rendering note.** Upstream's weather layer now owns two hosts that also work
+on Google 3D tiles:
+- `resolveImageryHost` falls back to `tileset.imageryLayers` when `globe.show` is false;
+- `createShellSurface({rectangle, …})` in `src/layers/weather/shellRendering.js`
+  draws one full-extent image in a raised rectangle that lifts with the camera.
+
+Either one fixes the "AEMET gradient invisible under 3D tiles" issue for a radar
+overlay, provided the image is in lat/lon (EPSG:4326), which the raster product
+already is.
+
+**Proposed order**:
+1. Regional radar and surface-analysis pills in the existing PiP layer (work today).
+2. Radar overlay on the globe only once `raster/nacional` resolves (or via EUMETNET OPERA).
+3. NDVI pill.
+4. Normals/extremes in the station card.
 
 Real datasets, reviewed and consciously left out — not oversights:
 
