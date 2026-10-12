@@ -12,7 +12,7 @@ investigación.
   `mi-main` cuando cumple su "hecho cuando", con commit y push.
 - **Calidad de PR desde el primer día.** Cada fase sigue la guía de contribución de
   upstream: tests, docs y gates. Así, si en el futuro hay suficientes integraciones de
-  datos de España, el PR conjunto a upstream (Fase 7) es una tarea de **montaje**, no de
+  datos de España, el PR conjunto a upstream (Fase 9) es una tarea de **montaje**, no de
   reescritura.
 - **Lo que no puede ir nunca a upstream va marcado como `solo fork`.** Ejemplo: TMB, por
   su licencia ligada a la aplicación.
@@ -38,9 +38,9 @@ investigación.
      en el sync nos quedamos con su implementación y adaptamos la nuestra.
    - **#634** (Ontario): modo y nombre de línea por feed. Si se fusiona, nuestro
      `deriveRoute` (Fase 1) pasa a usar su mecanismo.
-   - **#733** (MBTA rutas y alertas): patrón para la Fase 5.
+   - **#733** (MBTA rutas y alertas): patrón para el trazado de líneas (Fase 5) y para las incidencias (Fase 7).
 5. **Ninguna fase añade capa nueva** (son filas de la capa Transit existente), así que no
-   hacen falta tokens de share-link. TMB (Fase 6) sí podría necesitar una capa, y usaría
+   hacen falta tokens de share-link. TMB (Fase 4) sí podría necesitar una capa, y usaría
    el bloque `z*` del fork.
 
 ---
@@ -95,7 +95,7 @@ investigación.
     línea se toma del sufijo del `tripId`;
   - LD: `routeId` vacío, y la etiqueta es el número de tren.
 - La ficha pasa a mostrar "Línea C4 · andén 8". Es el primer campo genérico opcional;
-  ver Fase 4.
+  ver Fase 6.
 - `terms`:
   - quote: _"Las presentes condiciones generales permiten la reutilización de los
     documentos sometidos a ellas para fines comerciales y no comerciales."_
@@ -204,46 +204,7 @@ parado/en marcha, JSON malformado), los gates comunes, y comprobar en vivo que e
 como metro con el aviso de "a nivel de calle", y la ficha explica que el dato llega cada
 ~2 min.
 
-### Fase 4 — Ficha enriquecida (datos que llegan y no se muestran)
-
-**Objetivo.** Aprovechar los datos extra con **campos genéricos opcionales** del
-registro normalizado, para que cualquier feed pueda rellenarlos:
-
-| Campo genérico   | Renfe            | FGC                                        | En la ficha                            |
-| ---------------- | ---------------- | ------------------------------------------ | -------------------------------------- |
-| `platform`       | `label` (Fase 1) | —                                          | "andén 8"                              |
-| `destination`    | —                | `desti` + `codigo-estaciones`              | "→ Terrassa Nacions Unides"            |
-| `nextStops[]`    | —                | `properes_parades`                         | "próx.: Rubí, Les Planes…"             |
-| `onTime`         | —                | `en_hora`                                  | "En hora / Fuera de horario"           |
-| `occupancyPct[]` | —                | `ocupacio_*_percent`                       | "Ocupación: 15 % · 32 % · 28 % · 15 %" |
-| `vehicleType`    | —                | `tipus_unitat`                             | "Unidad serie 112"                     |
-| nombre de parada | (fase posterior) | `codigo-estaciones`, pequeño, se empaqueta | "parado en Sarrià" en vez de "stop SR" |
-
-**Validación.** Tests de `buildTransitSelectionCopy` con y sin cada campo (los feeds de
-upstream no cambian), y capturas de la ficha.
-
-**Hecho cuando** una ficha de FGC muestra destino, próximas paradas, puntualidad y
-ocupación, y una de Renfe muestra línea y andén.
-
-### Fase 5 — Retrasos e incidencias
-
-**Objetivo.** Mostrar si el tren va con retraso y los avisos de servicio.
-
-- Retraso: los `trip_updates` de Renfe (Cercanías y LD) y el `trip-updates` de FGC,
-  cruzados por `tripId`, dan "+3 min" en la ficha.
-- Incidencias: `alerts` de Renfe y `alerts-gtfs_realtime` de FGC, siguiendo el patrón de
-  #733 (`/api/transit/alerts/<feed>`, texto acotado y sin enlaces al navegador).
-- Fuera de esta fase: nombres de parada y tipo de servicio (AVE/Alvia/MD) de Renfe, que
-  necesitan su GTFS estático (pesado). Se dejan como posible fase posterior.
-
-**Hecho cuando** un tren con retraso lo dice en la ficha y una incidencia activa se ve
-en la capa.
-
-### Fase 6 — TMB (metro y bus de Barcelona) — `solo fork`
-
-**Requisito previo:** registrarte en developer.tmb.cat y dar de alta una aplicación.
-La clave (`TMB_APP_ID`/`TMB_APP_KEY`) va en el servidor y se ofrece en POWER UP, como
-la de AEMET.
+### Fase 4 — TMB: clave y llamadas a la API — `solo fork`
 
 **Por qué es solo para el fork.**
 
@@ -251,31 +212,126 @@ la de AEMET.
   aplicación y/o servicio indicado en la solicitud".
 - Solo hay predicciones de llegada: no hay coordenadas.
 
-**Orden dentro de la fase:**
+**4a — Clave en POWER UP** (como AEMET). `TMB_APP_ID` y `TMB_APP_KEY` van solo en el
+servidor (`.env`) y se ofrecen en el panel POWER UP, con enlace al registro en
+developer.tmb.cat. El navegador nunca ve la clave: todas las llamadas pasan por un
+proxy propio (`/api/tmb/...`) que solo admite rutas fijas.
 
-1. **Panel de próximas llegadas** al pulsar una estación de metro (iMetro) o una parada
-   de bus (iBus). Bajo demanda, honesto y barato.
-2. **Geometría oficial** de líneas, estaciones y accesos de metro (`/v1/transit`, GeoJSON)
-   como contexto.
-3. **Experimento: metro "estimado".** Se interpola cada `codi_servei` entre estaciones a
-   partir de sus llegadas, sobre `linies/metro/{l}/trams`. Siempre etiquetado como
-   _posición estimada a partir de predicciones_, con estilo propio, y desactivable.
-
-**Hecho cuando** (1) y (2) funcionan con la clave del usuario y, sin clave, la capa dice
+**4b — Panel de próximas llegadas.** Al pulsar una estación de metro (iMetro) o una
+parada de bus (iBus), bajo demanda y con caché corta (~15 s). Sin clave, la capa dice
 claramente que necesita una.
 
-### Fase 7 — (Futuro) PR conjunto a upstream con las integraciones de España
+**Hecho cuando** la clave se guarda desde POWER UP y se valida contra la API, y el panel
+muestra las llegadas reales de una estación y una parada.
+
+### Fase 5 — Red y estaciones (datos estáticos con script)
+
+**Cuándo.** Cuando Renfe (✅), FGC (Fase 3) y TMB (Fase 4) ya estén conectados. Así una
+sola pasada cubre las tres redes, y el diccionario de estaciones sirve a la vez a:
+
+- los ids de parada de Renfe ("18000" → Madrid-Atocha Cercanías);
+- las iniciales de Geotren ("PC" → Pl. Catalunya);
+- los códigos de estación de TMB.
+
+**Fuentes** (comprobadas el 2026-10-13; todas CC BY 4.0 salvo TMB):
+
+| Red                                                                                                                      | Estaciones                              | Trazado                                                                                                     | Extras                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Renfe Cercanías/Rodalies, GTFS `https://ssl.renfe.com/ftransit/Fichero_CER_FOMENTO/fomento_transit.zip` (14 MB)          | 1.136 en `stops.txt`                    | `shapes.txt`: 15 núcleos y 152 trazados, Rodalies incluido (R1–R17, RG1, RL3/4, RT1/2, en los dos sentidos) | Color oficial por línea en `routes.txt`. El núcleo sale del prefijo del `tripId` en tiempo real ("51…" Barcelona, "10…" Madrid) y distingue la C1 de Madrid de la de Sevilla |
+| Renfe AV/LD/MD, GTFS `https://ssl.renfe.com/gtransit/Fichero_AV_LD/google_transit.zip` (0,9 MB)                          | 1.006                                   | ❌                                                                                                          | Tipo de servicio por ruta (AVE, Alvia, Intercity…)                                                                                                                           |
+| FGC (dadesobertes.fgc.cat): `gtfs_stops`, `gtfs_shapes`, `lineas-red-fgc`, `codigo-estaciones`                           | 305 paradas, más los códigos de Geotren | 11.662 puntos                                                                                               | Color por línea                                                                                                                                                              |
+| IGN "Redes de transporte de España" (WFS INSPIRE `https://servicios.idee.es/wfs-inspire/transportes`, CC BY 4.0 scne.es) | Áreas y nodos de estación               | Toda la red ferroviaria (enlaces ferroviarios), alta velocidad incluida                                     | Tipo y uso de vía                                                                                                                                                            |
+| TMB `/v1/transit` (clave, licencia ligada a la app)                                                                      | Estaciones y accesos de metro           | Líneas y tramos (`trams`)                                                                                   | —                                                                                                                                                                            |
+
+Todos los `stopId` de Renfe en tiempo real que se probaron existen en sus GTFS.
+
+**Cómo:**
+
+1. **Script** `scripts/build-spain-transit-network.mjs`, en la línea de
+   `build-spain-boundaries.mjs`:
+   - descarga los GTFS de Renfe y los datasets de FGC;
+   - extrae estaciones `{id, nombre, lat, lon}`, rutas `{núcleo, línea, color}` y
+     trazados simplificados (Douglas–Peucker, ~10 m);
+   - escribe JSON compactos en `src/data/local_data/spain_transit/` con un `SOURCE.md`
+     de fuentes, fechas y licencias.
+   - Se carga con `loadBundledJson` (la regla de upstream prohíbe importar JSON como módulo).
+   - Presupuesto orientativo: estaciones ~100 KB, trazados ≤ 600 KB.
+   - El script se vuelve a ejecutar cuando cambian los GTFS (mensual, o cuando Renfe
+     publique horarios nuevos).
+2. **Red de larga distancia:** con la capa ferroviaria del IGN, simplificada con el mismo
+   script. Es el paso más pesado; va al final de la fase.
+3. **TMB no se empaqueta.** Por clave y licencia, el servidor descarga su geometría con la
+   clave del usuario y la guarda en caché local (gitignored).
+4. **En la app:**
+   - nombres de estación en la ficha ("next stop Madrid-Atocha Cercanías");
+   - trazado de líneas con color oficial, siguiendo el patrón del PR #733 (polilíneas
+     agrupadas a ras de suelo);
+   - marcadores de estación a escala de calle.
+
+**Validación.**
+
+- Tests del script con un GTFS de fixture recortado, y un test de tamaño de los JSON.
+- Comprobar que los ids de parada observados en vivo (Renfe, FGC) tienen nombre.
+- Capturas de Barcelona y Madrid con red y trenes, y gates comunes.
+
+**Hecho cuando** la ficha nombra las estaciones, se ven las líneas de Cercanías/Rodalies
+y FGC con sus colores, y regenerar los datos es ejecutar un solo comando.
+
+### Fase 6 — Ficha enriquecida (datos que llegan y no se muestran)
+
+**Objetivo.** Aprovechar los datos extra con **campos genéricos opcionales** del
+registro normalizado, para que cualquier feed pueda rellenarlos:
+
+| Campo genérico   | Renfe            | FGC                           | En la ficha                            |
+| ---------------- | ---------------- | ----------------------------- | -------------------------------------- |
+| `platform`       | `label` (Fase 1) | —                             | "andén 8"                              |
+| `destination`    | —                | `desti` + `codigo-estaciones` | "→ Terrassa Nacions Unides"            |
+| `nextStops[]`    | —                | `properes_parades`            | "próx.: Rubí, Les Planes…"             |
+| `onTime`         | —                | `en_hora`                     | "En hora / Fuera de horario"           |
+| `occupancyPct[]` | —                | `ocupacio_*_percent`          | "Ocupación: 15 % · 32 % · 28 % · 15 %" |
+| `vehicleType`    | —                | `tipus_unitat`                | "Unidad serie 112"                     |
+| nombre de parada | Fase 5           | Fase 5                        | "parado en Sarrià" en vez de "stop SR" |
+
+**Validación.** Tests de `buildTransitSelectionCopy` con y sin cada campo (los feeds de
+upstream no cambian), y capturas de la ficha.
+
+**Hecho cuando** una ficha de FGC muestra destino, próximas paradas, puntualidad y
+ocupación, y una de Renfe muestra línea y andén.
+
+### Fase 7 — Retrasos e incidencias
+
+**Objetivo.** Mostrar si el tren va con retraso y los avisos de servicio.
+
+- Retraso: los `trip_updates` de Renfe (Cercanías y LD) y el `trip-updates` de FGC,
+  cruzados por `tripId`, dan "+3 min" en la ficha.
+- Incidencias: `alerts` de Renfe y `alerts-gtfs_realtime` de FGC, siguiendo el patrón de
+  #733 (`/api/transit/alerts/<feed>`, texto acotado y sin enlaces al navegador).
+- El tipo de servicio de Renfe (AVE/Alvia/MD) sale del GTFS de la Fase 5, cruzado por
+  número de tren.
+
+**Hecho cuando** un tren con retraso lo dice en la ficha y una incidencia activa se ve
+en la capa.
+
+### Fase 8 — (Opcional) Experimento: metro TMB "estimado" — `solo fork`
+
+Necesita la Fase 4 (iMetro) y la geometría de tramos de la Fase 5. Se interpola cada
+`codi_servei` entre estaciones a partir de sus llegadas, sobre `linies/metro/{l}/trams`.
+Siempre etiquetado como _posición estimada a partir de predicciones_, con estilo propio,
+y desactivable. Riesgos: saltos cuando cambia la predicción, ambigüedad del
+`codi_servei` entre líneas, y lagunas en las terminales.
+
+### Fase 9 — (Futuro) PR conjunto a upstream con las integraciones de España
 
 Se abre solo cuando haya suficientes integraciones de datos de España terminadas en el fork.
 
 **Candidatos:**
 
-| Integración                                                      | ¿Apta para upstream?                                                                                              |
-| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Fases 1–5 (Renfe, enganches, FGC, ficha, retrasos e incidencias) | ✅ sin clave, CC BY 4.0, con coordenadas reales                                                                   |
-| Capas AEMET (`docs/plans/weather-data-integrations.md`)          | ✅ probablemente: piden clave gratuita, como otras capas de upstream (TomTom, Mapillary). Revisar sus tokens `z*` |
-| CCTV Bilbao y extras del pack de Cataluña                        | Revisar uno a uno (Andorra da 404)                                                                                |
-| Fase 6 TMB                                                       | ❌ licencia ligada a la aplicación: se queda en el fork                                                           |
+| Integración                                                                                      | ¿Apta para upstream?                                                                                              |
+| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Fases 1–3 y 5–7 (Renfe, enganches, FGC, red y estaciones sin TMB, ficha, retrasos e incidencias) | ✅ sin clave, CC BY 4.0, con coordenadas reales                                                                   |
+| Capas AEMET (`docs/plans/weather-data-integrations.md`)                                          | ✅ probablemente: piden clave gratuita, como otras capas de upstream (TomTom, Mapillary). Revisar sus tokens `z*` |
+| CCTV Bilbao y extras del pack de Cataluña                                                        | Revisar uno a uno (Andorra da 404)                                                                                |
+| Fases 4 y 8 (TMB)                                                                                | ❌ licencia ligada a la aplicación: se queda en el fork                                                           |
 
 **Cómo montarlo:**
 
@@ -337,7 +393,7 @@ Se abre solo cuando haya suficientes integraciones de datos de España terminada
 - **GTFS-RT de posiciones de FGC: no sirve como fuente principal.** Es intermitente
   (0 bytes a mediodía, ~2,4 KB por la tarde) y, aunque son los mismos trenes que Geotren,
   **no trae `routeId`**. `trip-updates` (13 KB) y `alerts` (6 KB) sí son útiles para la
-  Fase 5.
+  Fase 7.
 - **Modo por línea** (GTFS `gtfs_routes`): L6, L7, L8 y L12 son `route_type` 1 (metro);
   S\*, R\* y RL\* son 2; FV, MM y la cremallera de Núria son 7.
 
