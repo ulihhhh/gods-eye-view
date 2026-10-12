@@ -142,6 +142,20 @@
   largest cities) and `CCTV_VEGVESEN_VIDEO=0` keeps stills only. Attributed
   under NLOD 2.0.
 
+- Add Catalonia (Servei Català de Trànsit) as a keyless CCTV source pack: ~163
+  cameras from a WFS/GML feed that aggregates SCT's own highway cameras with
+  hotlinked Barcelona, Terrassa and Andorra cameras, each partner named as a
+  credit beside the shared provider. Ambient-card refresh paced to 3 minutes,
+  matching the empirically observed upstream cadence. `CCTV_CATALONIA_MAX_SOURCES`
+  sets the cap and `CCTV_CATALONIA_ENABLED=0` turns the pack off. The catalog
+  is fetched over https with redirects refused and a 1 MiB body cap, and frame
+  links carrying userinfo are rejected even on an allowlisted host.
+
+- Add Bilbao (Ayuntamiento de Bilbao, CC BY 4.0) as a keyless CCTV source pack:
+  119 municipal cameras with compass headings carried directly in the feed.
+  `CCTV_BILBAO_MAX_SOURCES` sets the cap and `CCTV_BILBAO_ENABLED=0` turns the
+  pack off.
+
 ## [0.2.1] — 2026-10-02 — God's Eye View through Your Agent (with security fixes and other features)
 
 - Ship each bundled data pack once. The region, marine, admin-boundary,
@@ -657,20 +671,6 @@ Analyst records for loaded satellites, datacenters and dams, with explicit bound
   Source-only timed shots use their authored card dwell and continue normally.
   Media autoplay now requires a live Play Scene or Play Shot action; passive
   loading, saved state and seeking do not grant playback authority.
-
-- Add Catalonia (Servei Català de Trànsit) as a keyless CCTV source pack: ~163
-  cameras from a WFS/GML feed that aggregates SCT's own highway cameras with
-  hotlinked Barcelona, Terrassa and Andorra cameras, each partner named as a
-  credit beside the shared provider. Ambient-card refresh paced to 3 minutes,
-  matching the empirically observed upstream cadence. `CCTV_CATALONIA_MAX_SOURCES`
-  sets the cap and `CCTV_CATALONIA_ENABLED=0` turns the pack off. The catalog
-  is fetched over https with redirects refused and a 1 MiB body cap, and frame
-  links carrying userinfo are rejected even on an allowlisted host.
-
-- Add Bilbao (Ayuntamiento de Bilbao, CC BY 4.0) as a keyless CCTV source pack:
-  119 municipal cameras with compass headings carried directly in the feed.
-  `CCTV_BILBAO_MAX_SOURCES` sets the cap and `CCTV_BILBAO_ENABLED=0` turns the
-  pack off.
 
 - Add Director import previews, validated scene/shot detail drafts and selected-scene
   JSON or asset-bundle sharing. Preserve attribution; verify bounded bundle bytes

@@ -1636,7 +1636,9 @@ export function cataloniaCameraName(carretera, municipi) {
  * one pinned origin, and each non-SCT camera carries its publisher as a
  * `credit` alongside the shared `provider`. The feed carries no heading, so
  * every camera takes the id-hash fallback, low-confidence pose (same as TfL
- * and Fintraffic).
+ * and Fintraffic). It carries no camera status either, so a camera its
+ * publisher has taken offline still registers and serves that publisher's
+ * own "image unavailable" still.
  *
  * The list decides ids, coordinates, labels and which allowlisted frame path
  * is proxied, so it is fetched over https, redirects are refused (the list
