@@ -212,7 +212,12 @@ como metro con el aviso de "a nivel de calle", y la ficha explica que el dato ll
   aplicación y/o servicio indicado en la solicitud".
 - Solo hay predicciones de llegada: no hay coordenadas.
 
-**4a — Clave en POWER UP** (como AEMET). `TMB_APP_ID` y `TMB_APP_KEY` van solo en el
+**4a — Clave en POWER UP** (como AEMET) — ✅ hecho 2026-10-13: entrada `tmb` en
+`src/keySetupCore.mjs` (las dos variables obligatorias), bloque en `.env.example` y
+`/api/tmb/status` (`server/providers/tmb.js`). Este último prueba la pareja con una petición
+pequeña a `/v1/transit/linies/metro`, cacheada 10 min, y responde `ok`, `rejected` o
+`unavailable` sin devolver nunca la clave. Tiene la guarda contra peticiones de otros
+sitios y no sigue redirecciones. Tests en `src/tooling/tmbProvider.test.mjs`. `TMB_APP_ID` y `TMB_APP_KEY` van solo en el
 servidor (`.env`) y se ofrecen en el panel POWER UP, con enlace al registro en
 developer.tmb.cat. El navegador nunca ve la clave: todas las llamadas pasan por un
 proxy propio (`/api/tmb/...`) que solo admite rutas fijas.

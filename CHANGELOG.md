@@ -95,6 +95,12 @@
 
 ## [Unreleased]
 
+- Offer a TMB (Barcelona metro and bus) developer key in the POWER UP panel:
+  `TMB_APP_ID` and `TMB_APP_KEY`, both required, kept server-side only.
+  `/api/tmb/status` checks the pair against TMB with one small request,
+  cached for ten minutes, and reports only `ok`, `rejected` or
+  `unavailable`, never the key.
+
 - Add Renfe to the Transit layer: live Cercanías / Rodalies trains and
   high-speed, long and medium distance trains across Spain, from Renfe's two
   keyless GTFS-Realtime feeds. The line and platform are read from the

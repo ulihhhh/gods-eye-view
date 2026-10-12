@@ -755,6 +755,7 @@
   "scripts/qa-transit.mjs",
   "scripts/qa-transit-heading.mjs",
   "src/tooling/transitProvider.test.mjs",
+  "src/tooling/tmbProvider.test.mjs",
   "src/app/layers/transit.js",
   "src/data/transitIcons.js",
   "src/data/cameraSensitivity.js",
