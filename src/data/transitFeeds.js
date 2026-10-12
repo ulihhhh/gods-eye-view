@@ -26,6 +26,8 @@
  * node:test. No Cesium, no Node built-ins.
  */
 
+import { SPAIN_TRANSIT_FEEDS } from './transitFeedsSpain.js';
+
 /** Transit modes the layer colors. `routeMode` hints refine a feed's default. */
 export const TRANSIT_MODES = Object.freeze([
   'bus',
@@ -124,6 +126,8 @@ function metroTransitRouteMode(routeId) {
  *   url: string, headers?: Record<string, string>,
  *   license: string, licenseUrl: string, attribution: string,
  *   defaultMode: string, routeMode?: (routeId: string|null) => string,
+ *   deriveRoute?: (record: object) => {routeId?: string, platform?: string},
+ *   yieldsTo?: string,
  * }>>}
  */
 export const TRANSIT_FEED_REGISTRY = Object.freeze([
@@ -270,6 +274,7 @@ export const TRANSIT_FEED_REGISTRY = Object.freeze([
     }),
     defaultMode: 'bus',
   }),
+  ...SPAIN_TRANSIT_FEEDS,
 ]);
 
 /**

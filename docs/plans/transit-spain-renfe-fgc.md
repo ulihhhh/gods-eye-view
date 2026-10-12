@@ -77,7 +77,7 @@ investigación.
 
 ## 3. Fases
 
-### Fase 1 — Renfe: Cercanías/Rodalies y AV/LD/MD
+### Fase 1 — Renfe: Cercanías/Rodalies y AV/LD/MD — ✅ hecha 2026-10-12
 
 **Objetivo.** Trenes de Renfe en vivo en toda España: Cercanías, incluido Rodalies
 (89–222 trenes según la hora), y AV/LD/MD (~110).
@@ -114,6 +114,47 @@ investigación.
 **Hecho cuando** en Barcelona se ven los Rodalies y en Madrid los Cercanías y los AVE,
 con línea y andén en la ficha, todos los gates pasan, y DATA_SOURCES y CURRENT-STATE
 están actualizados.
+
+**Resultado (2026-10-12, rama `feat/transit-es-renfe`):**
+
+- Implementado como estaba planeado:
+  - `src/data/transitFeedsSpain.js` (2 filas y `renfeCercaniasRoute`);
+  - una línea en `transitFeeds.js`;
+  - `applyDerivedRoutes` genérico en `transitProxy.js` (campo opcional `deriveRoute`);
+  - "platform N" en la ficha.
+- **Ajustes que salieron al validar:**
+  - **Modo resuelto.** Los dos feeds declaran `routeMode: () => 'rail'`. Con el modo
+    "por defecto", la capa aplicaría el tope de velocidad de `unknown` (~200 km/h) y
+    rechazaría los saltos de un AVE.
+  - **Trenes en los dos feeds.** Los Regionales catalanes (R15, R16, R17…) salen en
+    Cercanías y en LD con el mismo número de tren y a 0,4–5,7 km de distancia. Nuevo
+    campo genérico `yieldsTo`: `renfe-ld` cede a `renfe-cercanias`, y el servicio quita
+    del snapshot de LD los ids del último snapshot de Cercanías. En vivo: 3 trenes
+    cedidos y 0 duplicados.
+  - **Gate `qa:transit`:**
+    - Barcelona y Madrid añadidas a `LIVE_CITIES`.
+    - Nueva variable `QA_CITIES=barcelona,madrid`, que fuerza las ciudades a cualquier hora.
+    - Nuevo campo `groundM` por ciudad. El gate colocaba la cámara a 600 m sobre el
+      elipsoide, y en Madrid (~670 m) eso es bajo el suelo.
+- **Validación:**
+  - `format:check`, `check:boundaries`, `doctor`, `npm test` (6482 OK la primera
+    pasada) y `build`: pasan.
+  - `test:track`: 109/109.
+  - `qa:transit` con `QA_CITIES=madrid,barcelona`: las dos ciudades pasan todos sus
+    checks (8 de 8 en Madrid tras `groundM`).
+    - Ficha en Atocha: "🚆 Route C2 · Last report: next stop 18000 · platform 2".
+    - DETECT etiqueta "C2/RAIL", "R11/RAIL", etc.
+  - Fallos que no son de esta fase:
+    - presupuestos de 800/3000 vehículos (`budgets`, que ya fallan en `main` según el PR #944);
+    - "matrix" de Boston (harness cerrado);
+    - checks de estilo `UNEXERCISED` por haber pocos sprites aislados de noche;
+    - "all required sections enabled", que falla por diseño en ejecuciones parciales.
+  - Proxy en vivo: Cercanías 60–222 trenes según la hora (con línea en todos y andén en
+    ~40 %), y LD ~60–110 con la hora de cabecera.
+- **De paso** se arregló en `mi-main` una regresión de `check:boundaries` del sync del
+  día (`layerManifest.js` sin dueño en `application-layer-construction`).
+- **Pins del fork que cambian:** `transitQa.test.mjs` cuenta 8 filas de Transit en
+  DATA_SOURCES (antes 7).
 
 ### Fase 2 — Enganches compartidos: `format` e intervalo mínimo por feed
 

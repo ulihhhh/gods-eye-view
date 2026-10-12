@@ -95,6 +95,13 @@
 
 ## [Unreleased]
 
+- Add Renfe to the Transit layer: live Cercanías / Rodalies trains and
+  high-speed, long and medium distance trains across Spain, from Renfe's two
+  keyless GTFS-Realtime feeds. The line and platform are read from the
+  vehicle label ("Route C4", "platform 8"), and both feeds count as rail so
+  high-speed trains are not refused as implausibly fast. Catalan regional
+  trains published by both feeds are drawn once.
+
 - Add an experimental ChatGPT/Codex OAuth option for cloud voice in Provider
   Settings. API-key voice remains the default. Local sign-in can start from
   the auth button and reports completion, failure, timeout, or expired

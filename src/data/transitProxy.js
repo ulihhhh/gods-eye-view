@@ -257,11 +257,74 @@ export function buildTransitSnapshot(feed, bytes, now = Date.now()) {
     truncated: decoded.truncated,
     count: decoded.vehicles.length,
     vehicles: repairVehicleTimestamps(
-      decoded.vehicles,
+      applyDerivedRoutes(feed, decoded.vehicles),
       decoded.timestamp,
       Math.floor(now / 1000),
     ),
   };
+}
+
+/**
+ * Drop the vehicles another feed already reports, for a feed whose registry
+ * row names it in `yieldsTo`. One operator can publish the same train in two
+ * feeds (Renfe's Catalan regional lines appear in both its Cercanías and its
+ * long-distance feed, kilometres apart), and two markers for one train read
+ * as two trains. The preferred feed keeps it; this one yields.
+ * @param {object} snapshot Snapshot from `buildTransitSnapshot`.
+ * @param {object[]|null} preferredVehicles The preferred feed's latest vehicles,
+ *   or null when that feed has not been fetched yet.
+ * @returns {object} Snapshot without the shared vehicles, `yielded` = how many.
+ */
+export function excludeYieldedVehicles(snapshot, preferredVehicles) {
+  if (!Array.isArray(preferredVehicles) || !preferredVehicles.length) {
+    return { ...snapshot, yielded: 0 };
+  }
+  const taken = new Set(preferredVehicles.map((vehicle) => vehicle?.id));
+  const vehicles = snapshot.vehicles.filter(
+    (vehicle) => !taken.has(vehicle.id),
+  );
+  return {
+    ...snapshot,
+    count: vehicles.length,
+    yielded: snapshot.vehicles.length - vehicles.length,
+    vehicles,
+  };
+}
+
+/** Longest line or platform code a feed's `deriveRoute` may supply. */
+export const TRANSIT_DERIVED_CODE_MAX_CHARS = 8;
+
+function boundedCode(value) {
+  return typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= TRANSIT_DERIVED_CODE_MAX_CHARS
+    ? value
+    : null;
+}
+
+/**
+ * Apply a feed's optional `deriveRoute(record)` to decoded vehicles, for
+ * feeds that leave `trip.route_id` empty but name the line elsewhere (Renfe
+ * Cercanías puts it, and the platform, in the vehicle label). A route the
+ * feed itself published always wins; derived values are short strings or
+ * nothing, and a feed without the hook is returned untouched.
+ * @param {object} feed Registry entry.
+ * @param {object[]} vehicles Normalized vehicle records.
+ * @returns {object[]} Records, with `routeId` and `platform` where derived.
+ */
+export function applyDerivedRoutes(feed, vehicles) {
+  if (typeof feed?.deriveRoute !== 'function') return vehicles;
+  return vehicles.map((vehicle) => {
+    const derived = feed.deriveRoute(vehicle) || {};
+    const routeId = vehicle.routeId ? null : boundedCode(derived.routeId);
+    const platform = boundedCode(derived.platform);
+    if (!routeId && !platform) return vehicle;
+    return {
+      ...vehicle,
+      ...(routeId ? { routeId } : {}),
+      ...(platform ? { platform } : {}),
+    };
+  });
 }
 
 /**
