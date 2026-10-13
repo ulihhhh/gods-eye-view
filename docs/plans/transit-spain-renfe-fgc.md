@@ -258,8 +258,17 @@ como metro con el aviso de "a nivel de calle", y la ficha explica que el dato ll
   - El check de flota (≥ 20 vehículos) falló a las 00:45 por la hora: había 19.
   - Proxy en vivo: MISS y luego HIT con `max-age=60`.
   - Cuota consumida en todo el día de pruebas: ~150 de 5.000.
-- **Pendiente:** repetir `qa:transit` con Barcelona en hora punta, y ver de día una
-  ficha de metro (L6/L7) con su aviso de "a nivel de calle".
+- **Cierre (2026-10-13, 11:30, `QA_CITIES=barcelona`, Node 24):**
+  - Barcelona pasa entero: 431 vehículos (FGC 53, Cercanías 241, AV/LD/MD 137), ficha,
+    DETECT (`L6/METRO`), sprites por modo, movimiento y la recarga del histórico.
+  - Ficha de metro de día (captura `qa-shots/transit/keyed-barcelona-fgc-l7-card.jpg`):
+    "🚇 Route L7 · Subway · FGC … next stop TB · many seats available · Shown at
+    street level · depth not in the feed".
+  - Fallos fuera de Barcelona, ninguno de la fase: `budgets` y `matrix` (ya fallaban en
+    la base) y `trail-visible` (Austin, 300 m). Este último también falla, y de forma
+    intermitente, en `6c6a2f8` (mi-main antes de FGC).
+  - El "unexercised" de contraste por estilo se debe a pocos sprites aislados en
+    pantalla (1–2 de 6), no a un fallo.
 - **Pins del fork que cambian:** `transitQa.test.mjs` cuenta 9 filas de Transit en
   DATA_SOURCES (antes 8).
 
@@ -283,10 +292,84 @@ proxy propio (`/api/tmb/...`) que solo admite rutas fijas.
 
 **4b — Panel de próximas llegadas.** Al pulsar una estación de metro (iMetro) o una
 parada de bus (iBus), bajo demanda y con caché corta (~15 s). Sin clave, la capa dice
-claramente que necesita una.
+claramente que necesita una. Rama `feat/transit-es-tmb-arrivals`.
+
+_Datos comprobados en vivo el 2026-10-13 con la clave del fork:_
+
+| Petición                                                     | Respuesta                                                                                                                                                                                                             |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/v1/transit/linies/metro/estacions`                         | 171 estaciones-línea (133 KB, `max-age=10800`), 140 grupos `CODI_GRUP_ESTACIO`. Líneas L1–L5, L9N/S, L10N/S, L11 y FM (funicular). Cada fila: `CODI_ESTACIO`, `NOM_ESTACIO`, `NOM_LINIA`, `COLOR_LINIA`, punto        |
+| `/v1/transit/parades`                                        | 2.723 paradas de bus, **1,9 MB** con 19 campos: hay que recortarlas en el servidor a `{codi, nom, lat, lon}`                                                                                                          |
+| `/v1/itransit/metro/estacions?estacions=326,126` (Catalunya) | 1,5 KB. `linies[] → estacions[] (codi_via, id_sentit) → linies_trajectes[] (desti_trajecte, color_linia) → propers_trens[] {codi_servei, temps_arribada}` (epoch ms) + `timestamp` de la consulta. Dos trenes por vía |
+| `/v1/itransit/bus/parades/108` (Pl. Espanya – FGC)           | 4,8 KB. `parades[] → linies_trajectes[] (nom_linia, desti_trajecte, id_sentit) → propers_busos[] {temps_arribada, id_bus}`. Incluye líneas AMB (L70, X70…)                                                            |
+
+Un grupo de estación (p. ej. Catalunya = L1 `126` + L3 `326`) se consulta en **una sola**
+petición iMetro con todos sus `CODI_ESTACIO`.
+
+**Cambios.**
+
+1. **Servidor** — ampliar `server/providers/tmb.js` (sigue siendo `solo fork`):
+   - `GET /api/tmb/stations` → `{metro: [{group, name, lat, lon, codes[], lines[{name, color}]}], bus: [{code, name, lat, lon}]}`.
+     Une las 171 estaciones-línea por grupo y recorta las paradas. Caché en memoria de
+     24 h, single-flight, y se sirve la copia vieja si TMB falla. Sin caché en disco: eso
+     queda para la Fase 5.
+   - `GET /api/tmb/arrivals/metro/<group>` y `GET /api/tmb/arrivals/bus/<code>`:
+     - id validado con `^\d{1,6}$` (404 si no);
+     - el grupo debe existir en el catálogo, y el servidor traduce grupo → códigos;
+       el navegador nunca elige la URL;
+     - caché de 15 s por id, single-flight, y como máximo 30 ids distintos por minuto
+       para que un clic repetido o un bucle no gaste la cuota de la app;
+     - respuesta normalizada: `{fetchedAt, lines: [{line, color, destination, track, arrivals: [epochMs…]}]}`.
+       Nunca se reenvía el cuerpo de TMB.
+   - Sin clave → 503 `{error: 'no_key'}`, como AEMET. Con clave rechazada → 502
+     `{error: 'rejected'}`. Mismas guardas que `/status`: `sameSiteGated`,
+     `redirect: 'error'`, timeout, y la clave nunca en logs ni respuestas.
+2. **Decodificador puro** — `src/data/tmbArrivals.js`: `normalizeTmbMetroArrivals`,
+   `normalizeTmbBusArrivals` y `buildTmbArrivalsCopy` (título + líneas de la ficha:
+   "L3 → Trinitat Nova · 3 min, 6 min"). Sin Cesium, para que se pueda testear y para
+   no romper `check:boundaries`.
+3. **Capa nueva `tmb-arrivals`** — `src/data/tmbArrivalsLayer.js`, con el patrón de
+   `aemetBeaches.js` (puntos, `pickRegistry`, ficha seleccionada en `worldOverlay`):
+   - estaciones de metro como puntos con el color de la línea (gris si son varias);
+   - paradas de bus solo a escala de calle (umbral de altura de cámara, a fijar al
+     validar), para no pintar 2.723 puntos a vista de ciudad;
+   - solo carga el catálogo si la cámara está a ≲ 40 km de Barcelona;
+   - al pulsar: pide las llegadas y refresca cada 15 s mientras siga seleccionada
+     (cuenta atrás local entre refrescos). Escape o clic fuera cierra la ficha;
+   - sin clave: aviso "TMB needs a developer key — add it in POWER UP" y ningún
+     punto. Clave rechazada: aviso equivalente;
+   - créditos: "TMB" con la fecha de consulta, como pide la licencia.
+4. **Registro de la capa:**
+   - token **`zh`** en `LAYER_STATE_REGISTRY` (bloque `z*` del fork) y en el ledger;
+   - `constructCatalog.js`, `layerManifest.js` (alias de voz: "metro arrivals",
+     "bus arrivals", "TMB") y `dataCredits.js`;
+   - nada en `transitFeeds*.js`: TMB no tiene posiciones.
+
+**Validación.**
+
+- Tests sin red con fixtures recortados de las respuestas de arriba:
+  - normalizadores (metro con dos líneas, bus con líneas AMB, listas vacías, JSON roto);
+  - proxy: validación de id, caché de 15 s, single-flight, 503 sin clave, 502 si TMB
+    rechaza, sin redirecciones, y que la clave no aparezca en ninguna respuesta;
+  - catálogo: agrupación por `CODI_GRUP_ESTACIO` y recorte de paradas.
+- Gates comunes (§5), con Node 24.
+- En vivo: ficha de Catalunya (L1 + L3) y de la parada 108; contar peticiones a TMB en
+  5 min con la ficha abierta (≈ 20 para una ficha, no más).
+
+**Pins del fork que cambian:** el ledger pasa de 36 a 37 reservas (`zh`); revisar
+también los recuentos del manifiesto de voz y de DATA_SOURCES si los hay.
 
 **Hecho cuando** la clave se guarda desde POWER UP y se valida contra la API, y el panel
 muestra las llegadas reales de una estación y una parada.
+
+**4c — (Después de la 4b) Ampliación AMB y bicis compartidas.** Decidido el 2026-10-13:
+las paradas AMB no entran en la 4b. Van en una ampliación posterior, junto con AMBici y
+Bicing en la capa Bike Share:
+
+- llegadas a paradas AMB desde el TripUpdates (sin clave), en el mismo panel de la 4b;
+- AMBici (GBFS, CC0) y Bicing (GBFS, licencia por verificar) como filas de la capa
+  Bike Share de upstream;
+- datos y licencias en §4, "AMB".
 
 ### Fase 5 — Red y estaciones (datos estáticos con script)
 
@@ -473,10 +556,43 @@ Especificaciones públicas en `/assets/api-docs/v1/<servicio>/swagger.json`.
 | Planner  | `/v1/planner/plan`                         | Rutas (OpenTripPlanner)                                                                            |
 | Static   | `/v1/static/datasets/gtfs.zip`             | GTFS estático                                                                                      |
 
-- Sin GTFS-RT ni posiciones de vehículos. El AMB tampoco publica GTFS-RT de buses.
+- Sin GTFS-RT ni posiciones de vehículos.
 - Todo pide `app_id` + `app_key`.
 - Licencia gratuita, pero ligada a la aplicación declarada; obliga a citar la fuente y la
   fecha. TMB puede cambiar la API o cortar la licencia sin aviso.
+
+### AMB (ambmobilitat.cat, catálogo amb.cat) — revisado 2026-10-13
+
+Buses metropolitanos **no TMB** (Baixbus, Moventis, Sagalés, Aerobús…). Todo sin clave y
+comprobado en vivo:
+
+| Dataset                                                | URL                                                                 | Qué da (hoy)                                                                                                                                                                                                                                             |
+| ------------------------------------------------------ | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GTFS-RT **TripUpdates** ("Servei GTFS Real time")      | `https://www.ambmobilitat.cat/transit/trips-updates/trips.bin`      | 250 KB, cada ~30 s, ETag + Last-Modified. 854 viajes en 91 líneas, **todos** con `VehicleDescriptor` (id y número de coche) y horas absolutas de llegada a las próximas paradas. Los 854 `trip_id` existen en el GTFS estático. **Sin VehiclePositions** |
+| GTFS-RT **Alerts**                                     | `https://www.ambmobilitat.cat/transit/alerts/alerts.bin`            | 134 KB, 114 avisos en catalán y castellano (desvíos, paradas cambiadas), con periodo activo                                                                                                                                                              |
+| GTFS estático                                          | `https://www.ambmobilitat.cat/OpenData/google_transit.zip`          | 8,9 MB (60 MB descomprimido), diario. 140 rutas con color oficial, 4.970 paradas, `shapes.txt` (9,5 MB), `trip_headsign`. Vigencia corta (`feed_info`: 13–18 oct)                                                                                        |
+| AMBici (bici eléctrica metropolitana)                  | `https://gbfs.nextbike.net/maps/gbfs/v2/nextbike_bs/gbfs.json`      | GBFS 2.x, 237 estaciones, **CC0-1.0** en `system_information`                                                                                                                                                                                            |
+| Bicing (Barcelona, no AMB, enlazado desde el catálogo) | `https://barcelona.publicbikesystem.net/customer/gbfs/v2/gbfs.json` | GBFS 2.3, 543 estaciones (~8.000 bicis). Sin licencia en el feed: **pendiente de verificar** antes de usarlo. El host ya entra en la lista blanca `*.publicbikesystem.net` de upstream                                                                   |
+
+- **Licencia** de los feeds de bus: "Autorització segons Llei 37/2007" (condiciones de uso
+  de amb.cat): reutilización libre citando a AMB y la fecha de la última actualización, sin
+  alterar ni desvirtuar el contenido. No es CC BY: para la Fase 9, revisar si upstream la
+  admite. Los servicios SOAP de AMB (`OpenData.aspx`, incidencias por parada) piden
+  formulario: no los usamos.
+- **Qué no hay:** posiciones de bus. Ni AMB ni TMB las publican.
+- **iBus de TMB ya incluye líneas AMB** en las paradas de TMB (p. ej. L70/X70 en la 108),
+  pero no cubre las paradas AMB fuera de la red TMB.
+- **Encaje en las fases:**
+  - **4c** (después de la 4b): llegadas a paradas AMB, sin clave, desde el TripUpdates,
+    en el panel de la 4b.
+  - **5:** paradas, trazados y colores de las 140 líneas AMB, con el mismo script.
+  - **7:** las alertas AMB entran por el mismo camino que las de Renfe y FGC.
+  - **8:** buses AMB "estimados" sobre `shapes.txt`, a partir del tramo entre la última
+    parada y la próxima. Es mejor candidato que el metro de TMB: licencia abierta, sin
+    clave, con id de vehículo real y todas las líneas.
+  - **Bicis (4c):** AMBici (CC0) y, si se confirma la licencia, Bicing, como filas de la
+    capa Bike Share de upstream (hoy solo tiene sistemas de EE. UU.). Candidato claro a la
+    Fase 9.
 
 ---
 
