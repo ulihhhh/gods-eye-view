@@ -11,6 +11,9 @@ investigación.
 - **Hecho y en `mi-main`** (`e1d2fcf`, subido): fases 1–5e. Todas las ramas
   `feat/transit-es-*` están fusionadas; la siguiente fase sale de `mi-main` en una rama
   nueva.
+- **Pendientes anotados por el usuario** (sin orden fijo, se pueden intercalar): Fase 5f
+  (quitar la superposición de la red AV/LD donde comparte vía con Cercanías) y Fase 6c
+  (seguir al tren seleccionado con la cámara).
 - **Siguiente: Fase 6a — ficha de FGC** (ver Fase 6). Punto de partida:
   - `src/data/fgcGeotren.js` (`decodeFgcGeotren`): hoy solo lee `lin`, `id`, `ut`,
     `estacionat_a` y la primera de `properes_parades`. Añadir `desti`, `origen`, la lista
@@ -736,6 +739,31 @@ encendido, así que un enlace solo lleva lo que se apaga):
 - **Decisión del usuario:** las pills **solo filtran la red**, no los trenes en vivo de
   la capa Transit (que es de upstream).
 
+### Fase 5f — Tramos compartidos entre Cercanías y la red nacional — pendiente
+
+Anotado por el usuario el 2026-10-13. Donde Cercanías/Rodalies y la red del IGN (pill
+AV/LD) usan la misma vía, las dos líneas se dibujan **superpuestas**: la gris del IGN
+asoma junto a la de color, porque no coinciden al metro (las dos geometrías se
+simplificaron por separado; Douglas–Peucker a 50 m en el IGN). Queremos que en los
+tramos compartidos **solo se vea la de Cercanías**.
+
+**Cómo:**
+
+- En el script (`scripts/build-spain-rail-ign.mjs`, o un paso posterior que lea
+  `lines.json`), partir cada trazado del IGN en tramos "compartidos" (a ≤ ~60 m de una
+  línea de Cercanías/FGC durante un recorrido sostenido, p. ej. ≥ 200 m) y
+  "exclusivos". Índice de rejilla como el de `src/data/trackFollow.js`.
+- **No borrar los compartidos:** guardarlos aparte en el pack (`paths` y `sharedPaths`).
+  La capa dibuja `sharedPaths` solo cuando la pill CERCANÍAS está apagada y AV/LD
+  encendida. Si no, al apagar Cercanías quedarían huecos en la red nacional.
+- `trackGeometry` de LD (vía IGN + Cercanías) sigue usando **todas** las vías: los trenes
+  de LD tienen que poder seguir los tramos compartidos.
+- Medir antes y después: km de IGN que pasan a "compartidos" y tamaño del pack.
+
+**Hecho cuando**, en Madrid (Atocha–Chamartín) y en Barcelona (Sants–Clot), solo se ve
+el color de Cercanías sobre la vía compartida, y al apagar CERCANÍAS la red gris aparece
+entera.
+
 ### Reanálisis de datos (2026-10-13) — qué hay y qué queremos mostrar
 
 Comprobado en vivo el 2026-10-13 (~19:00). "Ahora" = lo que ya se muestra.
@@ -803,6 +831,33 @@ capturas de una ficha de cada operador.
 
 **Hecho cuando** una ficha de FGC muestra destino, próximas paradas, puntualidad y
 ocupación, y una de Renfe muestra tipo, destino, retraso y próximas paradas.
+
+### Fase 6c — Seguir al tren seleccionado con la cámara — pendiente
+
+Anotado por el usuario el 2026-10-13: poder seguir con la cámara al tren seleccionado,
+como ya se hace con los aviones.
+
+- **Lo que ya existe en la app:** aviones y militares tienen seguimiento
+  (`src/layers/flights/tracking.js`, `src/layers/military/tracking.js`) sobre piezas
+  compartidas: `src/data/trackedCamera.js` (`applyTrackedCameraFrame`,
+  `clampTrackedCameraPosition`) y `src/data/trackingClickGesture.js`. Hay acción de voz
+  `track_entity` / `stop_tracking` y restauración desde un enlace
+  (`SHARE_TRACKING_RESTORE_POLICIES` en `src/data/layerState.js`).
+- **Transit hoy solo selecciona** (ficha y estela): no tiene seguimiento. La capa es de
+  upstream, así que es un cambio **solo del fork**: mantenerlo en módulos nuevos
+  (p. ej. `src/layers/transit/follow.js`) con enganches mínimos en `selection.js`.
+- **Cómo:**
+  - la cámara sigue la posición **reproducida** (`entry.sample`, la que se dibuja), no
+    el último fix, a una altura y un ángulo de calle;
+  - la orientación sigue el rumbo de la vía (`courseAlongTrack` / rumbo del tramo) con
+    suavizado, para no girar a saltos;
+  - el seguimiento termina al cerrar la ficha, con Escape o si el tren desaparece del
+    feed (decir por qué).
+- **Opcional:** voz ("sigue al tren R2 …") con `track_entity` y restauración en enlaces,
+  igual que los aviones.
+
+**Hecho cuando** al seleccionar un tren se puede pulsar "seguir", y la cámara lo
+acompaña por la vía sin tirones hasta que se suelta.
 
 ### Fase 7 — Paneles de llegadas en las estaciones (Rail network)
 
