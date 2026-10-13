@@ -190,15 +190,18 @@ export function createQueries({ state, parts }) {
       for (const entry of state._vehicles.values()) {
         if (result.length >= maxCount) break;
         const record = entry.record || {};
-        if (!Number.isFinite(record.lat) || !Number.isFinite(record.lon))
+        // A report whose position the operator fills with something else
+        // (Renfe's arriving trains) keeps the vehicle where it was drawn.
+        const place = record.positionUntrusted ? entry.sample || {} : record;
+        if (!Number.isFinite(place.lat) || !Number.isFinite(place.lon))
           continue;
         result.push({
           id: record.label || record.id || entry.key,
           label: record.label || null,
           routeId: record.routeId || null,
           mode: entry.mode || null,
-          lat: record.lat,
-          lon: record.lon,
+          lat: place.lat,
+          lon: place.lon,
           speedMps: num(record.speedMps),
           courseDeg: num(entry.courseDeg ?? record.bearing),
           status: record.status || null,

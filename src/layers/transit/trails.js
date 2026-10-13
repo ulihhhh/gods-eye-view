@@ -34,29 +34,32 @@ export function createTrails({ state, services, parts, source }) {
    */
   const trackIndexes = new Map();
   function trackIndexFor(entry) {
-    const known = trackIndexes.get(entry.feedId);
+    return trackIndexForFeed(entry.feedId);
+  }
+  function trackIndexForFeed(feedId) {
+    const known = trackIndexes.get(feedId);
     if (known && typeof known === 'object') return known;
     if (known) return null;
-    const feed = getRegisteredTransitFeed(entry.feedId);
+    const feed = getRegisteredTransitFeed(feedId);
     if (typeof feed?.trackGeometry !== 'function') {
-      trackIndexes.set(entry.feedId, 'failed');
+      trackIndexes.set(feedId, 'failed');
       return null;
     }
-    trackIndexes.set(entry.feedId, 'loading');
+    trackIndexes.set(feedId, 'loading');
     Promise.resolve()
       .then(() => feed.trackGeometry())
       .then((lines) => {
-        trackIndexes.set(entry.feedId, createTrackIndex(lines));
+        trackIndexes.set(feedId, createTrackIndex(lines));
         // Redraw the feed's segments along the track from the next pass.
         for (const vehicle of state._vehicles.values())
-          if (vehicle.feedId === entry.feedId) vehicle.pathSignature = null;
+          if (vehicle.feedId === feedId) vehicle.pathSignature = null;
       })
       .catch((error) => {
         console.warn(
-          `[Data:Transit] ${entry.feedId} track geometry unavailable:`,
+          `[Data:Transit] ${feedId} track geometry unavailable:`,
           error?.message || error,
         );
-        trackIndexes.set(entry.feedId, 'failed');
+        trackIndexes.set(feedId, 'failed');
       });
     return null;
   }
@@ -427,6 +430,7 @@ export function createTrails({ state, services, parts, source }) {
   }
   return {
     prepareEntry,
+    trackIndexForFeed,
     samplePosition,
     select,
     clear,

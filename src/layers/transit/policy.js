@@ -11,6 +11,7 @@ import {
   playbackPosition,
 } from './movement.js';
 import { PLAYBACK_MAX_DELAY_MS } from '../../data/contactPlayback.js';
+import { transitStopRelation } from '../../data/transitStopRelation.js';
 
 export const TRANSIT_SELECTED_OVERLAY_SOURCE_ID = 'transit-selected';
 export const TRANSIT_SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
@@ -409,15 +410,20 @@ export function buildTransitSelectionCopy(
   const state = [];
   // A named stop reads as a place ("stopped at Sarrià"); a bare id keeps
   // saying it is a stop code ("stopped at stop SR").
+  // What the stop IS to the vehicle depends on the feed: Renfe's Cercanías
+  // name the station a train left where GTFS-Realtime means the next one.
   const stop = record.stopName || (record.stopId && `stop ${record.stopId}`);
-  if (record.status === 'STOPPED_AT' && stop)
-    state.push(`Last report: stopped at ${stop}`);
-  else if (record.status === 'INCOMING_AT' && stop)
+  const relation = transitStopRelation(record);
+  if (relation === 'at' && stop) state.push(`Last report: stopped at ${stop}`);
+  else if (relation === 'arriving' && stop)
     state.push(`Last report: arriving at ${stop}`);
-  else if (record.status === 'IN_TRANSIT_TO' && record.stopName)
+  else if (relation === 'next' && record.stopName)
     state.push(`Last report: next stop ${record.stopName}`);
-  else if (record.status === 'IN_TRANSIT_TO' && record.stopId)
+  else if (relation === 'next' && record.stopId)
     state.push(`Last report: next stop ${record.stopId}`);
+  else if (relation === 'left' && stop) state.push(`Last report: left ${stop}`);
+  else if (relation === 'last' && stop)
+    state.push(`Last report: last stop ${stop}`);
   // A platform is the operator's own statement, like the stop it belongs to.
   if (record.platform) state.push(`platform ${record.platform}`);
   if (record.occupancy && record.occupancy !== 'NO_DATA_AVAILABLE') {

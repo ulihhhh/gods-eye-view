@@ -2,6 +2,7 @@ import {
   createLagReservoir,
   destroyTrack,
   FIX_FLAGS,
+  PLAYBACK_MAX_DELAY_MS,
   trimTrack,
 } from '../../data/contactPlayback.js';
 import {
@@ -19,8 +20,13 @@ import {
   transitModeFor,
   transitModeResolved,
 } from '../../data/transitFeeds.js';
+import { transitStopRelation } from '../../data/transitStopRelation.js';
+import { courseAlongTrack } from '../../data/trackFollow.js';
 import {
+  DISPLAY_LAG_MIN_MS,
   attachFloorToPlace,
+  displacementPlausible,
+  fixDistanceM,
   initializePlayback,
   recordFix,
   updatePlayback,
@@ -41,6 +47,123 @@ export const FUTURE_STAMP_TOLERANCE_MS = 10_000;
  * refused until real time caught up with its old mistake.
  */
 export const ORDER_REJECTS_BEFORE_RESET = 3;
+
+/**
+ * Oldest recent position (`recent`, from the server's retained history) a new
+ * vehicle is seeded with, relative to its current fix.
+ */
+export const SEED_MAX_AGE_MS = 6 * 60_000;
+
+/**
+ * The stretch a vehicle travelled before its current report, from the
+ * snapshot's `recent: [[tMs, lat, lon], …]` (oldest first), as far back as it
+ * is usable: each fix earlier than the next, within SEED_MAX_AGE_MS of the
+ * current one, and reached at a speed the mode allows.
+ * @param {object} record
+ * @param {{t: number, lat: number, lon: number}|null} fix The current fix, or
+ *   null when the current report's position is not to be used.
+ * @param {string} mode
+ * @param {boolean} modeInferred
+ * @returns {Array<{t: number, lat: number, lon: number}>} Oldest first.
+ */
+export function transitSeedFixes(record, fix, mode, modeInferred) {
+  const recent = Array.isArray(record?.recent) ? record.recent : [];
+  const seeds = [];
+  let next = fix;
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const [t, lat, lon] = Array.isArray(recent[i]) ? recent[i] : [];
+    if (
+      !Number.isFinite(t) ||
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lon) ||
+      Math.abs(lat) > 90 ||
+      Math.abs(lon) > 180
+    )
+      break;
+    const seed = { t, lat, lon };
+    if (next) {
+      if (!(t < next.t)) break;
+      if (
+        !displacementPlausible(
+          mode,
+          fixDistanceM(seed, next),
+          (next.t - t) / 1000,
+          modeInferred,
+        )
+      )
+        break;
+    }
+    if (fix && fix.t - t > SEED_MAX_AGE_MS) break;
+    seeds.unshift(seed);
+    next = seed;
+  }
+  return seeds;
+}
+
+/**
+ * How far behind real time a seeded vehicle starts: what the feed has needed
+ * so far (`feedLagMs`, its 90th-percentile report lag plus five seconds) or
+ * the default first-fix lag, whichever is longer — but never further back
+ * than the oldest seed, or it would stand still until the clock got there.
+ *
+ * Before the feed's lag is known (the layer's first snapshot), as far back as
+ * playback allows. Starting a whole fleet only one first-fix lag behind ran
+ * every Renfe train into its newest fix within twenty seconds: they all
+ * stood waiting at once, then again while the measured lag caught up.
+ * @param {number} nowMs
+ * @param {number} oldestSeedT
+ * @param {number} fixT Newest fix time.
+ * @param {number} feedLagMs 0 while unknown.
+ * @param {number} maxDelayMs
+ * @returns {number}
+ */
+export function transitSeededDelayMs(
+  nowMs,
+  oldestSeedT,
+  fixT,
+  feedLagMs,
+  maxDelayMs,
+) {
+  const wanted =
+    feedLagMs > 0
+      ? Math.min(maxDelayMs, Math.max(nowMs - fixT + 20_000, feedLagMs + 5_000))
+      : maxDelayMs;
+  return Math.max(DISPLAY_LAG_MIN_MS, Math.min(wanted, nowMs - oldestSeedT));
+}
+
+function percentile90(reservoir) {
+  if (!reservoir?.count) return 0;
+  const sorted = reservoir.values.slice(0, reservoir.count).sort();
+  return sorted[Math.ceil(sorted.length * 0.9) - 1];
+}
+
+/**
+ * Which way a vehicle with no reported bearing is heading, from its reported
+ * stop: toward the stop it is travelling to or arriving at, away from the one
+ * it left. Read along the feed's track when there is one.
+ * @param {object} record
+ * @param {object|null} trackIndex
+ * @returns {number} Degrees, or NaN when the stop does not say.
+ */
+export function transitCourseFromStop(record, trackIndex) {
+  const relation = transitStopRelation(record);
+  if (relation !== 'next' && relation !== 'arriving' && relation !== 'left')
+    return NaN;
+  if (!Number.isFinite(record.stopLat) || !Number.isFinite(record.stopLon))
+    return NaN;
+  const here = { lat: record.lat, lon: record.lon };
+  const stop = { lat: record.stopLat, lon: record.stopLon };
+  // Standing at the stop says nothing about which way it will go.
+  if (fixDistanceM(here, stop) < 50) return NaN;
+  const course = courseAlongTrack(
+    trackIndex,
+    here,
+    stop,
+    record.routeId || null,
+  );
+  if (!Number.isFinite(course)) return NaN;
+  return relation === 'left' ? (course + 180) % 360 : course;
+}
 
 /**
  * Fetching feeds through the proxy and turning snapshots into rendered points.
@@ -224,6 +347,9 @@ export function createIngestion({ state, services, parts, source }) {
       const key = transitVehicleKey(feed.id, record.id);
       const mode = transitModeFor(feed, record.routeId);
       const modeInferred = !transitModeResolved(feed, record.routeId);
+      // The operator filled this report's position with something other than
+      // the vehicle's place: the vehicle stays, the position is not used.
+      const untrusted = record.positionUntrusted === true;
       // A stamp ahead of the fetch is a clock fault; the fetch time bounds it.
       const stamped = vehicleReportTimeMs(record, fetchedAt);
       const reportAt =
@@ -232,7 +358,16 @@ export function createIngestion({ state, services, parts, source }) {
         t: reportAt,
         lat: record.lat,
         lon: record.lon,
-        bearingDeg: Number.isFinite(record.bearing) ? record.bearing : NaN,
+        // A feed that sends no bearing still names where the vehicle is
+        // going; a vehicle with one fix then faces that way, not north.
+        bearingDeg: Number.isFinite(record.bearing)
+          ? record.bearing
+          : untrusted
+            ? NaN
+            : transitCourseFromStop(
+                record,
+                parts.trails.trackIndexForFeed?.(feed.id) ?? null,
+              ),
         flags:
           stamped !== reportAt
             ? FIX_FLAGS.RECEIPT_TIME
@@ -243,7 +378,27 @@ export function createIngestion({ state, services, parts, source }) {
                 : FIX_FLAGS.RECEIPT_TIME,
       };
       let entry = state._vehicles.get(key);
+      // Some feeds keep repeating a position with a newer time while the
+      // vehicle moves on (`staleRepeats`): only a vehicle stopped at its stop
+      // is standing there. Read as fixes, the repeats drew trains that halted
+      // for half a minute and then leapt, or were refused as impossibly fast
+      // and stood until the next report.
+      const staleRepeat =
+        feed.staleRepeats === true &&
+        entry &&
+        entry.seenLat === record.lat &&
+        entry.seenLon === record.lon &&
+        transitStopRelation(record) !== 'at';
+      if (entry && (untrusted || staleRepeat)) {
+        entry.record = record;
+        entry.fetchedAt = fetchedAt;
+        entry.pollSeq = pollSeq;
+        seen += 1;
+        continue;
+      }
       if (entry) {
+        entry.seenLat = record.lat;
+        entry.seenLon = record.lon;
         const heard = recordFix(entry, fix, {
           receivedAt: now,
           monoNowMs: monoNow,
@@ -307,7 +462,18 @@ export function createIngestion({ state, services, parts, source }) {
           }
           continue;
         }
-        const height = parts.height.requestHeight(record.lat, record.lon);
+        // The stretch the vehicle travelled before this report, when the
+        // server kept it: it plays at once instead of after a whole report
+        // interval, and the vehicle starts out facing its way.
+        const seeds = transitSeedFixes(
+          record,
+          untrusted ? null : fix,
+          mode,
+          modeInferred,
+        );
+        if (untrusted && !seeds.length) continue; // nowhere honest to draw it yet
+        const place = untrusted ? seeds.at(-1) : fix;
+        const height = parts.height.requestHeight(place.lat, place.lon);
         // Keep the local prior separate from resolved historical floors.
         // A neighbouring cell is not a guaranteed lower bound.
         const prior = height.height === null ? height.prior : height.height;
@@ -329,7 +495,7 @@ export function createIngestion({ state, services, parts, source }) {
           toCart: null,
           playT: NaN,
           resets: 0,
-          courseDeg: Number.isFinite(record.bearing) ? record.bearing : null,
+          courseDeg: Number.isFinite(fix.bearingDeg) ? fix.bearingDeg : null,
           courseAt: now,
           courseEvalAt: monoNow,
           record,
@@ -342,7 +508,7 @@ export function createIngestion({ state, services, parts, source }) {
           status.lag,
           transitFeedTiming(feed),
         );
-        const first = recordFix(entry, fix, {
+        const observation = {
           receivedAt: now,
           monoNowMs: monoNow,
           wallNowMs: now,
@@ -353,13 +519,43 @@ export function createIngestion({ state, services, parts, source }) {
             route: record.routeId || '',
             mode,
           },
-        });
+        };
+        // Seeds were received long ago: they carry no news about how late
+        // this feed's reports arrive, so they are replayed into the track.
+        const seedObservation = { ...observation, replayed: true };
+        const first = recordFix(
+          entry,
+          seeds.length
+            ? { ...seeds[0], bearingDeg: NaN, flags: fix.flags }
+            : fix,
+          seeds.length ? seedObservation : observation,
+        );
         if (!first.accepted) {
           destroyTrack(entry.track);
           continue;
         }
+        for (const seed of seeds.slice(1))
+          recordFix(
+            entry,
+            { ...seed, bearingDeg: NaN, flags: fix.flags },
+            seedObservation,
+          );
+        if (seeds.length && !untrusted) recordFix(entry, fix, seedObservation);
+        if (seeds.length) {
+          entry.track.targetDelayMs = transitSeededDelayMs(
+            now,
+            seeds[0].t,
+            untrusted ? seeds.at(-1).t : fix.t,
+            percentile90(status.lag),
+            entry.track.policy.maxDelayMs ?? PLAYBACK_MAX_DELAY_MS,
+          );
+        }
+        if (!untrusted) {
+          entry.seenLat = record.lat;
+          entry.seenLon = record.lon;
+        }
         if (height.height !== null)
-          attachFloorToPlace(entry, fix, height.height);
+          attachFloorToPlace(entry, place, height.height);
         // A new vehicle holds at its only fix; its clock starts a full lag
         // behind, so by the time playback reaches the fix the next one has
         // arrived and the segment can be drawn at 1x.

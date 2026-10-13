@@ -1,4 +1,5 @@
 import { validTransitIdentifier } from './transitHistory.js';
+import { transitStopRelation } from '../data/transitStopRelation.js';
 export { validTransitIdentifier } from './transitHistory.js';
 /** Bounded, process-local operator position history. No upstream or scene access. */
 export const TRANSIT_HISTORY_LIMITS = Object.freeze({
@@ -315,6 +316,7 @@ export function createTransitHistory({
       for (const record of records) {
         if (
           !validTransitIdentifier(record.id) ||
+          record.positionUntrusted === true ||
           !Number.isFinite(record.lat) ||
           Math.abs(record.lat) > 90 ||
           !Number.isFinite(record.lon) ||
@@ -337,6 +339,16 @@ export function createTransitHistory({
         if (entry) {
           const last = read(entry, entry.count - 1);
           if (t <= last[0]) continue;
+          // The same position with a newer time is no news on a feed that
+          // repeats positions (`staleRepeats`), unless the vehicle is stopped
+          // at its stop: keep the first sighting as the time it was there.
+          if (
+            feed.staleRepeats === true &&
+            last[1] === record.lat &&
+            last[2] === record.lon &&
+            transitStopRelation(record) !== 'at'
+          )
+            continue;
         } else {
           const encodedKey = encoder.encode(key),
             bytes =
@@ -466,6 +478,39 @@ export function createTransitHistory({
     }
     return payload;
   }
+  /**
+   * A vehicle's retained positions just before it reached (lat, lon), in its
+   * current trip, oldest first: the stretch it has just travelled.
+   * @param {string} feedId
+   * @param {string} vehicleId
+   * @param {number} lat Current position.
+   * @param {number} lon
+   * @param {{sinceMs?: number, limit?: number}} [bounds] Oldest time kept,
+   *   and most fixes.
+   * @returns {Array<[number, number, number]>} [tMs, lat, lon] each.
+   */
+  function recent(
+    feedId,
+    vehicleId,
+    lat,
+    lon,
+    { sinceMs = -Infinity, limit = 8 } = {},
+  ) {
+    const entry = entries.get(`${feedId}\u0000${vehicleId}`);
+    const out = [];
+    if (!entry?.count) return out;
+    const epoch = read(entry, entry.count - 1)[4];
+    let leftCurrent = false;
+    for (let i = entry.count - 1; i >= 0 && out.length < limit; i--) {
+      const fix = read(entry, i);
+      if (fix[4] !== epoch || fix[0] < sinceMs) break;
+      // Skip the run of fixes at the current position itself.
+      if (!leftCurrent && fix[1] === lat && fix[2] === lon) continue;
+      leftCurrent = true;
+      out.push([fix[0], fix[1], fix[2]]);
+    }
+    return out.reverse();
+  }
   function clear() {
     if (timer) clearInterval(timer);
     timer = null;
@@ -480,6 +525,7 @@ export function createTransitHistory({
   return {
     ingest,
     get,
+    recent,
     prune,
     clear,
     diagnostics: () => ({

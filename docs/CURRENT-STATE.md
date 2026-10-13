@@ -3342,6 +3342,16 @@ Retained transit history uses the same outlier quarantine as live observations a
 preserves the active live bracket. Rejected reports do not publish route or mode
 changes to sprites, cards or detection text.
 
+MBTA, Renfe (both feeds) and FGC retain history in the proxy. For the Spanish
+feeds each snapshot also carries a vehicle's last few minutes (`recent`, up to
+8 fixes in 8 minutes), and a vehicle seen for the first time plays from inside
+that stretch, as far behind as the feed's measured lag (all of playback's
+120 s before it is measured). Registry fields `interpretStatus` (per-feed
+reading of `current_status` → `stopRelation`, `positionUntrusted`),
+`staleRepeats` (a repeated position is a fix only when stopped at the stop)
+and `stopPlaces` (station positions → `stopLat`/`stopLon`, for the heading of
+a vehicle with one fix) are optional; feeds without them behave as before.
+
 **Timestamp playback.** Vehicles play between reports at 1× or hold while
 waiting for the next report. The display delay adapts within 25–120 seconds;
 late updates do not make a vehicle accelerate. A short reported crawl still

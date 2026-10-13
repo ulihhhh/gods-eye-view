@@ -4,6 +4,8 @@ import { PbfWriter } from 'pbf';
 import {
   SPAIN_TRANSIT_FEEDS,
   renfeCercaniasRoute,
+  renfeCercaniasStatus,
+  renfeLdStatus,
 } from './transitFeedsSpain.js';
 import {
   TRANSIT_FEED_REGISTRY,
@@ -17,6 +19,8 @@ import {
 import {
   TRANSIT_DERIVED_CODE_MAX_CHARS,
   applyDerivedRoutes,
+  applyStatusSemantics,
+  applyStopPlaces,
   buildTransitSnapshot,
   excludeYieldedVehicles,
 } from './transitProxy.js';
@@ -157,6 +161,87 @@ test('a Cercanías snapshot carries line, platform and the feed time', () => {
   assert.equal(sevilla.timestampSource, 'vehicle');
   assert.equal(barcelona.routeId, 'R2N');
   assert.equal('platform' in barcelona, false);
+  // Renfe's own reading of the statuses travels with each train.
+  assert.equal(sevilla.stopRelation, 'arriving');
+  assert.equal(sevilla.positionUntrusted, true);
+  assert.equal(barcelona.stopRelation, 'left');
+  assert.equal('positionUntrusted' in barcelona, false);
+});
+
+test('each Renfe feed reads its statuses as measured; other feeds keep GTFS-Realtime', () => {
+  assert.deepEqual(renfeCercaniasStatus({ status: 'IN_TRANSIT_TO' }), {
+    stopRelation: 'left',
+  });
+  assert.deepEqual(renfeCercaniasStatus({ status: 'INCOMING_AT' }), {
+    stopRelation: 'arriving',
+    positionUntrusted: true,
+  });
+  assert.deepEqual(renfeCercaniasStatus({ status: 'STOPPED_AT' }), {});
+  assert.deepEqual(renfeLdStatus({ status: 'STOPPED_AT' }), {
+    stopRelation: 'last',
+  });
+  assert.deepEqual(renfeLdStatus({ status: 'IN_TRANSIT_TO' }), {});
+  const records = [
+    { id: 'a', stopId: 'S', status: 'STOPPED_AT' },
+    { id: 'b', status: 'STOPPED_AT' },
+  ];
+  assert.equal(
+    applyStatusSemantics({ id: 'plain' }, records),
+    records,
+    'a feed without the hook is left as it is',
+  );
+  const [stopped, noStop] = applyStatusSemantics(
+    { interpretStatus: () => ({}) },
+    records,
+  );
+  assert.equal(stopped.stopRelation, 'at', 'the standard reading fills in');
+  assert.equal('stopRelation' in noStop, false, 'no stop, no relation');
+  for (const feed of SPAIN_TRANSIT_FEEDS) {
+    assert.equal(feed.staleRepeats, true, feed.id);
+    assert.equal(feed.historyRetention, true, feed.id);
+    assert.equal(typeof feed.stopPlaces, 'function', feed.id);
+  }
+});
+
+test('stops are placed only from finite, in-range station positions', () => {
+  const places = { A: [41.4, 2.1], B: [91, 2], C: 'x' };
+  const placed = applyStopPlaces(
+    [{ stopId: 'A' }, { stopId: 'B' }, { stopId: 'C' }, { stopId: 'Z' }, {}],
+    places,
+  );
+  assert.deepEqual(placed[0], { stopId: 'A', stopLat: 41.4, stopLon: 2.1 });
+  for (const vehicle of placed.slice(1))
+    assert.equal('stopLat' in vehicle, false);
+});
+
+test('the card says where a train left, or the last stop it served', () => {
+  const card = (record) =>
+    buildTransitSelectionCopy(
+      getTransitFeed('renfe-cercanias'),
+      {
+        id: '1',
+        lat: 41.4,
+        lon: 2.1,
+        timestamp: 1_791_803_923,
+        stopId: '71801',
+        stopName: 'Barcelona-Sants',
+        ...record,
+      },
+      'rail',
+      1_791_803_938_000,
+    ).details.join(' | ');
+  assert.match(
+    card({ status: 'IN_TRANSIT_TO', stopRelation: 'left' }),
+    /Last report: left Barcelona-Sants/,
+  );
+  assert.match(
+    card({ status: 'STOPPED_AT', stopRelation: 'last' }),
+    /Last report: last stop Barcelona-Sants/,
+  );
+  assert.match(
+    card({ status: 'IN_TRANSIT_TO' }),
+    /Last report: next stop Barcelona-Sants/,
+  );
 });
 
 test('a long-distance snapshot keeps the train number and uses the feed time', () => {
@@ -447,4 +532,50 @@ test('the card names the stop when the station pack knows it', () => {
       line.startsWith('Last report: next stop Dos Hermanas'),
     ),
   );
+});
+
+test('a train the server has seen before arrives with its recent stretch and its stop placed', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_791_803_940_000 });
+  const train = (lat, timestamp) =>
+    renfeFeed(
+      [
+        {
+          entityId: 'VP_C1-23559',
+          vehicleId: '23559',
+          label: 'C1-23559',
+          tripId: '3084M23559C1',
+          lat,
+          lon: -5.97,
+          status: 2, // IN_TRANSIT_TO: the station it left
+          timestamp,
+          stopId: '51003',
+        },
+      ],
+      timestamp,
+    );
+  let body = train(37.34, 1_791_803_930);
+  const service = createTransitService({
+    fetchImpl: async () => new Response(body, { status: 200 }),
+  });
+  try {
+    const get = async () =>
+      (
+        await service.handle({
+          url: 'http://localhost/api/transit/vehicles/renfe-cercanias',
+          method: 'GET',
+        })
+      ).json();
+    const first = (await get()).vehicles[0];
+    assert.equal('recent' in first, false, 'nothing retained yet');
+    assert.ok(Number.isFinite(first.stopLat), 'its stop is placed');
+    t.mock.timers.tick(20_000);
+    body = train(37.34, 1_791_803_950); // same place, newer time: no news
+    await get();
+    t.mock.timers.tick(20_000);
+    body = train(37.35, 1_791_803_970);
+    const moved = (await get()).vehicles[0];
+    assert.deepEqual(moved.recent, [[1_791_803_930_000, first.lat, first.lon]]);
+  } finally {
+    service.close();
+  }
 });

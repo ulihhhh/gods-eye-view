@@ -85,6 +85,10 @@ export async function fetchTransitFeed(
   throw new Error('upstream redirected too many times');
 }
 
+/** How far back a vehicle's recent stretch reaches, and how many fixes. */
+export const TRANSIT_RECENT_WINDOW_MS = 8 * 60_000;
+export const TRANSIT_RECENT_MAX_FIXES = 8;
+
 /**
  * Vite plugin: GTFS-Realtime VehiclePositions proxy for the Transit layer.
  *
@@ -142,39 +146,72 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
   }
 
   /** @type {Map<string, {promise: Promise<object|null>, at: number}>} */
-  const stopNameLoads = new Map();
+  const stopDictionaryLoads = new Map();
 
   /**
-   * The feed's station dictionary (registry `stopNames()`), loaded once and
-   * shared. A failed load serves the snapshot without names and is retried
-   * after a minute, never on every poll.
-   * @returns {Promise<Readonly<Record<string, string>>|null>}
+   * One of the feed's station dictionaries (registry `stopNames()` or
+   * `stopPlaces()`), loaded once and shared. A failed load serves the
+   * snapshot without it and is retried after a minute, never on every poll.
+   * @param {object} feed
+   * @param {'stopNames'|'stopPlaces'} hook
+   * @param {number} now
+   * @returns {Promise<Readonly<Record<string, unknown>>|null>}
    */
-  function stopNamesFor(feed, now) {
-    if (typeof feed.stopNames !== 'function') return Promise.resolve(null);
-    const known = stopNameLoads.get(feed.id);
+  function stopDictionaryFor(feed, hook, now) {
+    if (typeof feed[hook] !== 'function') return Promise.resolve(null);
+    const key = `${feed.id}\u0000${hook}`;
+    const known = stopDictionaryLoads.get(key);
     if (known && (known.ok || now - known.at < 60_000)) return known.promise;
     const load = {
       at: now,
       ok: false,
       promise: Promise.resolve()
-        .then(() => feed.stopNames())
+        .then(() => feed[hook]())
         .then(
-          (names) => {
-            load.ok = Boolean(names);
-            return names || null;
+          (dictionary) => {
+            load.ok = Boolean(dictionary);
+            return dictionary || null;
           },
           (error) => {
             console.warn(
-              `[transit] ${feed.id} station names unavailable:`,
+              `[transit] ${feed.id} station ${hook === 'stopNames' ? 'names' : 'positions'} unavailable:`,
               error?.message || error,
             );
             return null;
           },
         ),
     };
-    stopNameLoads.set(feed.id, load);
+    stopDictionaryLoads.set(key, load);
     return load.promise;
+  }
+
+  /**
+   * The stretch each vehicle travelled just before its current position, from
+   * the retained history (`recent: [[tMs, lat, lon], …]`, oldest first), so a
+   * browser that sees it for the first time can play it from a few minutes
+   * back at once, instead of holding it still until enough reports arrive.
+   * Feeds without history are untouched.
+   * @param {object} feed
+   * @param {object} snapshot
+   * @param {number} now
+   * @returns {object}
+   */
+  function attachRecent(feed, snapshot, now) {
+    if (feed.historyRetention !== true) return snapshot;
+    for (const vehicle of snapshot.vehicles) {
+      const recent = history.recent(
+        feed.id,
+        vehicle.id,
+        vehicle.lat,
+        vehicle.lon,
+        {
+          sinceMs: now - TRANSIT_RECENT_WINDOW_MS,
+          limit: TRANSIT_RECENT_MAX_FIXES,
+        },
+      );
+      if (recent.length) vehicle.recent = recent;
+    }
+    return snapshot;
   }
 
   /**
@@ -250,13 +287,17 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
         response,
         TRANSIT_PROXY_MAX_BODY_BYTES,
       );
-      const stopNames = await stopNamesFor(feed, now);
+      const [stopNames, stopPlaces] = await Promise.all([
+        stopDictionaryFor(feed, 'stopNames', now),
+        stopDictionaryFor(feed, 'stopPlaces', now),
+      ]);
       const snapshot = yieldShared(
         feed,
-        buildTransitSnapshot(feed, bytes, now, { stopNames }),
+        buildTransitSnapshot(feed, bytes, now, { stopNames, stopPlaces }),
       );
       if (closed) throw new Error('Transit provider closed');
       history.ingest(feed, snapshot.vehicles, Date.now());
+      attachRecent(feed, snapshot, Date.now());
       const entry = {
         at: snapshot.fetchedAt,
         contactedAt: snapshot.fetchedAt,

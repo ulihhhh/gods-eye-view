@@ -3983,3 +3983,167 @@ test('parked transit reprojects held and reported courses at the bounded camera 
     'selected unknown course also stays screen-up',
   );
 });
+
+// A feed that repeats a position with a newer time while the train moves on.
+const REPEATING_FEED = Object.freeze({
+  id: 'repeat-rail',
+  name: 'Repeat Rail',
+  region: 'Test',
+  center: BOSTON,
+  loadRadiusKm: 70,
+  defaultMode: 'rail',
+  routeMode: () => 'rail',
+  staleRepeats: true,
+});
+
+test('a repeated position is no news unless the train is stopped at its stop', (t) => {
+  const app = harness(t);
+  app.layer.enable(app.viewer);
+  const { ingestion } = app.layer._transitPartsForTest();
+  const now = Date.now();
+  const poll = (atS, lat, extra = {}) =>
+    ingestion.applySnapshot(
+      REPEATING_FEED,
+      {
+        fetchedAt: atS * 1000,
+        vehicles: [vehicle('t1', lat, -71.06, atS, { stopId: 'S', ...extra })],
+      },
+      { stale: false },
+    );
+  const s = now / 1000;
+  poll(s - 60, 42.36, { status: 'IN_TRANSIT_TO' });
+  poll(s - 40, 42.36, { status: 'IN_TRANSIT_TO' });
+  poll(s - 20, 42.36, { status: 'IN_TRANSIT_TO' });
+  const entry = app.state()._vehicles.get('repeat-rail:t1');
+  assert.equal(entry.fixes.length, 1, 'in-transit repeats add no fix');
+  assert.equal(entry.record.timestamp, s - 20, 'the record stays current');
+  poll(s - 10, 42.361, { status: 'STOPPED_AT' });
+  poll(s, 42.361, { status: 'STOPPED_AT' });
+  assert.equal(entry.fixes.length, 3, 'a stopped train keeps standing there');
+});
+
+test('an untrusted position keeps the train where it was', (t) => {
+  const app = harness(t);
+  app.layer.enable(app.viewer);
+  const { ingestion } = app.layer._transitPartsForTest();
+  const s = Date.now() / 1000;
+  const poll = (atS, lat, extra = {}) =>
+    ingestion.applySnapshot(
+      REPEATING_FEED,
+      {
+        fetchedAt: atS * 1000,
+        vehicles: [vehicle('t2', lat, -71.06, atS, extra)],
+      },
+      { stale: false },
+    );
+  poll(s - 40, 42.36);
+  poll(s - 20, 42.5, { positionUntrusted: true, status: 'INCOMING_AT' });
+  const entry = app.state()._vehicles.get('repeat-rail:t2');
+  assert.equal(entry.fixes.length, 1);
+  assert.equal(entry.fixes[0].lat, 42.36);
+  assert.equal(entry.record.status, 'INCOMING_AT', 'the card still reads it');
+  // A first sighting with nothing trusted to stand on is not drawn yet.
+  ingestion.applySnapshot(
+    REPEATING_FEED,
+    {
+      fetchedAt: s * 1000,
+      vehicles: [vehicle('t3', 42.5, -71.06, s, { positionUntrusted: true })],
+    },
+    { stale: false },
+  );
+  assert.equal(app.state()._vehicles.has('repeat-rail:t3'), false);
+});
+
+test('a new train seeded with its recent stretch moves at once, facing its way', (t) => {
+  const app = harness(t);
+  app.layer.enable(app.viewer);
+  const { ingestion } = app.layer._transitPartsForTest();
+  const now = Date.now();
+  const s = now / 1000;
+  ingestion.applySnapshot(
+    REPEATING_FEED,
+    {
+      fetchedAt: now,
+      vehicles: [
+        vehicle('t4', 42.37, -71.06, s - 10, {
+          recent: [
+            [now - 130_000, 42.35, -71.06],
+            [now - 70_000, 42.36, -71.06],
+          ],
+        }),
+      ],
+    },
+    { stale: false },
+  );
+  const entry = app.state()._vehicles.get('repeat-rail:t4');
+  assert.equal(entry.fixes.length, 3);
+  assert.ok(
+    entry.playT >= entry.fixes[0].t,
+    'playback starts inside the seeded stretch, not before it',
+  );
+  assert.equal(entry.sample.phase, 'playing');
+  assert.equal(entry.sample.motion, 'moving');
+  assert.ok(Math.abs(entry.sample.segmentCourseDeg) < 1, 'heading north');
+});
+
+test('a train with one fix faces its next stop, or away from the one it left', (t) => {
+  const app = harness(t);
+  app.layer.enable(app.viewer);
+  const { ingestion } = app.layer._transitPartsForTest();
+  const s = Date.now() / 1000;
+  ingestion.applySnapshot(
+    REPEATING_FEED,
+    {
+      fetchedAt: s * 1000,
+      vehicles: [
+        vehicle('east', 42.36, -71.06, s, {
+          stopId: 'E',
+          status: 'IN_TRANSIT_TO',
+          stopLat: 42.36,
+          stopLon: -71.0,
+        }),
+        vehicle('west', 42.36, -71.06, s, {
+          stopId: 'E',
+          status: 'IN_TRANSIT_TO',
+          stopRelation: 'left',
+          stopLat: 42.36,
+          stopLon: -71.0,
+        }),
+      ],
+    },
+    { stale: false },
+  );
+  const course = (id) =>
+    app.state()._vehicles.get(`repeat-rail:${id}`).courseDeg;
+  assert.ok(Math.abs(course('east') - 90) < 1);
+  assert.ok(Math.abs(course('west') - 270) < 1);
+});
+
+test('a seeded train starts as far back as the feed needs, within its own stretch', async () => {
+  const { transitSeededDelayMs } = await import('./ingestion.js');
+  const now = 1_000_000;
+  // Feed lag unknown: as far back as playback allows, if the stretch reaches.
+  assert.equal(
+    transitSeededDelayMs(now, now - 300_000, now - 10_000, 0, 120_000),
+    120_000,
+  );
+  // ... and never before the oldest seed.
+  assert.equal(
+    transitSeededDelayMs(now, now - 70_000, now - 10_000, 0, 120_000),
+    70_000,
+  );
+  // Known lag: that lag, or the fix's own age plus a margin.
+  assert.equal(
+    transitSeededDelayMs(now, now - 300_000, now - 10_000, 55_000, 120_000),
+    60_000,
+  );
+  assert.equal(
+    transitSeededDelayMs(now, now - 300_000, now - 50_000, 20_000, 120_000),
+    70_000,
+  );
+  // Never below the playback floor.
+  assert.equal(
+    transitSeededDelayMs(now, now - 5_000, now - 1_000, 0, 120_000),
+    25_000,
+  );
+});

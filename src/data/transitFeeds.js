@@ -128,8 +128,11 @@ function metroTransitRouteMode(routeId) {
  *   defaultMode: string, routeMode?: (routeId: string|null) => string,
  *   deriveRoute?: (record: object) => {routeId?: string, platform?: string},
  *   yieldsTo?: string, format?: string, minIntervalMs?: number,
- *   reportIntervalMs?: number,
+ *   reportIntervalMs?: number, historyRetention?: boolean,
+ *   interpretStatus?: (record: object) => {stopRelation?: string, positionUntrusted?: boolean},
+ *   staleRepeats?: boolean,
  *   stopNames?: () => Promise<Readonly<Record<string, string>>>,
+ *   stopPlaces?: () => Promise<Readonly<Record<string, [number, number]>>>,
  *   trackGeometry?: () => Promise<Array<{routes?: string[]|null, paths: number[][]}>>,
  * }>>}
  */
