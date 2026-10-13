@@ -95,6 +95,20 @@
 
 ## [Unreleased]
 
+- Add AMB metropolitan buses to the Barcelona arrivals layer (renamed
+  "Barcelona Arrivals (TMB · AMB)"): the ~3,400 AMB stops outside TMB's
+  network show at street scale in AMB amber, and a click lists the next buses
+  from AMB's keyless GTFS-Realtime trip updates, named by line and headsign
+  from its static GTFS. A stop both operators list is drawn once, as TMB's,
+  whose iBus already includes the AMB lines. Without a TMB key the layer still
+  draws every AMB stop and says the metro and TMB buses need the key. The
+  server reads AMB's schedule once a day and its trip updates at most every
+  30 s, whatever the number of stops asked about.
+
+- Add Bicing (Barcelona) and AMBici (Barcelona metropolitan area e-bikes) to
+  the Bike Share layer, from the operators' keyless GBFS feeds listed in
+  MobilityData's systems catalogue; AMBici's feed is CC0.
+
 - Add a TMB Arrivals layer for Barcelona: metro stations (from city scale)
   and TMB bus stops (at street scale) as points; clicking one shows the next
   trains or buses, counting down and refreshed every 15 s while the card is

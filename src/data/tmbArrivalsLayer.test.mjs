@@ -7,6 +7,8 @@ import {
   TMB_CARD_REFRESH_MS,
   TMB_METRO_MAX_DISTANCE_M,
   createTmbArrivalsLayer,
+  mergeArrivalPlaces,
+  normalizeAmbStopsPayload,
   normalizeTmbCatalogPayload,
   parseTmbPlaceEntityId,
   tmbPlaceColorRgb,
@@ -56,7 +58,8 @@ const json = (status, body) => ({
   json: async () => body,
 });
 
-function harness(answer) {
+/** `amb` answers `/api/amb/stops`; `answer` everything else. */
+function harness(answer, amb = json(200, { stops: [], fetchedAt: 1 })) {
   let clock = 100_000;
   const requests = [];
   const calls = [];
@@ -69,7 +72,7 @@ function harness(answer) {
     },
     fetchImpl: async (url) => {
       requests.push(url);
-      return answer(url);
+      return url === '/api/amb/stops' ? amb : answer(url);
     },
     now: () => clock,
     setIntervalImpl: (fn, ms) => timers.push({ fn, ms }) - 1,
@@ -138,7 +141,10 @@ test('the catalogue draws metro stations from city scale and bus stops at street
   const h = harness(() => json(200, CATALOG));
   try {
     assert.equal(await h.layer.update(), true);
-    assert.deepEqual(h.requests, ['/api/tmb/stations']);
+    assert.deepEqual(h.requests.sort(), [
+      '/api/amb/stops',
+      '/api/tmb/stations',
+    ]);
     const entities = h.viewer._dataSources[0].entities;
     const station = entities.getById('tmb-arrivals:metro:6660100');
     const stop = entities.getById('tmb-arrivals:bus:108');
@@ -164,12 +170,101 @@ test('the catalogue draws metro stations from city scale and bus stops at street
   assert.equal(isOwnedByOtherLayer('transit', 'tmb-arrivals:bus:108'), false);
 });
 
-test('without a key the layer draws nothing and says where to add one', async () => {
-  const h = harness(() => json(503, { error: 'no_key' }));
+test('with neither source the layer draws nothing and says where to add the key', async () => {
+  const h = harness(
+    () => json(503, { error: 'no_key' }),
+    json(502, { error: 'unavailable' }),
+  );
   try {
     assert.equal(await h.layer.update(), false);
     assert.match(h.layer.getStats().error, /POWER UP/);
     assert.equal(h.viewer._dataSources[0].entities.values.length, 0);
+  } finally {
+    h.layer.destroy(h.viewer);
+  }
+});
+
+const AMB_STOPS = [
+  { id: '000108', code: '108', name: 'Plaça B', lat: 41.37, lon: 2.15 },
+  { id: '100005', code: '100005', name: 'Escola', lat: 41.36, lon: 2.09 },
+];
+
+test('without a TMB key every AMB stop is drawn, and the status says what is missing', async () => {
+  const h = harness(
+    () => json(503, { error: 'no_key' }),
+    json(200, { stops: AMB_STOPS, fetchedAt: 1 }),
+  );
+  try {
+    assert.equal(await h.layer.update(), true);
+    const ids = h.viewer._dataSources[0].entities.values
+      .map((e) => e.id)
+      .sort();
+    assert.deepEqual(ids, [
+      'tmb-arrivals:amb:000108',
+      'tmb-arrivals:amb:100005',
+    ]);
+    assert.match(h.layer.getStats().error, /AMB stops only.*TMB key/);
+  } finally {
+    h.layer.destroy(h.viewer);
+  }
+});
+
+test('a stop both operators list is drawn once, as TMB (iBus includes AMB lines)', () => {
+  const places = mergeArrivalPlaces(CATALOG, AMB_STOPS);
+  assert.deepEqual([...places.keys()].sort(), [
+    'tmb-arrivals:amb:100005',
+    'tmb-arrivals:bus:108',
+    'tmb-arrivals:metro:6660100',
+  ]);
+  assert.equal(mergeArrivalPlaces(null, AMB_STOPS).size, 2);
+  assert.deepEqual(tmbPlaceColorRgb('amb', AMB_STOPS[1]), [255, 170, 0]);
+  assert.deepEqual(parseTmbPlaceEntityId('tmb-arrivals:amb:100005'), {
+    kind: 'amb',
+    id: '100005',
+  });
+  assert.equal(
+    normalizeAmbStopsPayload({
+      stops: [{ ...AMB_STOPS[0], id: '108' }, AMB_STOPS[1]],
+    }).length,
+    1,
+  );
+  assert.equal(normalizeAmbStopsPayload({}), null);
+});
+
+test('clicking an AMB stop asks the AMB route and cites AMB', async () => {
+  const fetchedAt = Date.UTC(2026, 9, 13, 10, 0, 0);
+  const h = harness(
+    (url) =>
+      url === '/api/tmb/stations'
+        ? json(503, { error: 'no_key' })
+        : json(200, {
+            kind: 'amb',
+            id: '100005',
+            fetchedAt,
+            routes: [
+              {
+                line: 'L20',
+                destination: 'St. Joan D.',
+                arrivals: [100_000 + 125_000],
+              },
+            ],
+          }),
+    json(200, { stops: AMB_STOPS, fetchedAt: 1 }),
+  );
+  try {
+    await h.layer.update();
+    h.layer._selectPlaceForTest('tmb-arrivals:amb:100005');
+    assert.deepEqual(h.lastCard().details, [
+      'Bus stop 100005 · AMB',
+      'Asking AMB for the next arrivals…',
+    ]);
+    await flush();
+    assert.equal(h.requests.at(-1), '/api/amb/arrivals/100005');
+    assert.deepEqual(h.lastCard().details, [
+      'Bus stop 100005 · AMB',
+      'L20 → St. Joan D. · 2 min',
+      'Source: AMB Mobilitat · 12:00',
+    ]);
   } finally {
     h.layer.destroy(h.viewer);
   }
@@ -214,14 +309,14 @@ test('clicking a station shows a loading card, then its arrivals, then counts do
     h.advance(14_000);
     h.layer._tickForTest();
     assert.equal(h.lastCard().details[1], 'L1 → Nord · 1 min');
-    assert.equal(h.requests.length, 2);
+    assert.equal(h.requests.length, 3);
 
     // A failed refresh keeps the last answer and says so.
     arrivalsAnswer = json(502, { error: 'unavailable' });
     h.advance(TMB_CARD_REFRESH_MS);
     h.layer._tickForTest();
     await flush();
-    assert.equal(h.requests.length, 3);
+    assert.equal(h.requests.length, 4);
     assert.deepEqual(h.lastCard().details.slice(1, 3), [
       'L1 → Nord · 1 min',
       'TMB unavailable · showing last answer',

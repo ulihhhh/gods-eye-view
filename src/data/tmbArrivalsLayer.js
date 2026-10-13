@@ -12,24 +12,33 @@ import {
 import { buildTmbArrivalsCopy } from './tmbArrivals.js';
 
 /**
- * TMB next arrivals (fork-local) — Barcelona metro stations and TMB bus stops
- * as points; clicking one asks the server for its next arrivals and shows
- * them on a card that counts down and refreshes while it stays open.
+ * Barcelona next arrivals (fork-local) — TMB metro stations, TMB bus stops
+ * and AMB metropolitan bus stops as points; clicking one asks the server for
+ * its next arrivals and shows them on a card that counts down and refreshes
+ * while it stays open.
  *
- * TMB publishes predictions only, no vehicle positions, so nothing here
- * moves. The developer key stays on the server: this layer only ever calls
- * `/api/tmb/stations` and `/api/tmb/arrivals/<kind>/<id>`, and without a key
- * it draws nothing and says so in its status line.
+ * Neither operator publishes vehicle positions, so nothing here moves.
+ * - TMB (keyed): the developer key stays on the server. This layer only
+ *   calls `/api/tmb/stations` and `/api/tmb/arrivals/<kind>/<id>`.
+ * - AMB (keyless): `/api/amb/stops` and `/api/amb/arrivals/<stopId>`.
+ * A stop both list (same code: AMB "000108" is TMB 108) is drawn once, as
+ * TMB's: iBus already includes the AMB lines that call there. Without a TMB
+ * key the layer still draws every AMB stop and says the rest needs the key.
  *
- * Metro stations show from city scale; the ~2,700 bus stops only once the
- * camera is down at street scale, so a city view is not a carpet of dots.
- * Same point treatment as the AEMET point layers (RELATIVE_TO_GROUND, normal
- * depth testing).
+ * Metro stations show from city scale; bus stops only once the camera is
+ * down at street scale, so a city view is not a carpet of dots.
  */
 
 const LAYER_ID = 'tmb-arrivals';
 const STATIONS_URL = '/api/tmb/stations';
-const ARRIVALS_URL = '/api/tmb/arrivals';
+const AMB_STOPS_URL = '/api/amb/stops';
+
+/** Arrivals URL of a station or stop. */
+function arrivalsUrl(kind, id) {
+  return kind === 'amb'
+    ? `/api/amb/arrivals/${encodeURIComponent(id)}`
+    : `/api/tmb/arrivals/${kind}/${encodeURIComponent(id)}`;
+}
 
 export const TMB_ARRIVALS_SELECTED_OVERLAY_SOURCE_ID = 'tmb-arrivals-selected';
 export const TMB_ARRIVALS_SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
@@ -43,8 +52,10 @@ export const TMB_CARD_TICK_MS = 5_000;
 export const TMB_CARD_REFRESH_MS = 15_000;
 
 /** Camera distances beyond which each kind of marker is not drawn. */
-export const TMB_METRO_MAX_DISTANCE_M = 40_000;
-export const TMB_BUS_MAX_DISTANCE_M = 3_000;
+// Metro: 137 points, readable from a whole-metropolitan-area view. Bus stops
+// (TMB and AMB, ~6,000): only once the camera is down at neighbourhood scale.
+export const TMB_METRO_MAX_DISTANCE_M = 150_000;
+export const TMB_BUS_MAX_DISTANCE_M = 5_000;
 
 const DEFAULT_OVERLAY_HOST = Object.freeze({
   setEntries: setOverlayEntries,
@@ -55,9 +66,22 @@ const DEFAULT_OVERLAY_HOST = Object.freeze({
 /** Interchanges (several lines) are white; TMB's own line colour otherwise. */
 const INTERCHANGE_RGB = [235, 235, 235];
 const BUS_STOP_RGB = [218, 41, 28];
+/** AMB's own metropolitan-bus amber, so its stops read apart from TMB's. */
+const AMB_STOP_RGB = [255, 170, 0];
 const UNKNOWN_RGB = [145, 164, 180];
 const COLOR_OUTLINE = Cesium.Color.BLACK.withAlpha(0.6);
 const POINT_HEIGHT_OFFSET_M = 2.0;
+
+const AMB_STATUS_MESSAGES = Object.freeze({
+  unavailable: 'AMB unavailable',
+  not_found: 'AMB no longer lists this stop',
+});
+
+/** Shown, with AMB stops still drawn, when TMB's half needs the key. */
+const TMB_KEY_HINT = Object.freeze({
+  no_key: 'AMB stops only — metro and TMB buses need the TMB key (POWER UP)',
+  rejected: 'AMB stops only — TMB refused the developer key (POWER UP)',
+});
 
 const STATUS_MESSAGES = Object.freeze({
   no_key: 'TMB developer key not configured — add it in POWER UP',
@@ -75,12 +99,13 @@ function hexToRgb(hex) {
 
 /**
  * Marker colour of a station or stop.
- * @param {'metro'|'bus'} kind
+ * @param {'metro'|'bus'|'amb'} kind
  * @param {{lines?: Array<{color: string|null}>}} place
  * @returns {[number, number, number]}
  */
 export function tmbPlaceColorRgb(kind, place) {
   if (kind === 'bus') return BUS_STOP_RGB;
+  if (kind === 'amb') return AMB_STOP_RGB;
   const lines = place?.lines || [];
   if (lines.length > 1) return INTERCHANGE_RGB;
   return hexToRgb(lines[0]?.color) ?? UNKNOWN_RGB;
@@ -97,7 +122,7 @@ export function tmbPlaceEntityId(kind, id) {
 
 /** Inverse of `tmbPlaceEntityId`, or null for anything else. */
 export function parseTmbPlaceEntityId(entityId) {
-  const match = /^tmb-arrivals:(metro|bus):(\d{1,7})$/.exec(
+  const match = /^tmb-arrivals:(metro|bus|amb):(\d{1,7})$/.exec(
     String(entityId || ''),
   );
   return match ? { kind: match[1], id: match[2] } : null;
@@ -119,6 +144,42 @@ export function normalizeTmbCatalogPayload(payload) {
     metro: payload.metro.filter(valid),
     bus: payload.bus.filter(valid),
   };
+}
+
+/** Validate the AMB proxy's stop list; null when it is not one. */
+export function normalizeAmbStopsPayload(payload) {
+  if (!Array.isArray(payload?.stops)) return null;
+  return payload.stops.filter(
+    (stop) =>
+      stop &&
+      /^\d{6}$/.test(String(stop.id)) &&
+      typeof stop.name === 'string' &&
+      Number.isFinite(stop.lat) &&
+      Number.isFinite(stop.lon) &&
+      Math.abs(stop.lat) <= 90 &&
+      Math.abs(stop.lon) <= 180,
+  );
+}
+
+/**
+ * Every place the layer draws, keyed by entity id. TMB's stops win where
+ * AMB lists the same stop code; AMB's fill in everywhere else.
+ * @param {{metro: object[], bus: object[]}|null} tmb
+ * @param {object[]|null} amb
+ * @returns {Map<string, {kind: 'metro'|'bus'|'amb', place: object}>}
+ */
+export function mergeArrivalPlaces(tmb, amb) {
+  const places = new Map();
+  for (const kind of /** @type {const} */ (['metro', 'bus'])) {
+    for (const place of tmb?.[kind] || [])
+      places.set(tmbPlaceEntityId(kind, place.id), { kind, place });
+  }
+  const tmbStops = new Set((tmb?.bus || []).map((stop) => stop.id));
+  for (const stop of amb || []) {
+    if (tmbStops.has(String(Number(stop.id)))) continue;
+    places.set(tmbPlaceEntityId('amb', stop.id), { kind: 'amb', place: stop });
+  }
+  return places;
 }
 
 /**
@@ -166,10 +227,10 @@ export function createTmbSelectedOverlayEntry({
   };
 }
 
-async function errorCodeOf(response) {
+async function errorCodeOf(response, messages = STATUS_MESSAGES) {
   try {
     const body = await response.json();
-    if (typeof body?.error === 'string' && STATUS_MESSAGES[body.error])
+    if (typeof body?.error === 'string' && messages[body.error])
       return body.error;
   } catch {
     /* fall through */
@@ -190,12 +251,12 @@ export function createTmbArrivalsLayer({
   let _lastUpdate = null;
   let _lastError = null;
   let _enabled = false;
-  /** @type {Map<string, {kind: 'metro'|'bus', place: object}>} entity id → place */
+  /** @type {Map<string, {kind: 'metro'|'bus'|'amb', place: object}>} entity id → place */
   let _places = new Map();
   /**
    * The open card: which place, what TMB last said about it, and whether a
    * request is out. `generation` discards answers for a card already closed.
-   * @type {{entityId: string, kind: 'metro'|'bus', place: object,
+   * @type {{entityId: string, kind: 'metro'|'bus'|'amb', place: object,
    *   arrivals: object|null, status: 'loading'|'ready'|'error',
    *   error: string|null, askedAt: number, inFlight: boolean,
    *   generation: number}|null}
@@ -242,20 +303,20 @@ export function createTmbArrivalsLayer({
     selection.inFlight = true;
     selection.askedAt = now();
     const { kind, place, generation } = selection;
+    const messages = kind === 'amb' ? AMB_STATUS_MESSAGES : STATUS_MESSAGES;
+    const operator = kind === 'amb' ? 'AMB' : 'TMB';
     let arrivals = null;
     let error = null;
     try {
-      const response = await fetchImpl(
-        `${ARRIVALS_URL}/${kind}/${encodeURIComponent(place.id)}`,
-      );
+      const response = await fetchImpl(arrivalsUrl(kind, place.id));
       if (response.ok) arrivals = await response.json();
-      else error = STATUS_MESSAGES[await errorCodeOf(response)];
+      else error = messages[await errorCodeOf(response, messages)];
       if (response.ok && !Array.isArray(arrivals?.routes)) {
         arrivals = null;
-        error = 'Malformed TMB answer';
+        error = `Malformed ${operator} answer`;
       }
     } catch {
-      error = 'TMB network error';
+      error = `${operator} network error`;
     }
     if (_selection?.generation !== generation) return;
     selection.inFlight = false;
@@ -356,9 +417,43 @@ export function createTmbArrivalsLayer({
     if (hasDom()) document.removeEventListener('keydown', _onKeyDown);
   }
 
+  /** @returns {Promise<{catalog: object|null, code?: string, error?: string}>} */
+  async function _loadTmbCatalog() {
+    try {
+      const response = await fetchImpl(STATIONS_URL);
+      if (!response.ok) {
+        const code = await errorCodeOf(response);
+        return { catalog: null, code, error: STATUS_MESSAGES[code] };
+      }
+      const catalog = normalizeTmbCatalogPayload(await response.json());
+      return catalog
+        ? { catalog }
+        : { catalog: null, error: 'Malformed TMB station list' };
+    } catch (error) {
+      console.warn('[Data:TmbArrivals] TMB fetch error:', error);
+      return { catalog: null, error: 'TMB network error' };
+    }
+  }
+
+  /** @returns {Promise<{stops: object[]|null, error?: string}>} */
+  async function _loadAmbStops() {
+    try {
+      const response = await fetchImpl(AMB_STOPS_URL);
+      if (!response.ok) return { stops: null, error: 'AMB unavailable' };
+      const stops = normalizeAmbStopsPayload(await response.json());
+      return stops
+        ? { stops }
+        : { stops: null, error: 'Malformed AMB stop list' };
+    } catch (error) {
+      console.warn('[Data:TmbArrivals] AMB fetch error:', error);
+      return { stops: null, error: 'AMB network error' };
+    }
+  }
+
   function _placeEntity(kind, place) {
     const rgb = tmbPlaceColorRgb(kind, place);
     const metro = kind === 'metro';
+    // AMB stops share the TMB bus stops' street-scale distance.
     const maxDistance = metro
       ? TMB_METRO_MAX_DISTANCE_M
       : TMB_BUS_MAX_DISTANCE_M;
@@ -388,9 +483,9 @@ export function createTmbArrivalsLayer({
 
   const layer = {
     id: LAYER_ID,
-    name: 'TMB Arrivals',
+    name: 'Barcelona Arrivals (TMB · AMB)',
     icon: '🚇',
-    source: 'TMB iMetro / iBus · Barcelona',
+    source: 'TMB iMetro / iBus · AMB Mobilitat',
     // The catalogue changes rarely and the server keeps it for a day; this
     // only re-reads the server's copy.
     updateInterval: 3_600_000,
@@ -428,50 +523,41 @@ export function createTmbArrivalsLayer({
     },
 
     async update() {
-      try {
-        const response = await fetchImpl(STATIONS_URL);
-        if (!response.ok) {
-          _lastError = STATUS_MESSAGES[await errorCodeOf(response)];
-          return false;
-        }
-        const catalog = normalizeTmbCatalogPayload(await response.json());
-        if (!catalog) {
-          _lastError = 'Malformed TMB station list';
-          return false;
-        }
-        if (!_dataSource) return false;
-        const nextPlaces = new Map();
-        const entities = [];
-        for (const kind of /** @type {const} */ (['metro', 'bus'])) {
-          for (const place of catalog[kind]) {
-            nextPlaces.set(tmbPlaceEntityId(kind, place.id), { kind, place });
-            entities.push(_placeEntity(kind, place));
-          }
-        }
-        _dataSource.entities.suspendEvents();
-        _dataSource.entities.removeAll();
-        for (const entity of entities) _dataSource.entities.add(entity);
-        _dataSource.entities.resumeEvents();
-        _places = nextPlaces;
-        if (_selection) {
-          const still = _places.get(_selection.entityId);
-          if (still) {
-            _selection.place = still.place;
-            _dataSource.entities.getById(_selection.entityId).point.show =
-              false;
-          } else {
-            _clearSelection();
-          }
-        }
-        _count = entities.length;
-        _lastUpdate = now();
-        _lastError = null;
-        return true;
-      } catch (error) {
-        console.warn('[Data:TmbArrivals] Fetch error:', error);
-        _lastError = 'TMB network error';
+      const [tmb, amb] = await Promise.all([
+        _loadTmbCatalog(),
+        _loadAmbStops(),
+      ]);
+      if (!tmb.catalog && !amb.stops) {
+        _lastError = tmb.error || amb.error;
         return false;
       }
+      if (!_dataSource) return false;
+      _places = mergeArrivalPlaces(tmb.catalog, amb.stops);
+      const entities = [];
+      for (const [, { kind, place }] of _places)
+        entities.push(_placeEntity(kind, place));
+      _dataSource.entities.suspendEvents();
+      _dataSource.entities.removeAll();
+      for (const entity of entities) _dataSource.entities.add(entity);
+      _dataSource.entities.resumeEvents();
+      if (_selection) {
+        const still = _places.get(_selection.entityId);
+        if (still) {
+          _selection.place = still.place;
+          _dataSource.entities.getById(_selection.entityId).point.show = false;
+        } else {
+          _clearSelection();
+        }
+      }
+      _count = entities.length;
+      _lastUpdate = now();
+      // Half a map is still a map: say which half is missing.
+      _lastError = tmb.catalog
+        ? amb.stops
+          ? null
+          : amb.error
+        : (TMB_KEY_HINT[tmb.code] ?? tmb.error);
+      return true;
     },
 
     destroy(viewer) {

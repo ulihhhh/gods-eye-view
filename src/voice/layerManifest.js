@@ -436,7 +436,13 @@ const layers = [
   },
   {
     id: 'tmb-arrivals',
-    aliases: ['metro arrivals', 'bus arrivals', 'tmb', 'barcelona metro'],
+    aliases: [
+      'metro arrivals',
+      'bus arrivals',
+      'tmb',
+      'amb buses',
+      'barcelona metro',
+    ],
     context: false,
     query: {
       fields: {
