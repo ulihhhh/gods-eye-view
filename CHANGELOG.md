@@ -95,6 +95,12 @@
 
 ## [Unreleased]
 
+- Transit cards name the station for Spanish trains ("stopped at Sarrià",
+  "next stop Madrid-Atocha Cercanías") from a bundled station pack built from
+  Renfe's and FGC's open data (`node scripts/build-spain-transit-network.mjs`).
+  Feeds gain an optional `stopNames` loader; a feed without one, or a stop the
+  dictionary does not know, keeps its stop code.
+
 - Add AMB metropolitan buses to the Barcelona arrivals layer (renamed
   "Barcelona Arrivals (TMB · AMB)"): the ~3,400 AMB stops outside TMB's
   network show at street scale in AMB amber, and a click lists the next buses

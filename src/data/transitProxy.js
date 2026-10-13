@@ -297,10 +297,18 @@ export function transitFeedTtlMs(feed) {
  * @param {object} feed Registry entry.
  * @param {Uint8Array|ArrayBuffer} bytes Raw GTFS-RT FeedMessage.
  * @param {number} [now=Date.now()] Fetch time (ms epoch).
+ * @param {{stopNames?: Readonly<Record<string, string>>|null}} [options]
+ *   `stopNames`: the feed's station dictionary (`feed.stopNames()`), when
+ *   loaded; each vehicle whose `stopId` it names gains `stopName`.
  * @returns {{ feedId: string, name: string, fetchedAt: number, feedTimestamp: number|null,
  *   version: string|null, entityCount: number, truncated: boolean, count: number, vehicles: object[] }}
  */
-export function buildTransitSnapshot(feed, bytes, now = Date.now()) {
+export function buildTransitSnapshot(
+  feed,
+  bytes,
+  now = Date.now(),
+  { stopNames = null } = {},
+) {
   const decoded = transitFormatFor(feed).decode(bytes);
   if (decoded.incrementality !== GTFS_INCREMENTALITY_FULL_DATASET) {
     throw new TransitFeedShapeError(
@@ -318,11 +326,35 @@ export function buildTransitSnapshot(feed, bytes, now = Date.now()) {
     truncated: decoded.truncated,
     count: decoded.vehicles.length,
     vehicles: repairVehicleTimestamps(
-      applyDerivedRoutes(feed, decoded.vehicles),
+      applyStopNames(applyDerivedRoutes(feed, decoded.vehicles), stopNames),
       decoded.timestamp,
       Math.floor(now / 1000),
     ),
   };
+}
+
+/** Longest station name a feed's dictionary may supply. */
+export const TRANSIT_MAX_STOP_NAME_CHARS = 120;
+
+/**
+ * Name each vehicle's stop from the feed's station dictionary, so the card
+ * can say "next stop Sarrià" instead of "next stop SR". Vehicles whose stop
+ * the dictionary does not know keep their bare `stopId`.
+ * @param {object[]} vehicles
+ * @param {Readonly<Record<string, string>>|null} stopNames
+ * @returns {object[]}
+ */
+export function applyStopNames(vehicles, stopNames) {
+  if (!stopNames || typeof stopNames !== 'object') return vehicles;
+  return vehicles.map((vehicle) => {
+    const id = vehicle?.stopId;
+    const name =
+      typeof id === 'string' && Object.hasOwn(stopNames, id)
+        ? String(stopNames[id] ?? '').trim()
+        : '';
+    if (!name || name.length > TRANSIT_MAX_STOP_NAME_CHARS) return vehicle;
+    return { ...vehicle, stopName: name };
+  });
 }
 
 /**

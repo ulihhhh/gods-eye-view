@@ -504,6 +504,44 @@ Todos los `stopId` de Renfe en tiempo real que se probaron existen en sus GTFS.
 **Hecho cuando** la ficha nombra las estaciones, se ven las líneas de Cercanías/Rodalies
 y FGC con sus colores, y regenerar los datos es ejecutar un solo comando.
 
+**Subfases** (decidido al empezar, 2026-10-13; rama `feat/transit-es-network`):
+
+- **5a — Diccionario de estaciones y nombres en la ficha** — ✅ hecho 2026-10-13.
+- **5b —** trazado de Cercanías/Rodalies y FGC con color oficial, y marcadores de
+  estación a escala de calle.
+- **5c —** red de larga distancia del IGN.
+- **5d —** geometría de TMB y AMB, servida por el servidor (TMB, por clave y licencia;
+  AMB, porque su licencia no permite alterar el contenido).
+
+**Resultado 5a:**
+
+- **Script** `scripts/build-spain-transit-network.mjs`: un solo comando, con
+  `--from DIR` para usar descargas locales. Escribe
+  `src/data/local_data/spain_transit/stations.json` (97 KB) y su `SOURCE.md`:
+  - Renfe Cercanías: 1.151 estaciones; Renfe AV/LD/MD: 1.006;
+  - FGC: 110 iniciales de Geotren, 98 con coordenadas. Las 12 sin punto son
+    funiculares y cremalleras, que el GTFS de FGC no trae.
+  - Lee los zips con el `readZipEntries` del proxy AMB. El parser CSV pasa a un módulo
+    compartido, `src/data/gtfsCsv.js`.
+- **Enganche genérico** `stopNames` en el registro (`() => Promise<{stopId: name}>`):
+  - `transitService` carga el diccionario una vez por feed; si falla, sirve sin nombres
+    y reintenta al minuto;
+  - `buildTransitSnapshot(…, {stopNames})` añade `stopName` con `applyStopNames`
+    (máximo 120 caracteres, solo propiedades propias);
+  - la ficha dice "stopped at Sarrià" / "next stop Pl. Catalunya". Sin nombre conserva
+    "stop SR".
+  - Las filas de España usan `spainStationNames(network)`
+    (`src/data/spainTransitStations.js`, `loadBundledJson`).
+- **En vivo:**
+  - Cercanías: 293/293 trenes con nombre. LD: todos los que traen parada. FGC: 61/61.
+  - Ficha real: "🚇 Route L6 … Last report: next stop Pl. Catalunya".
+  - `qa:transit` (Barcelona, sección de ciudades) pasa.
+- **Validación:** `npm test` da 6.571 tests, 0 fallos. Pasan boundaries y build.
+- **Incidencia:** se rompió la caché de dependencias de Vite de un servidor de desarrollo
+  (504 "Outdated Optimize Dep" en `cesium.js`), y la app no arrancaba. Se arregla con
+  `npm run dev -- --force`. Causa probable: un segundo Vite en un worktree con
+  `node_modules` enlazado comparte `node_modules/.vite`.
+
 ### Fase 6 — Ficha enriquecida (datos que llegan y no se muestran)
 
 **Objetivo.** Aprovechar los datos extra con **campos genéricos opcionales** del

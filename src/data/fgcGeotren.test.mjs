@@ -303,3 +303,25 @@ test('a sparse feed plays further behind instead of stalling', async () => {
   assert.equal(motionAt({}), 'NO FIX');
   assert.equal(motionAt(fgc), 'EN ROUTE');
 });
+
+test('FGC trains name their stop from the bundled station pack', async () => {
+  const service = createTransitService({
+    fetchImpl: async () => new Response(answer(), { status: 200 }),
+  });
+  try {
+    const response = await service.handle({
+      url: 'http://localhost/api/transit/vehicles/fgc-geotren',
+      method: 'GET',
+    });
+    const { vehicles } = await response.json();
+    const l8 = vehicles.find((vehicle) => vehicle.routeId === 'L8');
+    assert.equal(l8.stopId, 'PE');
+    assert.equal(l8.stopName, 'Pl. Espanya');
+    assert.ok(
+      vehicles.every((vehicle) => !vehicle.stopId || vehicle.stopName),
+      'every Geotren initial in the fixture is in the pack',
+    );
+  } finally {
+    service.close();
+  }
+});

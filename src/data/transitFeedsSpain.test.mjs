@@ -403,3 +403,48 @@ test('yieldsTo names a registered feed', () => {
   }
   assert.equal(getTransitFeed('renfe-ld').yieldsTo, 'renfe-cercanias');
 });
+
+test('the card names the stop when the station pack knows it', () => {
+  const record = {
+    id: '23631',
+    routeId: 'C4',
+    lat: 37.4,
+    lon: -5.94,
+    timestamp: 1_791_803_923,
+    timestampSource: 'vehicle',
+    stopId: '51003',
+    status: 'INCOMING_AT',
+  };
+  const feed = getTransitFeed('renfe-cercanias');
+  const at = 1_791_803_938_000;
+  const named = buildTransitSelectionCopy(
+    feed,
+    { ...record, stopName: 'Sevilla-Santa Justa' },
+    'rail',
+    at,
+  );
+  assert.ok(
+    named.details.some((line) =>
+      line.startsWith('Last report: arriving at Sevilla-Santa Justa'),
+    ),
+    named.details.join(' | '),
+  );
+  const bare = buildTransitSelectionCopy(feed, record, 'rail', at);
+  assert.ok(
+    bare.details.some((line) =>
+      line.startsWith('Last report: arriving at stop 51003'),
+    ),
+    bare.details.join(' | '),
+  );
+  const next = buildTransitSelectionCopy(
+    feed,
+    { ...record, status: 'IN_TRANSIT_TO', stopName: 'Dos Hermanas' },
+    'rail',
+    at,
+  );
+  assert.ok(
+    next.details.some((line) =>
+      line.startsWith('Last report: next stop Dos Hermanas'),
+    ),
+  );
+});

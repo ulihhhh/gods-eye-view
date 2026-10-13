@@ -407,10 +407,15 @@ export function buildTransitSelectionCopy(
   // It describes the moment of the report, which the display may not have
   // reached yet; presenting it as "now" is what put STOPPED on a moving metro.
   const state = [];
-  if (record.status === 'STOPPED_AT' && record.stopId)
-    state.push(`Last report: stopped at stop ${record.stopId}`);
-  else if (record.status === 'INCOMING_AT' && record.stopId)
-    state.push(`Last report: arriving at stop ${record.stopId}`);
+  // A named stop reads as a place ("stopped at Sarrià"); a bare id keeps
+  // saying it is a stop code ("stopped at stop SR").
+  const stop = record.stopName || (record.stopId && `stop ${record.stopId}`);
+  if (record.status === 'STOPPED_AT' && stop)
+    state.push(`Last report: stopped at ${stop}`);
+  else if (record.status === 'INCOMING_AT' && stop)
+    state.push(`Last report: arriving at ${stop}`);
+  else if (record.status === 'IN_TRANSIT_TO' && record.stopName)
+    state.push(`Last report: next stop ${record.stopName}`);
   else if (record.status === 'IN_TRANSIT_TO' && record.stopId)
     state.push(`Last report: next stop ${record.stopId}`);
   // A platform is the operator's own statement, like the stop it belongs to.
