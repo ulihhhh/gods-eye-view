@@ -190,6 +190,24 @@ export const DATA_CREDITS = [
       '<a href="https://developer.tmb.cat" target="_blank" rel="noopener">developer.tmb.cat</a>',
   },
   {
+    key: 'amb',
+    html:
+      'Barcelona metropolitan bus arrivals: AMB Mobilitat, Àrea Metropolitana de Barcelona — ' +
+      '<a href="https://www.amb.cat/web/area-metropolitana/dades-obertes" target="_blank" rel="noopener">amb.cat open data</a> (Law 37/2007)',
+  },
+  {
+    key: 'bicing',
+    html:
+      'Bicing stations: Barcelona City Council (B:SM) — ' +
+      '<a href="https://www.bicing.barcelona/" target="_blank" rel="noopener">bicing.barcelona</a> GBFS',
+  },
+  {
+    key: 'ambici',
+    html:
+      'AMBici stations: Àrea Metropolitana de Barcelona, operated by nextbike — ' +
+      '<a href="https://www.ambici.cat/" target="_blank" rel="noopener">ambici.cat</a> GBFS (CC0)',
+  },
+  {
     key: 'google-news-rss',
     html:
       'Cockpit regional headlines: ' +

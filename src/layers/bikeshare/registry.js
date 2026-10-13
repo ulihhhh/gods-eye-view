@@ -1,3 +1,4 @@
+import { SPAIN_GBFS_SYSTEMS } from './registrySpain.js';
 function buildBcycleUrls(systemId) {
   return {
     stationInformationUrl: `https://gbfs.bcycle.com/${systemId}/station_information.json`,
@@ -318,6 +319,7 @@ const RAW_GBFS_CITY_REGISTRY = [
     centerLon: -119.6982,
     systemId: 'bcycle_santabarbara',
   }),
+  ...SPAIN_GBFS_SYSTEMS,
 ];
 function normalizeRegistryEntry(entry) {
   const id = String(entry?.id || '')

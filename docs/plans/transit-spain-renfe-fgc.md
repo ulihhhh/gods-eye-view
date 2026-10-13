@@ -406,6 +406,51 @@ Bicing en la capa Bike Share:
   Bike Share de upstream;
 - datos y licencias en §4, "AMB".
 
+**Resultado 4c (2026-10-13, rama `feat/transit-es-amb`):**
+
+- **AMB en la capa de llegadas.** La capa pasa a llamarse "Barcelona Arrivals (TMB ·
+  AMB)" y conserva su id y su token (`tmb-arrivals`, `zh`).
+  - `server/providers/amb.js` sirve `/api/amb/stops` y `/api/amb/arrivals/<stop_id>`:
+    - el GTFS estático se baja una vez al día y se leen solo `stops`, `routes` y `trips`
+      (lector de zip propio, con tope por fichero);
+    - `trips.bin` se pide como mucho cada 30 s, revalidado por ETag, y una sola descarga
+      sirve a todas las paradas;
+    - cada refresco reconstruye el índice de llegadas por parada.
+  - `src/data/ambArrivals.js` (puro): CSV, paradas, líneas, cabeceras de viaje,
+    decodificador de TripUpdates y el índice por parada.
+  - **Paradas:** 4.861 en servicio. 1.417 tienen el mismo código que una de TMB ("000108"
+    es la 108), y se dibujan una sola vez, como TMB: iBus ya da allí las líneas AMB. Quedan
+    3.444 solo de AMB, en ámbar. Con clave: 6.304 puntos en total.
+  - **Sin clave de TMB** se dibujan todas las paradas AMB, y el estado dice "AMB stops
+    only — metro and TMB buses need the TMB key (POWER UP)".
+  - **En vivo:** al pulsar Eusebi Güell – Joaquim Auger (Sant Boi) salen 4 líneas (X79,
+    L78, M75, SB1). El feed trae ~845 viajes y ~2.240 paradas con llegada. Cada viaje
+    solo predice sus próximas paradas, así que las paradas lejanas de cualquier bus salen
+    vacías ("No arrivals reported right now").
+  - El test encontró un fallo antes de llegar a producción: una coordenada vacía en
+    `stops.txt` se convertía en (0, 0).
+- **Bicis.** Filas `barcelona-bicing` y `barcelona-ambici` en
+  `src/layers/bikeshare/registrySpain.js`, empalmadas con una línea en el registro, y
+  `gbfs.nextbike.net` en la lista blanca de `gbfsSource.js` (Bicing ya entraba por
+  `*.publicbikesystem.net`).
+  - En vivo: 544 estaciones de Bicing y 237 de AMBici, 781 en total.
+  - **Licencia de Bicing:** el feed GBFS del operador está en `systems.csv` de MobilityData
+    sin autenticación, como los sistemas PBSC de EE. UU. que ya usa upstream. La copia
+    del Ayuntamiento es CC BY 4.0, pero desde 2024 pide token. Crédito: "Bicing ·
+    Barcelona City Council (B:SM)".
+  - **Detalle de upstream (sin tocar):** la fila del panel de Bike Share solo se refresca
+    en el sondeo de 60 s. Con dos sistemas cargando a la vez muestra "237 LOADING ·
+    syncing 2 city feeds" hasta ~1 min, aunque la capa ya pinta las 781.
+- **Límites de distancia subidos** tras probarlo el usuario: con 40 km (metro) y 3 km
+  (bus) no se veía nada al mirar Barcelona entera. Ahora son **150 km** para el metro
+  (137 puntos) y **5 km** para las paradas TMB y AMB. El depth test sigue desactivado
+  hasta esa misma distancia; a 150 km el horizonte está mucho más lejos, así que no
+  aparecen puntos al otro lado del globo.
+- **Validación:** `npm test` da 6.563 tests, 0 fallos. Pasan format, boundaries y build.
+  Comprobado en la app con Puppeteer: ficha AMB, estaciones de bici y la carga de los
+  feeds a través del proxy.
+- **Pins del fork:** ninguno nuevo (el alias de voz "amb buses" no cambia el esquema).
+
 ### Fase 5 — Red y estaciones (datos estáticos con script)
 
 **Cuándo.** Cuando Renfe (✅), FGC (Fase 3) y TMB (Fase 4) ya estén conectados. Así una

@@ -24,6 +24,7 @@ import { mapillaryProxy } from './mapillary.js';
 import { keySetupEndpoint } from '../standalone/key-setup.js';
 import { liveuamapProxy } from './liveuamap.js';
 import { tmbProxy } from './tmb.js';
+import { ambProxy } from './amb.js';
 import {
   aemetBeachesProxy,
   aemetEnvironmentalProxy,
@@ -74,6 +75,7 @@ function localProviderPlugins({ realtime } = {}) {
     localReceiversProxy(),
     transitProxy(),
     tmbProxy(),
+    ambProxy(),
     adsbLolProxy(),
     aisLiveProxy(),
     trackBackfillProxies(),

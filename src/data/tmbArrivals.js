@@ -262,7 +262,10 @@ export function formatTmbClock(ms) {
 
 /**
  * Title and detail lines of the selected station or stop card.
- * @param {{kind: 'metro'|'bus', place: {id: string, name: string,
+ * AMB stops (`kind: 'amb'`) share the card: same rows, AMB's stop code and
+ * source line.
+ * @param {{kind: 'metro'|'bus'|'amb', place: {id: string, name: string,
+ *   code?: string,
  *   lines?: Array<{name: string}>}, arrivals?: {fetchedAt: number|null,
  *   routes: Array<{line: string, destination: string, arrivals: number[]}>}|null,
  *   status?: 'loading'|'ready'|'error', error?: string|null, now: number}} input
@@ -277,20 +280,24 @@ export function buildTmbArrivalsCopy({
   now,
 }) {
   const metro = kind === 'metro';
-  const title = `${metro ? '🚇' : '🚏'} ${place?.name || place?.id || 'TMB'}`;
+  const operator = kind === 'amb' ? 'AMB' : 'TMB';
+  const title = `${metro ? '🚇' : '🚏'} ${place?.name || place?.id || operator}`;
   const details = [];
   if (metro) {
     const lines = (place?.lines || []).map((line) => line.name).join(' ');
     details.push(`Metro station · TMB${lines ? ` · ${lines}` : ''}`);
   } else {
-    details.push(place?.id ? `Bus stop ${place.id} · TMB` : 'Bus stop · TMB');
+    const code = kind === 'amb' ? place?.code || place?.id : place?.id;
+    details.push(
+      code ? `Bus stop ${code} · ${operator}` : `Bus stop · ${operator}`,
+    );
   }
   if (status === 'loading' && !arrivals) {
-    details.push('Asking TMB for the next arrivals…');
+    details.push(`Asking ${operator} for the next arrivals…`);
     return { title, details };
   }
   if (status === 'error' && !arrivals) {
-    details.push(error || 'TMB arrivals unavailable');
+    details.push(error || `${operator} arrivals unavailable`);
     return { title, details };
   }
   const rows = [];
@@ -309,8 +316,10 @@ export function buildTmbArrivalsCopy({
   if (status === 'error' && error)
     details.push(`${error} · showing last answer`);
   const at = arrivals?.fetchedAt;
+  const source =
+    kind === 'amb' ? 'AMB Mobilitat' : `TMB ${metro ? 'iMetro' : 'iBus'}`;
   details.push(
-    `Source: TMB ${metro ? 'iMetro' : 'iBus'}${Number.isFinite(at) ? ` · ${formatTmbClock(at)}` : ''}`,
+    `Source: ${source}${Number.isFinite(at) ? ` · ${formatTmbClock(at)}` : ''}`,
   );
   return { title, details };
 }
