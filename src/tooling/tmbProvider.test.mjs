@@ -204,6 +204,23 @@ const BUS_BODY = {
     },
   ],
 };
+const LINES_BODY = {
+  type: 'FeatureCollection',
+  features: [
+    {
+      geometry: {
+        type: 'MultiLineString',
+        coordinates: [
+          [
+            [2.17, 41.38],
+            [2.18, 41.39],
+          ],
+        ],
+      },
+      properties: { NOM_LINIA: 'L1', COLOR_LINIA: 'ce1126', ORDRE_LINIA: 1 },
+    },
+  ],
+};
 const IMETRO_BODY = {
   timestamp: 1_000,
   linies: [
@@ -260,6 +277,7 @@ function tmbApi(override = () => null) {
     const body = {
       '/v1/transit/linies/metro/estacions': METRO_BODY,
       '/v1/transit/parades': BUS_BODY,
+      '/v1/transit/linies/metro': LINES_BODY,
       '/v1/itransit/metro/estacions': IMETRO_BODY,
       '/v1/itransit/bus/parades/108': IBUS_BODY,
     }[parsed.pathname];
@@ -296,7 +314,11 @@ test('the catalogue is built once a day, shared, and kept when a refresh fails',
     now: () => clock,
   });
   const [a, b] = await Promise.all([catalog.catalog(), catalog.catalog()]);
-  assert.equal(calls.length, 2, 'one metro and one bus request, shared');
+  assert.equal(
+    calls.length,
+    3,
+    'one metro, one bus and one line request, shared',
+  );
   assert.equal(a, b);
   assert.deepEqual(
     a.metro.map((s) => [s.id, s.codes]),
@@ -313,7 +335,7 @@ test('the catalogue is built once a day, shared, and kept when a refresh fails',
     a,
     'a failed refresh serves the old copy',
   );
-  assert.equal(calls.length, 4);
+  assert.equal(calls.length, 6);
   assert.deepEqual(await catalog.metroCodes('6660100'), [100, 300]);
   assert.equal(await catalog.hasBusStop('999'), false);
 });
@@ -505,4 +527,27 @@ test('the station and arrival routes map TMB failures to plain status codes', as
   );
   assert.equal(res.code, 503);
   assert.deepEqual(JSON.parse(res.body), { error: 'no_key' });
+});
+
+test('the catalogue carries metro line geometry, and survives without it', async () => {
+  const { fetchImpl, calls } = tmbApi();
+  const catalog = createTmbCatalogService({ env: PAIR, fetchImpl });
+  const { lines } = await catalog.catalog();
+  assert.deepEqual(lines, [
+    { name: 'L1', color: 'CE1126', paths: [[2.17, 41.38, 2.18, 41.39]] },
+  ]);
+  const linesCall = calls.find((c) => c.path === '/v1/transit/linies/metro');
+  assert.equal(
+    linesCall.params.get('propertyName'),
+    'NOM_LINIA,COLOR_LINIA,ORDRE_LINIA,GEOMETRY',
+  );
+  const broken = createTmbCatalogService({
+    env: PAIR,
+    fetchImpl: tmbApi((path) =>
+      path === '/v1/transit/linies/metro' ? { status: 500 } : null,
+    ).fetchImpl,
+  });
+  const fallback = await broken.catalog();
+  assert.deepEqual(fallback.lines, []);
+  assert.equal(fallback.metro.length, 1, 'stations still served');
 });

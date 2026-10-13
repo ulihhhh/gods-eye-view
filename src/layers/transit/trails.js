@@ -8,6 +8,7 @@ import {
 } from '../../data/contactPlayback.js';
 import { createContactTrailRenderer } from '../../data/contactTrailRenderer.js';
 import { fixDistanceM } from './movement.js';
+import { createTrackIndex, pathBetween } from '../../data/trackFollow.js';
 import { transitStyleProfile } from '../../data/transitPresetStyle.js';
 
 const MODE_COLOR = {
@@ -25,6 +26,56 @@ const STEP_M = 25;
 
 /** Shared prepared paths. Floors are aligned to work with Google 3D tiles. */
 export function createTrails({ state, services, parts, source }) {
+  /**
+   * Track geometry per feed (registry `trackGeometry()`), indexed once. The
+   * first segments of a feed draw straight while it loads; a feed without
+   * geometry, or whose load failed, always draws straight.
+   * @type {Map<string, ReturnType<typeof createTrackIndex>|'loading'|'failed'>}
+   */
+  const trackIndexes = new Map();
+  function trackIndexFor(entry) {
+    const known = trackIndexes.get(entry.feedId);
+    if (known && typeof known === 'object') return known;
+    if (known) return null;
+    const feed = getRegisteredTransitFeed(entry.feedId);
+    if (typeof feed?.trackGeometry !== 'function') {
+      trackIndexes.set(entry.feedId, 'failed');
+      return null;
+    }
+    trackIndexes.set(entry.feedId, 'loading');
+    Promise.resolve()
+      .then(() => feed.trackGeometry())
+      .then((lines) => {
+        trackIndexes.set(entry.feedId, createTrackIndex(lines));
+        // Redraw the feed's segments along the track from the next pass.
+        for (const vehicle of state._vehicles.values())
+          if (vehicle.feedId === entry.feedId) vehicle.pathSignature = null;
+      })
+      .catch((error) => {
+        console.warn(
+          `[Data:Transit] ${entry.feedId} track geometry unavailable:`,
+          error?.message || error,
+        );
+        trackIndexes.set(entry.feedId, 'failed');
+      });
+    return null;
+  }
+  /**
+   * The along-track path between two fixes of one vehicle, cached per
+   * segment; null keeps the straight chord.
+   */
+  function followTrack(entry, a, b) {
+    const index = trackIndexFor(entry);
+    if (!index) return null;
+    const key = `${a.seq}/${b.seq}`;
+    entry.trackPaths ||= new Map();
+    if (entry.trackPaths.has(key)) return entry.trackPaths.get(key);
+    const path = pathBetween(index, a, b, entry.record?.routeId || null);
+    entry.trackPaths.set(key, path);
+    if (entry.trackPaths.size > 64)
+      entry.trackPaths.delete(entry.trackPaths.keys().next().value);
+    return path;
+  }
   let historyRequest = null;
   let requestCount = 0,
     abortCount = 0;
@@ -89,15 +140,20 @@ export function createTrails({ state, services, parts, source }) {
         Math.max(0, entry.sample.toSeq - entry.track.baseSeq),
         b,
       );
+      const track = followTrack(entry, a, b);
       const n = Math.min(
         TRAIL_VERTEX_LIMIT - 1,
-        Math.max(1, Math.ceil(fixDistanceM(a, b) / STEP_M)),
+        Math.max(1, Math.ceil((track?.lengthM ?? fixDistanceM(a, b)) / STEP_M)),
       );
       for (let i = 0; i <= n; i++)
-        floor({
-          lat: a.lat + ((b.lat - a.lat) * i) / n,
-          lon: a.lon + ((b.lon - a.lon) * i) / n,
-        });
+        floor(
+          track
+            ? track.at(i / n)
+            : {
+                lat: a.lat + ((b.lat - a.lat) * i) / n,
+                lon: a.lon + ((b.lon - a.lon) * i) / n,
+              },
+        );
     }
     for (let i = 0; i < entry.track.count; i++) {
       readFix(entry.track, i, a);
@@ -125,7 +181,12 @@ export function createTrails({ state, services, parts, source }) {
       if (markerCorridor) markerIntervals--;
       if (a.epoch !== b.epoch || b.flags & FIX_FLAGS.BREAK) continue;
       if (entry !== selected && b.t < entry.sample.displayT) continue;
-      const desired = Math.max(1, Math.ceil(fixDistanceM(a, b) / STEP_M));
+      // Rail vehicles run along their track when the feed supplies it.
+      const track = followTrack(entry, a, b);
+      const desired = Math.max(
+        1,
+        Math.ceil((track?.lengthM ?? fixDistanceM(a, b)) / STEP_M),
+      );
       // Reserve endpoints for every future marker interval. Sparse reports
       // coarsen the active path instead of losing the vehicle to the body cap.
       const n = markerCorridor
@@ -139,16 +200,20 @@ export function createTrails({ state, services, parts, source }) {
       if (!markerCorridor && !retainBody) continue;
       if (markerCorridor) markerVertices += n + 1;
       const positions = [],
-        heights = [];
+        heights = [],
+        points = [];
       let valid = true;
       for (let k = 0; k <= n; k++) {
         const fraction = k / n;
-        const point = {
-          lat: a.lat + (b.lat - a.lat) * fraction,
-          lon: a.lon + (((b.lon - a.lon + 540) % 360) - 180) * fraction,
-        };
+        const point = track
+          ? track.at(fraction)
+          : {
+              lat: a.lat + (b.lat - a.lat) * fraction,
+              lon: a.lon + (((b.lon - a.lon + 540) % 360) - 180) * fraction,
+            };
         const h = floor(point);
         heights.push(h);
+        points.push(point);
         if (h === null) {
           valid = false;
           // Ground polylines consume longitude/latitude and drape themselves.
@@ -163,7 +228,14 @@ export function createTrails({ state, services, parts, source }) {
       }
       signature += `${a.seq}/${b.seq}:${heights.join(',')};`;
       if (retainBody) vertices += n + 1;
-      if (valid) paths.set(a.seq, { positions, toSeq: b.seq });
+      if (valid)
+        paths.set(a.seq, {
+          positions,
+          toSeq: b.seq,
+          // Along the track the heading turns with the curve; on a chord it
+          // is the segment's own, left to the playback.
+          courses: track ? pathCourses(points) : null,
+        });
       if (!valid && !draped) continue;
       if (entry === selected && retainBody && fixDistanceM(a, b) > 0) {
         for (let k = 0; k < n; k++)
@@ -197,6 +269,24 @@ export function createTrails({ state, services, parts, source }) {
     }
     return changed;
   }
+  /** Heading (degrees from north) of each piece of a lat/lon polyline. */
+  function pathCourses(points) {
+    const courses = new Float64Array(Math.max(1, points.length - 1));
+    for (let k = 0; k + 1 < points.length; k++) {
+      const p = points[k],
+        q = points[k + 1];
+      courses[k] =
+        ((Math.atan2(
+          (q.lon - p.lon) * Math.cos((p.lat * Math.PI) / 180),
+          q.lat - p.lat,
+        ) *
+          180) /
+          Math.PI +
+          360) %
+        360;
+    }
+    return courses;
+  }
   /** Allocation-free sampling of the exact path also used by the trail. */
   function samplePosition(
     entry,
@@ -225,6 +315,8 @@ export function createTrails({ state, services, parts, source }) {
     const index = Math.min(path.positions.length - 2, Math.floor(scaled));
     // Keep scalar interpolation in this frame function. Passing the changing
     // fraction to the general Cesium helper boxes it in sampled V8 stacks.
+    // On a track-following path the display course follows the curve.
+    if (path.courses) sample.segmentCourseDeg = path.courses[index];
     const a = path.positions[index],
       b = path.positions[index + 1],
       f = scaled - index;

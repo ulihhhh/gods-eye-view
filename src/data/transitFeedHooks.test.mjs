@@ -150,3 +150,18 @@ test('a feed with stopNames loads its dictionary once and names every poll', asy
     assert.equal(await feed.stopNames(), names, 'loaded once, then shared');
   }
 });
+
+test('each Spanish feed supplies the track its trains run on', async () => {
+  const { SPAIN_TRANSIT_FEEDS } = await import('./transitFeedsSpain.js');
+  const byId = Object.fromEntries(SPAIN_TRANSIT_FEEDS.map((f) => [f.id, f]));
+  const cercanias = await byId['renfe-cercanias'].trackGeometry();
+  assert.ok(cercanias.length > 50);
+  assert.ok(cercanias.some((line) => line.routes?.includes('R2')));
+  const fgc = await byId['fgc-geotren'].trackGeometry();
+  assert.ok(
+    fgc.some((line) => line.routes?.includes('L8')),
+    'merged "S9 · L8" splits',
+  );
+  const ld = await byId['renfe-ld'].trackGeometry();
+  assert.ok(ld.length > 0 && ld.every((line) => line.routes === null));
+});

@@ -95,6 +95,20 @@
 
 ## [Unreleased]
 
+- Spanish trains in the Transit layer now run along their track near the
+  ground instead of cutting straight between reports: each segment follows
+  the Cercanías / Rodalies, FGC or national network line both reports sit
+  on (within 150 m), ending exactly on the reports, and the icon turns with
+  the curve. Feeds gain an optional `trackGeometry` loader; segments with
+  no matching track keep the straight line.
+- The Rail network (Spain) layer adds the IGN's national mainline network
+  as thin neutral lines under the operators' colours
+  (`scripts/build-spain-rail-ign.mjs`, CC BY 4.0 © IGN — SCNE), and its
+  stations now take their line's colour (white at interchanges) like the
+  Barcelona metro's.
+- The Barcelona arrivals layer draws TMB's metro lines in their official
+  colours. Metro and rail stations show from 75 km.
+
 - Add a Rail network (Spain) layer: every Cercanías / Rodalies network and
   the FGC lines drawn on the ground in the operators' line colours, with
   their stations at street scale. Clicking a line or a station names it.

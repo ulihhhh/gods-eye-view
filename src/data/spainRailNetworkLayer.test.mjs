@@ -7,10 +7,12 @@ import {
   SPAIN_RAIL_STATION_MAX_DISTANCE_M,
   buildSpainRailCopy,
   createSpainRailNetworkLayer,
+  normalizeSpainRailIgnPaths,
   normalizeSpainRailLines,
   parseSpainRailPickId,
   spainRailLineRgb,
   spainRailNetworkLabel,
+  spainRailStationRgb,
   spainRailStationsFromPack,
 } from './spainRailNetworkLayer.js';
 import { loadBundledJson } from './bundledJson.js';
@@ -92,7 +94,34 @@ test('stations come from the Cercanías and FGC networks, with a point only', ()
   );
 });
 
+test('the national network pack is optional and validated path by path', async () => {
+  assert.deepEqual(
+    normalizeSpainRailIgnPaths({ paths: [[1, 2, 3, 4], [1, 2, 3], 'x'] }),
+    [[1, 2, 3, 4]],
+  );
+  assert.equal(normalizeSpainRailIgnPaths({}), null);
+  const layer = createSpainRailNetworkLayer({
+    overlayHost: { setEntries() {}, setVisible() {}, clearSource() {} },
+    loadJson: async (url) => {
+      if (url.pathname.endsWith('ign_rail.json')) throw new Error('missing');
+      return url.pathname.endsWith('lines.json') ? LINES : STATIONS;
+    },
+  });
+  const viewer = fakeViewer();
+  try {
+    layer.init(viewer);
+    assert.equal(await layer.update(), true, 'works without the IGN pack');
+    assert.equal(layer.getStats().count, 4);
+  } finally {
+    layer.destroy(viewer);
+  }
+});
+
 test('pick ids round-trip; others are left to their owners', () => {
+  assert.deepEqual(parseSpainRailPickId('spain-rail-network:ign:12'), {
+    kind: 'ign',
+    key: '12',
+  });
   assert.deepEqual(parseSpainRailPickId('spain-rail-network:line:3'), {
     kind: 'line',
     key: '3',
@@ -136,8 +165,10 @@ test('the layer reads both packs once, draws stations at street scale, and selec
       clearSource: (...args) => calls.push(['clear', ...args]),
     },
     loadJson: async (url) => {
-      reads.push(url.pathname.split('/').pop());
-      return url.pathname.endsWith('lines.json') ? LINES : STATIONS;
+      const name = url.pathname.split('/').pop();
+      reads.push(name);
+      if (name === 'ign_rail.json') return { paths: [[-3, 40, -2.9, 40.1]] };
+      return name === 'lines.json' ? LINES : STATIONS;
     },
   });
   const viewer = fakeViewer();
@@ -148,7 +179,7 @@ test('the layer reads both packs once, draws stations at street scale, and selec
     assert.equal(await layer.update(), true);
     assert.deepEqual(
       reads.sort(),
-      ['lines.json', 'stations.json'],
+      ['ign_rail.json', 'lines.json', 'stations.json'],
       'read once',
     );
     const stations = viewer._dataSources[0].entities.values;
@@ -157,7 +188,7 @@ test('the layer reads both packs once, draws stations at street scale, and selec
       Cesium.JulianDate.now(),
     ).far;
     assert.equal(far, SPAIN_RAIL_STATION_MAX_DISTANCE_M);
-    assert.equal(layer.getStats().count, 4);
+    assert.equal(layer.getStats().count, 5);
     assert.equal(
       isOwnedByOtherLayer('transit', 'spain-rail-network:line:0'),
       true,
@@ -176,6 +207,17 @@ test('the layer reads both packs once, draws stations at street scale, and selec
       '🛤 R2',
     );
     assert.equal(layer._selectForTest('spain-rail-network:line:99'), false);
+    const at = Cesium.Cartesian3.fromDegrees(-2.95, 40.05);
+    assert.equal(layer._selectForTest('spain-rail-network:ign:0', at), true);
+    assert.equal(
+      calls.filter(([type]) => type === 'entries').at(-1)[2][0].title,
+      '🛤 Railway',
+    );
+    assert.equal(
+      layer._selectForTest('spain-rail-network:ign:0'),
+      false,
+      'needs a click point',
+    );
   } finally {
     layer.destroy(viewer);
   }
@@ -203,4 +245,41 @@ test('the bundled lines pack stays within budget and holds both networks', async
     assert.ok(CERCANIAS_NETWORKS[group], `named network ${group}`);
   assert.ok(lines.some((l) => l.network === 'fgc' && l.line === 'L6'));
   assert.ok(lines.some((l) => l.group === '51' && l.line === 'R2'));
+});
+
+test('stations take their line colour, white at interchanges, slate on no line', () => {
+  const linesPack = {
+    lines: [
+      { network: 'fgc', line: 'L6', color: '797FBC', paths: [] },
+      { network: 'fgc', line: 'S1', color: 'EF7900', paths: [] },
+      { network: 'fgc', line: 'L12', color: null, paths: [] },
+    ],
+    stationLines: { fgc: { PC: [0, 1], TT: [0], X: [2] } },
+  };
+  const pack = {
+    networks: {
+      fgc: {
+        PC: ['Pl. Catalunya', 41.38, 2.16],
+        TT: ['Les Tres Torres', 41.39, 2.13],
+        X: ['Sense color', 41.4, 2.1],
+        Z: ['Sense línia', 41.41, 2.1],
+      },
+    },
+  };
+  const stations = Object.fromEntries(
+    spainRailStationsFromPack(pack, linesPack).map((s) => [s.code, s]),
+  );
+  assert.deepEqual(
+    stations.PC.lines.map((l) => l.name),
+    ['L6', 'S1'],
+  );
+  assert.deepEqual(spainRailStationRgb(stations.PC), [235, 235, 235]);
+  assert.deepEqual(spainRailStationRgb(stations.TT), [121, 127, 188]);
+  assert.deepEqual(spainRailStationRgb(stations.X), [145, 164, 180]);
+  assert.deepEqual(spainRailStationRgb(stations.Z), [145, 164, 180]);
+  assert.deepEqual(buildSpainRailCopy('station', stations.PC).details, [
+    'FGC station · PC',
+    'Lines: L6 S1',
+    'Source: FGC open data',
+  ]);
 });

@@ -13,12 +13,14 @@ import { loadBundledJson } from './bundledJson.js';
 
 /**
  * Rail network (Spain, fork-local) — the Cercanías / Rodalies and FGC lines
- * drawn on the ground in the operators' own colours, and their stations as
- * points once the camera is down at street scale. Clicking a line or a
+ * drawn on the ground in the operators' own colours, over the whole national
+ * railway network in a thin neutral line, and the Cercanías / FGC stations
+ * as points once the camera is down at street scale. Clicking a line or a
  * station names it on a card.
  *
- * Static geometry from the packs `scripts/build-spain-transit-network.mjs`
- * writes (Renfe and FGC open data, CC BY 4.0); nothing here is fetched from
+ * Static geometry from bundled packs: `scripts/build-spain-transit-network.mjs`
+ * (Renfe and FGC open data) and `scripts/build-spain-rail-ign.mjs` (IGN's
+ * INSPIRE transport networks), all CC BY 4.0; nothing here is fetched from
  * an operator. The live trains stay in the Transit layer, so either layer
  * can be shown alone.
  */
@@ -32,6 +34,10 @@ const STATIONS_URL = new URL(
   './local_data/spain_transit/stations.json',
   import.meta.url,
 );
+const IGN_URL = new URL(
+  './local_data/spain_transit/ign_rail.json',
+  import.meta.url,
+);
 
 export const SPAIN_RAIL_SELECTED_OVERLAY_SOURCE_ID = 'spain-rail-selected';
 const SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
@@ -41,14 +47,20 @@ const SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
 });
 
 /** Station points show only once the camera is this close. */
-export const SPAIN_RAIL_STATION_MAX_DISTANCE_M = 8_000;
+export const SPAIN_RAIL_STATION_MAX_DISTANCE_M = 75_000;
 /** Line width on screen. */
 export const SPAIN_RAIL_LINE_WIDTH_PX = 3;
+/** The national network underneath: thinner, neutral. */
+export const SPAIN_RAIL_IGN_WIDTH_PX = 1.5;
+const IGN_LINE_COLOR = Cesium.Color.fromBytes(205, 210, 220, 170);
 
 /** Lines without an operator colour (FGC's Montserrat rack railway). */
 const FALLBACK_LINE_RGB = [160, 168, 176];
-const STATION_RGB = [245, 245, 245];
-const COLOR_OUTLINE = Cesium.Color.BLACK.withAlpha(0.7);
+/** Station points match the Barcelona metro's: line colour, white for an
+ * interchange, slate when no drawn line passes. */
+const INTERCHANGE_RGB = [235, 235, 235];
+const NO_LINE_RGB = [145, 164, 180];
+const COLOR_OUTLINE = Cesium.Color.BLACK.withAlpha(0.6);
 const POINT_HEIGHT_OFFSET_M = 2.0;
 
 /**
@@ -123,20 +135,46 @@ export function normalizeSpainRailLines(pack) {
   );
 }
 
+/** Validate the IGN pack: flat paths of two or more finite points. */
+export function normalizeSpainRailIgnPaths(pack) {
+  if (!Array.isArray(pack?.paths)) return null;
+  return pack.paths.filter(
+    (path) =>
+      Array.isArray(path) &&
+      path.length >= 4 &&
+      path.length % 2 === 0 &&
+      path.every(Number.isFinite),
+  );
+}
+
 /**
  * Stations with a point, from the stations pack: Cercanías and FGC (the
  * networks whose lines this layer draws).
+ * @param {object|null} [linesPack] The lines pack, for each station's lines.
  * @returns {Array<{id: string, network: string, code: string, name: string,
- *   lat: number, lon: number}>}
+ *   lat: number, lon: number, lines: Array<{name: string, color: string|null}>}>}
  */
-export function spainRailStationsFromPack(pack) {
+export function spainRailStationsFromPack(pack, linesPack = null) {
   const stations = [];
+  const allLines = Array.isArray(linesPack?.lines) ? linesPack.lines : [];
   for (const network of ['renfe-cercanias', 'fgc']) {
     for (const [code, entry] of Object.entries(
       pack?.networks?.[network] || {},
     )) {
       const [name, lat, lon] = Array.isArray(entry) ? entry : [];
       if (!name || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      // Lines serving the station, from the lines pack's `stationLines`.
+      const served = new Map();
+      for (const index of linesPack?.stationLines?.[network]?.[code] || []) {
+        const line = allLines[index];
+        if (line && typeof line.line === 'string' && !served.has(line.line))
+          served.set(line.line, {
+            name: line.line,
+            color: /^[0-9A-Fa-f]{6}$/.test(String(line.color || ''))
+              ? line.color
+              : null,
+          });
+      }
       stations.push({
         id: `${network}:${code}`,
         network,
@@ -144,23 +182,46 @@ export function spainRailStationsFromPack(pack) {
         name: String(name),
         lat,
         lon,
+        lines: [...served.values()],
       });
     }
   }
   return stations;
 }
 
+/**
+ * Station point colour: its line's colour, white where lines of different
+ * colours meet, slate when no drawn line passes.
+ * @returns {[number, number, number]}
+ */
+export function spainRailStationRgb(station) {
+  const colours = new Set(
+    (station?.lines || []).map((line) => line.color).filter(Boolean),
+  );
+  if (colours.size === 1) return hexToRgb([...colours][0]) ?? NO_LINE_RGB;
+  return colours.size > 1 ? INTERCHANGE_RGB : NO_LINE_RGB;
+}
+
 /** Entity / instance ids: `spain-rail-network:line:<n>`, `…:station:<id>`. */
 export function parseSpainRailPickId(pickedId) {
   const match =
-    /^spain-rail-network:(line|station):([A-Za-z0-9:_-]{1,40})$/.exec(
+    /^spain-rail-network:(line|station|ign):([A-Za-z0-9:_-]{1,40})$/.exec(
       String(pickedId || ''),
     );
   return match ? { kind: match[1], key: match[2] } : null;
 }
 
-/** Card copy for a line or a station. */
+/** Card copy for a line, a national-network track or a station. */
 export function buildSpainRailCopy(kind, item) {
+  if (kind === 'ign') {
+    return {
+      title: '🛤 Railway',
+      details: [
+        'Spanish rail network (mainline track)',
+        'Source: © Instituto Geográfico Nacional — SCNE',
+      ],
+    };
+  }
   if (kind === 'line') {
     return {
       title: `🛤 ${item.line}`,
@@ -171,12 +232,14 @@ export function buildSpainRailCopy(kind, item) {
     };
   }
   const fgc = item.network === 'fgc';
+  const lines = (item.lines || []).map((line) => line.name).join(' ');
   return {
     title: `🚉 ${item.name}`,
     details: [
       fgc
         ? `FGC station · ${item.code}`
         : `Renfe Cercanías station · ${item.code}`,
+      ...(lines ? [`Lines: ${lines}`] : []),
       `Source: ${fgc ? 'FGC' : 'Renfe Operadora'} open data`,
     ],
   };
@@ -190,7 +253,10 @@ export function createSpainRailNetworkLayer({
   let _dataSource = null;
   /** @type {Cesium.GroundPolylinePrimitive|null} */
   let _linesPrimitive = null;
+  /** @type {Cesium.GroundPolylinePrimitive|null} */
+  let _ignPrimitive = null;
   let _lines = [];
+  let _ignPaths = [];
   /** @type {Map<string, object>} station id → station */
   let _stations = new Map();
   let _count = 0;
@@ -218,7 +284,12 @@ export function createSpainRailNetworkLayer({
     if (!position) return;
     _selectedKey = key;
     const { title, details } = buildSpainRailCopy(kind, item);
-    const rgb = kind === 'line' ? spainRailLineRgb(item) : STATION_RGB;
+    const rgb =
+      kind === 'line'
+        ? spainRailLineRgb(item)
+        : kind === 'ign'
+          ? [205, 210, 220]
+          : spainRailStationRgb(item);
     overlayHost.setEntries(
       SPAIN_RAIL_SELECTED_OVERLAY_SOURCE_ID,
       [
@@ -251,6 +322,12 @@ export function createSpainRailNetworkLayer({
   function _select(pickedId, clickPosition) {
     const parsed = parseSpainRailPickId(pickedId);
     if (!parsed) return false;
+    if (parsed.kind === 'ign') {
+      const path = _ignPaths[Number(parsed.key)];
+      if (!path || !clickPosition) return false;
+      _showCard(pickedId, 'ign', null, clickPosition);
+      return true;
+    }
     if (parsed.kind === 'station') {
       const station = _stations.get(parsed.key);
       if (!station) return false;
@@ -304,10 +381,24 @@ export function createSpainRailNetworkLayer({
   }
 
   function _removeLines() {
-    if (_linesPrimitive && _viewer) {
-      _viewer.scene.groundPrimitives.remove(_linesPrimitive);
+    for (const primitive of [_ignPrimitive, _linesPrimitive]) {
+      if (primitive && _viewer)
+        _viewer.scene.groundPrimitives.remove(primitive);
     }
     _linesPrimitive = null;
+    _ignPrimitive = null;
+  }
+
+  function _groundPolylines(instances) {
+    return _viewer.scene.groundPrimitives.add(
+      new Cesium.GroundPolylinePrimitive({
+        geometryInstances: instances,
+        appearance: new Cesium.PolylineColorAppearance(),
+        classificationType: Cesium.ClassificationType.BOTH,
+        asynchronous: true,
+        show: _enabled,
+      }),
+    );
   }
 
   function _buildLines() {
@@ -322,6 +413,25 @@ export function createSpainRailNetworkLayer({
     if (!supported) {
       _lastError = 'Ground polylines unsupported here — stations only';
       return;
+    }
+    // The national network first, so the operators' coloured lines draw on
+    // top of the same track.
+    if (_ignPaths.length) {
+      const color =
+        Cesium.ColorGeometryInstanceAttribute.fromColor(IGN_LINE_COLOR);
+      _ignPrimitive = _groundPolylines(
+        _ignPaths.map(
+          (path, index) =>
+            new Cesium.GeometryInstance({
+              id: `${LAYER_ID}:ign:${index}`,
+              geometry: new Cesium.GroundPolylineGeometry({
+                positions: Cesium.Cartesian3.fromDegreesArray(path),
+                width: SPAIN_RAIL_IGN_WIDTH_PX,
+              }),
+              attributes: { color },
+            }),
+        ),
+      );
     }
     const instances = [];
     _lines.forEach((line, index) => {
@@ -342,15 +452,7 @@ export function createSpainRailNetworkLayer({
         );
       }
     });
-    _linesPrimitive = _viewer.scene.groundPrimitives.add(
-      new Cesium.GroundPolylinePrimitive({
-        geometryInstances: instances,
-        appearance: new Cesium.PolylineColorAppearance(),
-        classificationType: Cesium.ClassificationType.BOTH,
-        asynchronous: true,
-        show: _enabled,
-      }),
-    );
+    _linesPrimitive = _groundPolylines(instances);
   }
 
   function _buildStations(stations) {
@@ -358,16 +460,17 @@ export function createSpainRailNetworkLayer({
     _dataSource.entities.suspendEvents();
     _dataSource.entities.removeAll();
     for (const station of stations) {
+      const [r, g, b] = spainRailStationRgb(station);
       _dataSource.entities.add(
         new Cesium.Entity({
           id: `${LAYER_ID}:station:${station.id}`,
           position: _stationPosition(station),
           name: station.name,
           point: {
-            pixelSize: 7,
-            color: Cesium.Color.fromBytes(...STATION_RGB, 240),
+            pixelSize: 9,
+            color: Cesium.Color.fromBytes(r, g, b, 235),
             outlineColor: COLOR_OUTLINE,
-            outlineWidth: 1.5,
+            outlineWidth: 1,
             heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
             distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
               0,
@@ -403,6 +506,7 @@ export function createSpainRailNetworkLayer({
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
       if (_linesPrimitive) _linesPrimitive.show = true;
+      if (_ignPrimitive) _ignPrimitive.show = true;
       overlayHost.setVisible(SPAIN_RAIL_SELECTED_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer);
       registerPickOwner(LAYER_ID, (pickedId) =>
@@ -415,6 +519,7 @@ export function createSpainRailNetworkLayer({
       _clearSelection();
       if (_dataSource) _dataSource.show = false;
       if (_linesPrimitive) _linesPrimitive.show = false;
+      if (_ignPrimitive) _ignPrimitive.show = false;
       overlayHost.setVisible(SPAIN_RAIL_SELECTED_OVERLAY_SOURCE_ID, false);
       _removeClickHandler();
       unregisterPickOwner(LAYER_ID);
@@ -423,22 +528,28 @@ export function createSpainRailNetworkLayer({
     async update() {
       if (_lines.length) return true; // static: built once
       try {
-        const [linesPack, stationsPack] = await Promise.all([
+        const [linesPack, stationsPack, ignPack] = await Promise.all([
           loadJson(LINES_URL),
           loadJson(STATIONS_URL),
+          // The national network is context: the layer still works without it.
+          loadJson(IGN_URL).catch((error) => {
+            console.warn('[Data:SpainRail] IGN network unavailable:', error);
+            return null;
+          }),
         ]);
         const lines = normalizeSpainRailLines(linesPack);
         if (!lines) {
           _lastError = 'Malformed rail lines pack';
           return false;
         }
-        const stations = spainRailStationsFromPack(stationsPack);
+        const stations = spainRailStationsFromPack(stationsPack, linesPack);
         _lines = lines;
+        _ignPaths = normalizeSpainRailIgnPaths(ignPack) || [];
         _stations = new Map(stations.map((station) => [station.id, station]));
         _lastError = null;
         _buildLines();
         _buildStations(stations);
-        _count = lines.length + stations.length;
+        _count = lines.length + _ignPaths.length + stations.length;
         _lastUpdate = Date.now();
         return true;
       } catch (error) {
@@ -459,6 +570,7 @@ export function createSpainRailNetworkLayer({
         _dataSource = null;
       }
       _lines = [];
+      _ignPaths = [];
       _stations = new Map();
       _count = 0;
       _lastUpdate = null;

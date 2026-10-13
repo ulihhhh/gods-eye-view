@@ -4,6 +4,7 @@ import {
   TMB_BUS_ID_PATTERN,
   TMB_METRO_ID_PATTERN,
   buildTmbBusStops,
+  buildTmbMetroLines,
   buildTmbMetroStations,
   normalizeTmbBusArrivals,
   normalizeTmbMetroArrivals,
@@ -22,8 +23,9 @@ import {
  *   GET /api/tmb/status → {hasKey, state, checkedAt}
  *     state: 'ok' | 'rejected' (TMB refused the pair) | 'unavailable'
  *     (TMB unreachable or answering something else) | null (no key).
- *   GET /api/tmb/stations → {metro: [...], bus: [...], fetchedAt}
- *     Metro station groups and bus stops, trimmed and cached for a day.
+ *   GET /api/tmb/stations → {metro: [...], bus: [...], lines: [...], fetchedAt}
+ *     Metro station groups, bus stops and metro line geometry, trimmed and
+ *     cached for a day.
  *   GET /api/tmb/arrivals/metro/<group> and /api/tmb/arrivals/bus/<code>
  *     → {kind, id, fetchedAt, routes: [...]}: next arrivals, cached 15 s.
  *     The id must name a station or stop in the catalogue; the server
@@ -171,6 +173,12 @@ const METRO_STATION_FIELDS = [
   'GEOMETRY',
 ];
 const BUS_STOP_FIELDS = ['CODI_PARADA', 'NOM_PARADA', 'GEOMETRY'];
+const METRO_LINE_FIELDS = [
+  'NOM_LINIA',
+  'COLOR_LINIA',
+  'ORDRE_LINIA',
+  'GEOMETRY',
+];
 
 /** A TMB failure the routes turn into a status code, never into its body. */
 export class TmbError extends Error {
@@ -216,6 +224,9 @@ export function tmbCatalogUrls(credentials) {
     }),
     bus: tmbApiUrl('/transit/parades', credentials, {
       propertyName: BUS_STOP_FIELDS.join(','),
+    }),
+    lines: tmbApiUrl('/transit/linies/metro', credentials, {
+      propertyName: METRO_LINE_FIELDS.join(','),
     }),
   };
 }
@@ -284,17 +295,25 @@ export function createTmbCatalogService({
 
   async function load(credentials, pair) {
     const urls = tmbCatalogUrls(credentials);
-    const [metroBody, busBody] = await Promise.all([
+    const [metroBody, busBody, linesBody] = await Promise.all([
       fetchTmbJson(fetchImpl, urls.metro, TMB_CATALOG_MAX_BYTES),
       fetchTmbJson(fetchImpl, urls.bus, TMB_CATALOG_MAX_BYTES),
+      // The line geometry decorates the map; stations work without it.
+      fetchTmbJson(fetchImpl, urls.lines, TMB_CATALOG_MAX_BYTES).catch(
+        (error) => {
+          if (error?.code === 'rejected') throw error;
+          return null;
+        },
+      ),
     ]);
     const metro = buildTmbMetroStations(metroBody);
     const bus = buildTmbBusStops(busBody);
     if (!metro?.length || !bus?.length) throw new TmbError('unavailable');
+    const lines = buildTmbMetroLines(linesBody) || [];
     const fetchedAt = now();
     last = {
       pair,
-      catalog: { metro, bus, fetchedAt },
+      catalog: { metro, bus, lines, fetchedAt },
       metroById: new Map(metro.map((station) => [station.id, station])),
       busIds: new Set(bus.map((stop) => stop.id)),
       fetchedAt,

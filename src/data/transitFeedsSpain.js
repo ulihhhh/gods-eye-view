@@ -8,10 +8,11 @@
  *
  * Pure data + pure helpers, like the registry itself: no Cesium, no Node
  * built-ins, and no import from `transitFeeds.js` (which imports this file).
- * Station names come from a bundled pack, loaded only when a feed is first
- * fetched (`stopNames`).
+ * Station names and track geometry come from bundled packs, loaded only when
+ * a feed is first used (`stopNames`, `trackGeometry`).
  */
 import { spainStationNames } from './spainTransitStations.js';
+import { spainTrackLines } from './spainTrackGeometry.js';
 
 /**
  * Renfe Cercanías labels are `<line>-<train>` with an optional platform
@@ -113,6 +114,7 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     routeMode: railOnly,
     deriveRoute: renfeCercaniasRoute,
     stopNames: () => spainStationNames('renfe-cercanias'),
+    trackGeometry: () => spainTrackLines('renfe-cercanias'),
   }),
   Object.freeze({
     id: 'renfe-ld',
@@ -134,6 +136,7 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     // keeps them: it adds the line, the platform and the train's own time.
     yieldsTo: 'renfe-cercanias',
     stopNames: () => spainStationNames('renfe-ld'),
+    trackGeometry: () => spainTrackLines('renfe-ld'),
   }),
   Object.freeze({
     id: 'fgc-geotren',
@@ -160,5 +163,6 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     defaultMode: 'rail',
     routeMode: fgcRouteMode,
     stopNames: () => spainStationNames('fgc'),
+    trackGeometry: () => spainTrackLines('fgc'),
   }),
 ]);

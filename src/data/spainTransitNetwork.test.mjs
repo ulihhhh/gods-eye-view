@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { statSync } from 'node:fs';
 import {
+  assignStationLines,
   buildFgcStations,
   buildRenfeStations,
   buildStationsPack,
@@ -87,4 +88,24 @@ test('the bundled pack stays small and names the stations seen live', async () =
   assert.equal(networks['renfe-ld']['71801'][0], 'Barcelona-Sants');
   assert.equal(networks.fgc.PC[0], 'Pl. Catalunya');
   assert.equal(networks.fgc.TB[0], 'Av.Tibidabo');
+});
+
+test('a line serves the stations its track passes within 80 m of', () => {
+  const stations = {
+    networks: {
+      'renfe-cercanias': {
+        1: ['On the line', 41.4, 2.15],
+        2: ['300 m away', 41.4027, 2.15],
+      },
+      fgc: { PC: ['Pl. Catalunya', 41.38563, 2.16872], MT: ['Montserrat'] },
+    },
+  };
+  const lines = [
+    { network: 'renfe-cercanias', line: 'R2', paths: [[2.1, 41.4, 2.2, 41.4]] },
+    { network: 'fgc', line: 'L6', paths: [[2.168, 41.3856, 2.17, 41.3856]] },
+  ];
+  assert.deepEqual(assignStationLines(stations, lines), {
+    'renfe-cercanias': { 1: [0] },
+    fgc: { PC: [1] },
+  });
 });

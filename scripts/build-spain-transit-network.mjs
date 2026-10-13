@@ -383,6 +383,61 @@ export function buildLinesPack({
   };
 }
 
+/** How close a line must pass to count as serving a station. */
+export const STATION_LINE_MAX_M = 80;
+
+/**
+ * Which drawn lines serve each station, by geometry: a line serves a station
+ * when its track passes within STATION_LINE_MAX_M of it. (The GTFS says so
+ * through stop_times, a quarter-gigabyte file; the track says it too.)
+ * @param {{networks: Record<string, Record<string, Array>>}} stationsPack
+ * @param {Array<{network: string, paths: number[][]}>} lines
+ * @returns {Record<string, Record<string, number[]>>} network → stopId →
+ *   indices into `lines`
+ */
+export function assignStationLines(stationsPack, lines) {
+  const result = {};
+  for (const network of ['renfe-cercanias', 'fgc']) {
+    const byStation = {};
+    const stations = stationsPack?.networks?.[network] || {};
+    const candidates = lines
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => line.network === network);
+    for (const [id, entry] of Object.entries(stations)) {
+      const [, lat, lon] = entry;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+      const cosLat = Math.cos((lat * Math.PI) / 180);
+      const p = [lon, lat];
+      const served = [];
+      for (const { line, index } of candidates) {
+        let near = false;
+        for (const path of line.paths) {
+          for (let i = 0; i + 3 < path.length && !near; i += 2) {
+            // Cheap reject before the exact distance.
+            if (
+              Math.abs(path[i + 1] - lat) > 0.01 &&
+              Math.abs(path[i + 3] - lat) > 0.01
+            )
+              continue;
+            near =
+              segmentDistanceM(
+                p,
+                [path[i], path[i + 1]],
+                [path[i + 2], path[i + 3]],
+                cosLat,
+              ) <= STATION_LINE_MAX_M;
+          }
+          if (near) break;
+        }
+        if (near) served.push(index);
+      }
+      if (served.length) byStation[id] = served;
+    }
+    result[network] = byStation;
+  }
+  return result;
+}
+
 async function download(url) {
   const response = await fetch(url, { redirect: 'follow' });
   if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
@@ -456,7 +511,17 @@ async function main(argv) {
     (sum, line) => sum + line.paths.reduce((n, p) => n + p.length / 2, 0),
     0,
   );
-  write('lines.json', lines, `${lines.lines.length} lines, ${points} points`);
+  lines.stationLines = assignStationLines(stations, lines.lines);
+  lines.meta.stationLines = `network.<stopId> = [line indices], lines within ${STATION_LINE_MAX_M} m`;
+  const served = Object.values(lines.stationLines).reduce(
+    (sum, byStation) => sum + Object.keys(byStation).length,
+    0,
+  );
+  write(
+    'lines.json',
+    lines,
+    `${lines.lines.length} lines, ${points} points, ${served} stations on a line`,
+  );
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
