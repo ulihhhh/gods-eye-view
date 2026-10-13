@@ -35,5 +35,6 @@
   ["aemet-warnings", "ze"],
   ["aemet-weather-imagery", "zf"],
   ["liveuamap", "zg"],
-  ["tmb-arrivals", "zh"]
+  ["tmb-arrivals", "zh"],
+  ["spain-rail-network", "zi"]
 ]

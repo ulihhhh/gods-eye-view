@@ -95,6 +95,12 @@
 
 ## [Unreleased]
 
+- Add a Rail network (Spain) layer: every Cercanías / Rodalies network and
+  the FGC lines drawn on the ground in the operators' line colours, with
+  their stations at street scale. Clicking a line or a station names it.
+  The geometry is bundled (`lines.json`, 295 KB), built by the same
+  `scripts/build-spain-transit-network.mjs` from Renfe's and FGC's open data.
+
 - Transit cards name the station for Spanish trains ("stopped at Sarrià",
   "next stop Madrid-Atocha Cercanías") from a bundled station pack built from
   Renfe's and FGC's open data (`node scripts/build-spain-transit-network.mjs`).

@@ -19,6 +19,22 @@ source has no point). Networks:
 | `renfe-ld`        | GTFS `stop_id`                                  | `https://ssl.renfe.com/gtransit/Fichero_AV_LD/google_transit.zip` → `stops.txt`                         | CC BY 4.0 — Renfe Operadora, data.renfe.com      |
 | `fgc`             | Geotren station initials ("PC")                 | dadesobertes.fgc.cat `codigo-estaciones` (names) and `gtfs_stops` (points)                              | CC BY 4.0 — Ferrocarrils de la Generalitat de Catalunya |
 
-Transform: names trimmed with inner spaces collapsed; coordinates rounded to
+## `lines.json`
+
+`lines[] = {network, group, line, color, mode, paths}`; `paths` are flat
+`[lon, lat, lon, lat, …]` arrays.
+
+| Network           | Source                                                                                         | Notes                                                                                                   |
+| ----------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `renfe-cercanias` | `fomento_transit.zip` → `shapes.txt` (one direction per line; `_INV` dropped) and `routes.txt` | `group` is the Cercanías network ("núcleo") from the id prefix: 10 Madrid, 51 Rodalies de Catalunya, … |
+| `fgc`             | dadesobertes.fgc.cat `gtfs_routes` (each line's MultiLineString and colour)                    | bus and shapeless routes dropped; lines sharing one geometry merged ("S9 · L8")                         |
+
+Every path simplified with Douglas–Peucker at 10 m, coordinates rounded to
+5 decimals. Where a Cercanías line has two colours in `routes.txt`, the most
+common one is kept.
+
+## Transform (stations)
+
+Names trimmed with inner spaces collapsed; coordinates rounded to
 5 decimals; keys sorted. Renfe data are cited as "Renfe Operadora"; no
 endorsement by Renfe or FGC is implied.

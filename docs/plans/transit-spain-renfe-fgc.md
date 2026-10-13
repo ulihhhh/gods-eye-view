@@ -537,6 +537,32 @@ y FGC con sus colores, y regenerar los datos es ejecutar un solo comando.
   - Ficha real: "🚇 Route L6 … Last report: next stop Pl. Catalunya".
   - `qa:transit` (Barcelona, sección de ciudades) pasa.
 - **Validación:** `npm test` da 6.571 tests, 0 fallos. Pasan boundaries y build.
+- **Resultado 5b (2026-10-13):**
+  - El script también escribe `lines.json` (295 KB, por debajo del presupuesto de
+    600 KB): 72 líneas de Cercanías/Rodalies en 15 núcleos y 19 de FGC, con 16.569
+    puntos tras Douglas–Peucker a 10 m. De Cercanías se dibuja un sentido por línea (se
+    descarta `_INV`); FGC sale de `gtfs_routes`, que trae geometría y color.
+  - **Capa nueva del fork** "Rail network (Spain)" (`spain-rail-network`, token
+    **`zi`**, `src/data/spainRailNetworkLayer.js`). Las vías no van en la capa Transit:
+    se pueden ver sin trenes y no toca código de upstream.
+    - Líneas: un solo `GroundPolylinePrimitive` con color por instancia (3 px, a ras de
+      suelo, `ClassificationType.BOTH`), el mismo primitivo que upstream usa para
+      estelas y tráfico.
+    - Estaciones: 1.249 puntos (Cercanías y FGC con coordenadas), visibles a ≤ 8 km y
+      dibujados sobre el mesh 3D hasta esa misma distancia.
+    - Al pulsar una línea o una estación sale una ficha ("🛤 R2 · Rodalies de
+      Catalunya · line", "🚉 Barcelona-Sants · Renfe Cercanías station · 71801"). No se
+      usan etiquetas de Cesium (upstream las prohíbe por test).
+    - Nombres de núcleo por prefijo: 45 Cartagena, 46 Ferrol y 47 León son las redes de
+      ancho métrico (deducido por geografía).
+  - **Datos de origen tal cual:** FGC publica S9 y L8 con la misma geometría (salen
+    fusionadas), el Montserrat (MM) sin color (gris neutro), y la R1 de Rodalies con dos
+    colores en `routes.txt` (se queda el más frecuente, `094188`).
+  - **En vivo:** Barcelona a 45 km muestra todas las líneas de Rodalies y FGC con su
+    color, y la vista de España, todos los núcleos. El clic en Sants abre su ficha. Sin
+    errores de página.
+  - **Pins del fork:** catálogo 38 → 39; `REGISTERED_LAYER_IDS` 37 → 38; ledger 38
+    reservas, "39 published" y `l` de 96; esquema de voz 30819 más sus hashes.
 - **Incidencia:** se rompió la caché de dependencias de Vite de un servidor de desarrollo
   (504 "Outdated Optimize Dep" en `cesium.js`), y la app no arrancaba. Se arregla con
   `npm run dev -- --force`. Causa probable: un segundo Vite en un worktree con

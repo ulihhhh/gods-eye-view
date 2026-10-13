@@ -773,6 +773,8 @@
   "src/data/gtfsCsv.js",
   "src/data/spainTransitStations.js",
   "src/data/spainTransitNetwork.test.mjs",
+  "src/data/spainRailNetworkLayer.js",
+  "src/data/spainRailNetworkLayer.test.mjs",
   "scripts/build-spain-transit-network.mjs",
   "src/app/layers/transit.js",
   "src/data/transitIcons.js",

@@ -37,6 +37,7 @@ import { createAemetUvIndexLayer } from '../data/aemetUvIndex.js';
 import { createAemetBeachesLayer } from '../data/aemetBeaches.js';
 import { createAemetEnvironmentalLayer } from '../data/aemetEnvironmental.js';
 import { createTmbArrivalsLayer } from '../data/tmbArrivalsLayer.js';
+import { createSpainRailNetworkLayer } from '../data/spainRailNetworkLayer.js';
 import { createBhoteKoshiEventLayer } from '../data/bhoteKoshiEvent.js';
 import { createBhoteKoshiLocatorLayer } from '../data/bhoteKoshiLocator.js';
 
@@ -186,6 +187,7 @@ export function createApplicationCatalog({
         createAemetBeachesLayer(),
         createAemetEnvironmentalLayer(),
         createTmbArrivalsLayer(),
+        createSpainRailNetworkLayer(),
       ],
       metadata,
     );
