@@ -222,3 +222,31 @@ export function pathBetween(index, a, b, routeId = null) {
     },
   };
 }
+
+/** How far along the track the direction is read, in metres. */
+const COURSE_LOOKAHEAD_M = 100;
+
+/**
+ * The direction a train standing at `from` takes to reach `to`, read along
+ * the track it is on, in degrees clockwise from north. Where no single piece
+ * of track joins the two, the straight bearing.
+ * @param {ReturnType<typeof createTrackIndex>|null} index
+ * @param {{lat: number, lon: number}} from
+ * @param {{lat: number, lon: number}} to
+ * @param {string|null} [routeId]
+ * @returns {number} 0–360, or NaN when the two points are the same place.
+ */
+export function courseAlongTrack(index, from, to, routeId = null) {
+  if (metres(from.lon, from.lat, to.lon, to.lat) < 1) return NaN;
+  let toward = to;
+  const path = index ? pathBetween(index, from, to, routeId) : null;
+  if (path && path.lengthM >= 1) {
+    const ahead = path.at(Math.min(1, COURSE_LOOKAHEAD_M / path.lengthM));
+    if (metres(from.lon, from.lat, ahead.lon, ahead.lat) >= 1) toward = ahead;
+  }
+  const cos = Math.cos((from.lat * Math.PI) / 180);
+  const deg =
+    (Math.atan2((toward.lon - from.lon) * cos, toward.lat - from.lat) * 180) /
+    Math.PI;
+  return (deg + 360) % 360;
+}

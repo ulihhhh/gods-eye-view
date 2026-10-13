@@ -95,6 +95,22 @@
 
 ## [Unreleased]
 
+- Spanish trains in the Transit layer start moving as soon as they appear:
+  the proxy retains Renfe's and FGC's recent positions (as it already did
+  for MBTA) and hands each train its last few minutes (`recent`), which the
+  layer plays from as far back as the feed needs. A train with one report
+  faces its next stop, along the track. Feeds gain three optional fields:
+  `interpretStatus` (Renfe's Cercanías name the station a train left as
+  the one it is in transit to, and give arriving trains a position that is
+  not theirs, which is now ignored), `staleRepeats` (the same position with
+  a newer time is news only for a train stopped at a station, so trains no
+  longer halt and leap), and `stopPlaces`. Cards say "left Sants" or "last
+  stop" where that is what the operator means.
+- The Rail network (Spain) layer draws the national network at the same
+  width as the operators' lines, in one grey for track and stations alike,
+  and adds the high-speed, long and medium distance stations Cercanías
+  does not serve.
+
 - Spanish trains in the Transit layer now run along their track near the
   ground instead of cutting straight between reports: each segment follows
   the Cercanías / Rodalies, FGC or national network line both reports sit

@@ -14,8 +14,8 @@ import { loadBundledJson } from './bundledJson.js';
 /**
  * Rail network (Spain, fork-local) — the Cercanías / Rodalies and FGC lines
  * drawn on the ground in the operators' own colours, over the whole national
- * railway network in a thin neutral line, and the Cercanías / FGC stations
- * as points once the camera is down at street scale. Clicking a line or a
+ * railway network in neutral grey at the same width, and the Cercanías, FGC
+ * and AV/LD/MD stations as points once the camera is down at street scale. Clicking a line or a
  * station names it on a card.
  *
  * Static geometry from bundled packs: `scripts/build-spain-transit-network.mjs`
@@ -48,18 +48,17 @@ const SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
 
 /** Station points show only once the camera is this close. */
 export const SPAIN_RAIL_STATION_MAX_DISTANCE_M = 75_000;
-/** Line width on screen. */
+/** Line width on screen, the same for every network. */
 export const SPAIN_RAIL_LINE_WIDTH_PX = 3;
-/** The national network underneath: thinner, neutral. */
-export const SPAIN_RAIL_IGN_WIDTH_PX = 1.5;
-const IGN_LINE_COLOR = Cesium.Color.fromBytes(205, 210, 220, 170);
+/** The national network has no line colours: one neutral grey, for its
+ * track and for the stations no coloured line serves. */
+const NETWORK_RGB = [205, 210, 220];
 
 /** Lines without an operator colour (FGC's Montserrat rack railway). */
 const FALLBACK_LINE_RGB = [160, 168, 176];
 /** Station points match the Barcelona metro's: line colour, white for an
- * interchange, slate when no drawn line passes. */
+ * interchange, the network grey when no coloured line passes. */
 const INTERCHANGE_RGB = [235, 235, 235];
-const NO_LINE_RGB = [145, 164, 180];
 const COLOR_OUTLINE = Cesium.Color.BLACK.withAlpha(0.6);
 const POINT_HEIGHT_OFFSET_M = 2.0;
 
@@ -148,8 +147,9 @@ export function normalizeSpainRailIgnPaths(pack) {
 }
 
 /**
- * Stations with a point, from the stations pack: Cercanías and FGC (the
- * networks whose lines this layer draws).
+ * Stations with a point, from the stations pack: Cercanías and FGC, then the
+ * AV/LD/MD stations Cercanías does not already have (Renfe uses one station
+ * code across both packs).
  * @param {object|null} [linesPack] The lines pack, for each station's lines.
  * @returns {Array<{id: string, network: string, code: string, name: string,
  *   lat: number, lon: number, lines: Array<{name: string, color: string|null}>}>}
@@ -157,10 +157,12 @@ export function normalizeSpainRailIgnPaths(pack) {
 export function spainRailStationsFromPack(pack, linesPack = null) {
   const stations = [];
   const allLines = Array.isArray(linesPack?.lines) ? linesPack.lines : [];
-  for (const network of ['renfe-cercanias', 'fgc']) {
+  const cercanias = pack?.networks?.['renfe-cercanias'] || {};
+  for (const network of ['renfe-cercanias', 'fgc', 'renfe-ld']) {
     for (const [code, entry] of Object.entries(
       pack?.networks?.[network] || {},
     )) {
+      if (network === 'renfe-ld' && Object.hasOwn(cercanias, code)) continue;
       const [name, lat, lon] = Array.isArray(entry) ? entry : [];
       if (!name || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
       // Lines serving the station, from the lines pack's `stationLines`.
@@ -191,15 +193,15 @@ export function spainRailStationsFromPack(pack, linesPack = null) {
 
 /**
  * Station point colour: its line's colour, white where lines of different
- * colours meet, slate when no drawn line passes.
+ * colours meet, the network grey when no coloured line passes.
  * @returns {[number, number, number]}
  */
 export function spainRailStationRgb(station) {
   const colours = new Set(
     (station?.lines || []).map((line) => line.color).filter(Boolean),
   );
-  if (colours.size === 1) return hexToRgb([...colours][0]) ?? NO_LINE_RGB;
-  return colours.size > 1 ? INTERCHANGE_RGB : NO_LINE_RGB;
+  if (colours.size === 1) return hexToRgb([...colours][0]) ?? NETWORK_RGB;
+  return colours.size > 1 ? INTERCHANGE_RGB : NETWORK_RGB;
 }
 
 /** Entity / instance ids: `spain-rail-network:line:<n>`, `…:station:<id>`. */
@@ -233,12 +235,15 @@ export function buildSpainRailCopy(kind, item) {
   }
   const fgc = item.network === 'fgc';
   const lines = (item.lines || []).map((line) => line.name).join(' ');
+  const kindLabel = fgc
+    ? 'FGC station'
+    : item.network === 'renfe-ld'
+      ? 'Renfe AV/LD/MD station'
+      : 'Renfe Cercanías station';
   return {
     title: `🚉 ${item.name}`,
     details: [
-      fgc
-        ? `FGC station · ${item.code}`
-        : `Renfe Cercanías station · ${item.code}`,
+      `${kindLabel} · ${item.code}`,
       ...(lines ? [`Lines: ${lines}`] : []),
       `Source: ${fgc ? 'FGC' : 'Renfe Operadora'} open data`,
     ],
@@ -288,7 +293,7 @@ export function createSpainRailNetworkLayer({
       kind === 'line'
         ? spainRailLineRgb(item)
         : kind === 'ign'
-          ? [205, 210, 220]
+          ? NETWORK_RGB
           : spainRailStationRgb(item);
     overlayHost.setEntries(
       SPAIN_RAIL_SELECTED_OVERLAY_SOURCE_ID,
@@ -417,8 +422,9 @@ export function createSpainRailNetworkLayer({
     // The national network first, so the operators' coloured lines draw on
     // top of the same track.
     if (_ignPaths.length) {
-      const color =
-        Cesium.ColorGeometryInstanceAttribute.fromColor(IGN_LINE_COLOR);
+      const color = Cesium.ColorGeometryInstanceAttribute.fromColor(
+        Cesium.Color.fromBytes(...NETWORK_RGB, 235),
+      );
       _ignPrimitive = _groundPolylines(
         _ignPaths.map(
           (path, index) =>
@@ -426,7 +432,7 @@ export function createSpainRailNetworkLayer({
               id: `${LAYER_ID}:ign:${index}`,
               geometry: new Cesium.GroundPolylineGeometry({
                 positions: Cesium.Cartesian3.fromDegreesArray(path),
-                width: SPAIN_RAIL_IGN_WIDTH_PX,
+                width: SPAIN_RAIL_LINE_WIDTH_PX,
               }),
               attributes: { color },
             }),

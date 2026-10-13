@@ -780,6 +780,7 @@
   "src/data/spainTrackGeometry.js",
   "src/data/trackFollow.js",
   "src/data/trackFollow.test.mjs",
+  "src/data/transitStopRelation.js",
   "scripts/build-spain-transit-network.mjs",
   "src/app/layers/transit.js",
   "src/data/transitIcons.js",

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   TRACK_SNAP_MAX_M,
+  courseAlongTrack,
   createTrackIndex,
   pathBetween,
 } from './trackFollow.js';
@@ -68,4 +69,31 @@ test('no track, a far fix, the wrong line or an implausible detour fall back to 
     'never the 8 km way round',
   );
   assert.equal(pathBetween(index, a, a), null, 'no movement, no path');
+});
+
+test('the course to a point follows the track, and falls back to the straight bearing', () => {
+  // Track runs east, then turns north; the target is north-east of the start.
+  const index = createTrackIndex([
+    { routes: null, paths: [[0, 0, 0.01, 0, 0.01, 0.01]] },
+  ]);
+  const along = courseAlongTrack(
+    index,
+    { lat: 0, lon: 0 },
+    { lat: 0.01, lon: 0.01 },
+  );
+  assert.ok(Math.abs(along - 90) < 1, `east along the track, got ${along}`);
+  const straight = courseAlongTrack(
+    null,
+    { lat: 0, lon: 0 },
+    { lat: 0.01, lon: 0.01 },
+  );
+  assert.ok(
+    Math.abs(straight - 45) < 1,
+    `straight north-east, got ${straight}`,
+  );
+  assert.ok(
+    Number.isNaN(
+      courseAlongTrack(index, { lat: 0, lon: 0 }, { lat: 0, lon: 0 }),
+    ),
+  );
 });

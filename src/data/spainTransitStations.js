@@ -48,3 +48,34 @@ export async function spainStationNames(network) {
   namesByNetwork.set(network, names);
   return names;
 }
+
+/** @type {Map<string, Readonly<Record<string, [number, number]>>>} */
+const placesByNetwork = new Map();
+
+/**
+ * `{stopId: [lat, lon]}` for one network of the pack: where each station is,
+ * for the stations the pack places (FGC's funiculars have no point).
+ * @param {'renfe-cercanias'|'renfe-ld'|'fgc'} network
+ * @returns {Promise<Readonly<Record<string, [number, number]>>>}
+ */
+export async function spainStationPlaces(network) {
+  const known = placesByNetwork.get(network);
+  if (known) return known;
+  const stations = (await loadPack())?.networks?.[network];
+  if (!stations || typeof stations !== 'object')
+    throw new Error(`No "${network}" stations in the Spain transit pack`);
+  const places = Object.freeze(
+    Object.fromEntries(
+      Object.entries(stations)
+        .filter(
+          ([, entry]) =>
+            Array.isArray(entry) &&
+            Number.isFinite(entry[1]) &&
+            Number.isFinite(entry[2]),
+        )
+        .map(([id, entry]) => [id, Object.freeze([entry[1], entry[2]])]),
+    ),
+  );
+  placesByNetwork.set(network, places);
+  return places;
+}

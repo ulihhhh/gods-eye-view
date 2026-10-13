@@ -43,7 +43,10 @@ const STATIONS = {
   networks: {
     'renfe-cercanias': { 71801: ['Barcelona-Sants', 41.37918, 2.14036] },
     fgc: { PC: ['Pl. Catalunya', 41.38563, 2.16872], MT: ['Montserrat'] },
-    'renfe-ld': { 71801: ['Barcelona-Sants', 41.379, 2.14] },
+    'renfe-ld': {
+      71801: ['Barcelona-Sants', 41.379, 2.14],
+      60911: ['Ciudad Real', 38.98, -3.92],
+    },
   },
 };
 
@@ -87,11 +90,21 @@ test('lines keep a name and well-formed flat paths; networks read as a person na
   assert.equal(Object.keys(CERCANIAS_NETWORKS).length, 15);
 });
 
-test('stations come from the Cercanías and FGC networks, with a point only', () => {
+test('stations come from Cercanías, FGC and the AV/LD/MD stations Cercanías lacks, with a point only', () => {
+  const stations = spainRailStationsFromPack(STATIONS);
   assert.deepEqual(
-    spainRailStationsFromPack(STATIONS).map((s) => s.id),
-    ['renfe-cercanias:71801', 'fgc:PC'],
+    stations.map((s) => s.id),
+    ['renfe-cercanias:71801', 'fgc:PC', 'renfe-ld:60911'],
   );
+  assert.deepEqual(
+    spainRailStationRgb(stations[2]),
+    [205, 210, 220],
+    'no line colour → the national network grey',
+  );
+  assert.deepEqual(buildSpainRailCopy('station', stations[2]).details, [
+    'Renfe AV/LD/MD station · 60911',
+    'Source: Renfe Operadora open data',
+  ]);
 });
 
 test('the national network pack is optional and validated path by path', async () => {
@@ -111,7 +124,7 @@ test('the national network pack is optional and validated path by path', async (
   try {
     layer.init(viewer);
     assert.equal(await layer.update(), true, 'works without the IGN pack');
-    assert.equal(layer.getStats().count, 4);
+    assert.equal(layer.getStats().count, 5);
   } finally {
     layer.destroy(viewer);
   }
@@ -183,12 +196,12 @@ test('the layer reads both packs once, draws stations at street scale, and selec
       'read once',
     );
     const stations = viewer._dataSources[0].entities.values;
-    assert.equal(stations.length, 2);
+    assert.equal(stations.length, 3);
     const far = stations[0].point.distanceDisplayCondition.getValue(
       Cesium.JulianDate.now(),
     ).far;
     assert.equal(far, SPAIN_RAIL_STATION_MAX_DISTANCE_M);
-    assert.equal(layer.getStats().count, 5);
+    assert.equal(layer.getStats().count, 6);
     assert.equal(
       isOwnedByOtherLayer('transit', 'spain-rail-network:line:0'),
       true,
@@ -275,8 +288,8 @@ test('stations take their line colour, white at interchanges, slate on no line',
   );
   assert.deepEqual(spainRailStationRgb(stations.PC), [235, 235, 235]);
   assert.deepEqual(spainRailStationRgb(stations.TT), [121, 127, 188]);
-  assert.deepEqual(spainRailStationRgb(stations.X), [145, 164, 180]);
-  assert.deepEqual(spainRailStationRgb(stations.Z), [145, 164, 180]);
+  assert.deepEqual(spainRailStationRgb(stations.X), [205, 210, 220]);
+  assert.deepEqual(spainRailStationRgb(stations.Z), [205, 210, 220]);
   assert.deepEqual(buildSpainRailCopy('station', stations.PC).details, [
     'FGC station · PC',
     'Lines: L6 S1',

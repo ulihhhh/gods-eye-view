@@ -20,6 +20,10 @@ import {
 } from './gtfsRealtime.js';
 import { getTransitFeed } from './transitFeeds.js';
 import { decodeFgcGeotren } from './fgcGeotren.js';
+import {
+  TRANSIT_STANDARD_STOP_RELATION,
+  TRANSIT_STOP_RELATIONS,
+} from './transitStopRelation.js';
 
 /** Fresh window: a snapshot younger than this is served without refetching. */
 export const TRANSIT_PROXY_TTL_MS = 15_000;
@@ -297,9 +301,12 @@ export function transitFeedTtlMs(feed) {
  * @param {object} feed Registry entry.
  * @param {Uint8Array|ArrayBuffer} bytes Raw GTFS-RT FeedMessage.
  * @param {number} [now=Date.now()] Fetch time (ms epoch).
- * @param {{stopNames?: Readonly<Record<string, string>>|null}} [options]
+ * @param {{stopNames?: Readonly<Record<string, string>>|null,
+ *   stopPlaces?: Readonly<Record<string, [number, number]>>|null}} [options]
  *   `stopNames`: the feed's station dictionary (`feed.stopNames()`), when
  *   loaded; each vehicle whose `stopId` it names gains `stopName`.
+ *   `stopPlaces`: the feed's station positions (`feed.stopPlaces()`); each
+ *   vehicle whose stop it places gains `stopLat` / `stopLon`.
  * @returns {{ feedId: string, name: string, fetchedAt: number, feedTimestamp: number|null,
  *   version: string|null, entityCount: number, truncated: boolean, count: number, vehicles: object[] }}
  */
@@ -307,7 +314,7 @@ export function buildTransitSnapshot(
   feed,
   bytes,
   now = Date.now(),
-  { stopNames = null } = {},
+  { stopNames = null, stopPlaces = null } = {},
 ) {
   const decoded = transitFormatFor(feed).decode(bytes);
   if (decoded.incrementality !== GTFS_INCREMENTALITY_FULL_DATASET) {
@@ -326,7 +333,16 @@ export function buildTransitSnapshot(
     truncated: decoded.truncated,
     count: decoded.vehicles.length,
     vehicles: repairVehicleTimestamps(
-      applyStopNames(applyDerivedRoutes(feed, decoded.vehicles), stopNames),
+      applyStopPlaces(
+        applyStopNames(
+          applyStatusSemantics(
+            feed,
+            applyDerivedRoutes(feed, decoded.vehicles),
+          ),
+          stopNames,
+        ),
+        stopPlaces,
+      ),
       decoded.timestamp,
       Math.floor(now / 1000),
     ),
@@ -354,6 +370,67 @@ export function applyStopNames(vehicles, stopNames) {
         : '';
     if (!name || name.length > TRANSIT_MAX_STOP_NAME_CHARS) return vehicle;
     return { ...vehicle, stopName: name };
+  });
+}
+
+/**
+ * Place each vehicle's stop from the feed's station positions, so the layer
+ * can turn a train that has only one fix toward where it is going.
+ * Positions outside the valid range are ignored.
+ * @param {object[]} vehicles
+ * @param {Readonly<Record<string, [number, number]>>|null} stopPlaces
+ *   `{stopId: [lat, lon]}`.
+ * @returns {object[]}
+ */
+export function applyStopPlaces(vehicles, stopPlaces) {
+  if (!stopPlaces || typeof stopPlaces !== 'object') return vehicles;
+  return vehicles.map((vehicle) => {
+    const id = vehicle?.stopId;
+    const place =
+      typeof id === 'string' && Object.hasOwn(stopPlaces, id)
+        ? stopPlaces[id]
+        : null;
+    const [lat, lon] = Array.isArray(place) ? place : [];
+    if (
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lon) ||
+      Math.abs(lat) > 90 ||
+      Math.abs(lon) > 180
+    )
+      return vehicle;
+    return { ...vehicle, stopLat: lat, stopLon: lon };
+  });
+}
+
+/**
+ * Say what each vehicle's status means for this feed. Most feeds follow the
+ * GTFS-Realtime reading; a feed whose operator uses the statuses differently
+ * declares `interpretStatus(record) → {stopRelation?, positionUntrusted?}`
+ * (Renfe's Cercanías feed reports the station a train LEFT as the one it is
+ * in transit to). `positionUntrusted` marks a report whose position the
+ * operator is known to fill with something other than the vehicle's place;
+ * the layer keeps the vehicle but does not move it there.
+ * @param {object} feed Registry entry.
+ * @param {object[]} vehicles
+ * Feeds without the hook are left as they are: the card reads their
+ * `status` the standard way.
+ * @returns {object[]} Records with `stopRelation` where known, and
+ *   `positionUntrusted: true` where declared.
+ */
+export function applyStatusSemantics(feed, vehicles) {
+  if (typeof feed?.interpretStatus !== 'function') return vehicles;
+  return vehicles.map((vehicle) => {
+    const own = feed.interpretStatus(vehicle) || {};
+    const relation = Object.hasOwn(own, 'stopRelation')
+      ? own.stopRelation
+      : TRANSIT_STANDARD_STOP_RELATION[vehicle?.status];
+    const known = TRANSIT_STOP_RELATIONS.includes(relation) && vehicle?.stopId;
+    if (!known && own.positionUntrusted !== true) return vehicle;
+    return {
+      ...vehicle,
+      ...(known ? { stopRelation: relation } : {}),
+      ...(own.positionUntrusted === true ? { positionUntrusted: true } : {}),
+    };
   });
 }
 

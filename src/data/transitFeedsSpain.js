@@ -8,10 +8,16 @@
  *
  * Pure data + pure helpers, like the registry itself: no Cesium, no Node
  * built-ins, and no import from `transitFeeds.js` (which imports this file).
- * Station names and track geometry come from bundled packs, loaded only when
- * a feed is first used (`stopNames`, `trackGeometry`).
+ * Station names, station positions and track geometry come from bundled
+ * packs, loaded only when a feed is first used (`stopNames`, `stopPlaces`,
+ * `trackGeometry`). Renfe reads its stop statuses its own way
+ * (`interpretStatus`), and all three feeds repeat a position with a newer
+ * time while the train moves on (`staleRepeats`).
  */
-import { spainStationNames } from './spainTransitStations.js';
+import {
+  spainStationNames,
+  spainStationPlaces,
+} from './spainTransitStations.js';
 import { spainTrackLines } from './spainTrackGeometry.js';
 
 /**
@@ -58,6 +64,36 @@ export function renfeCercaniasRoute(record) {
  */
 function railOnly() {
   return 'rail';
+}
+
+/**
+ * How Renfe's Cercanías feed uses `current_status`, measured on live data
+ * (2026-10-13, ~10 minutes, every núcleo):
+ * - IN_TRANSIT_TO names the station the train LEFT: from the first report
+ *   of 48 trains in transit, 39 then moved away from that station;
+ * - INCOMING_AT names the next station, but its position is not the train's:
+ *   69 % of them sit more than 120 km/h away from the train's last
+ *   IN_TRANSIT_TO / STOPPED_AT position, often on the station after next;
+ * - STOPPED_AT positions sit on the station (median 19 m) and stay put.
+ * @param {{status?: string|null}} record
+ * @returns {{stopRelation?: string, positionUntrusted?: boolean}}
+ */
+export function renfeCercaniasStatus(record) {
+  if (record?.status === 'IN_TRANSIT_TO') return { stopRelation: 'left' };
+  if (record?.status === 'INCOMING_AT')
+    return { stopRelation: 'arriving', positionUntrusted: true };
+  return {};
+}
+
+/**
+ * Renfe's AV/LD/MD feed: IN_TRANSIT_TO is the next station (69 of 93 trains
+ * then moved toward it), but a STOPPED_AT train is a median 11 km from its
+ * station and keeps moving, so that station is the last one it served.
+ * @param {{status?: string|null}} record
+ * @returns {{stopRelation?: string}}
+ */
+export function renfeLdStatus(record) {
+  return record?.status === 'STOPPED_AT' ? { stopRelation: 'last' } : {};
 }
 
 /** Terms shared by every Renfe dataset (data.renfe.com/legal). */
@@ -113,7 +149,15 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     defaultMode: 'rail',
     routeMode: railOnly,
     deriveRoute: renfeCercaniasRoute,
+    interpretStatus: renfeCercaniasStatus,
+    // A train's position often stays the same while its time moves on; only
+    // a train stopped at a station is really standing there.
+    staleRepeats: true,
+    // The server keeps each train's recent positions, so a train the browser
+    // sees for the first time can start moving from where it was.
+    historyRetention: true,
     stopNames: () => spainStationNames('renfe-cercanias'),
+    stopPlaces: () => spainStationPlaces('renfe-cercanias'),
     trackGeometry: () => spainTrackLines('renfe-cercanias'),
   }),
   Object.freeze({
@@ -135,7 +179,11 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     // under one train number, at positions up to kilometres apart. Cercanías
     // keeps them: it adds the line, the platform and the train's own time.
     yieldsTo: 'renfe-cercanias',
+    interpretStatus: renfeLdStatus,
+    staleRepeats: true,
+    historyRetention: true,
     stopNames: () => spainStationNames('renfe-ld'),
+    stopPlaces: () => spainStationPlaces('renfe-ld'),
     trackGeometry: () => spainTrackLines('renfe-ld'),
   }),
   Object.freeze({
@@ -162,7 +210,10 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     terms: FGC_TERMS,
     defaultMode: 'rail',
     routeMode: fgcRouteMode,
+    staleRepeats: true,
+    historyRetention: true,
     stopNames: () => spainStationNames('fgc'),
+    stopPlaces: () => spainStationPlaces('fgc'),
     trackGeometry: () => spainTrackLines('fgc'),
   }),
 ]);

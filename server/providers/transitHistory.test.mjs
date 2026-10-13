@@ -177,3 +177,51 @@ test('snapshot capacity pressure preserves members not yet visited and discloses
   assert.equal(recreated.fixes.length, 1);
   assert.equal(recreated.truncated, true);
 });
+test('a feed that repeats positions keeps only the first sighting unless stopped there, and never an untrusted one', (t) => {
+  const h = history(t);
+  const rail = { ...feed, id: 'rail', staleRepeats: true };
+  const at = (ms, extra = {}) => row(ms, 'train', { stopId: 'S', ...extra });
+  h.ingest(rail, [at(100000, { status: 'IN_TRANSIT_TO' })], 100000);
+  h.ingest(rail, [at(120000, { status: 'IN_TRANSIT_TO' })], 120000);
+  h.ingest(rail, [at(140000, { lat: 42.01, positionUntrusted: true })], 140000);
+  assert.deepEqual(
+    h.get('rail', 'train', 140000).fixes.map((f) => f[0]),
+    [100000],
+  );
+  h.ingest(rail, [at(160000, { lat: 42.02, status: 'STOPPED_AT' })], 160000);
+  h.ingest(rail, [at(180000, { lat: 42.02, status: 'STOPPED_AT' })], 180000);
+  assert.equal(h.get('rail', 'train', 180000).fixes.length, 3);
+  // Without the flag every newer time is a fix, as before.
+  h.ingest(feed, [row(100000), row(120000)], 120000);
+  assert.equal(h.get('mbta', 'bus', 120000).fixes.length, 2);
+});
+
+test('the recent stretch is the trip so far before the current position, oldest first and bounded', (t) => {
+  const h = history(t);
+  for (let i = 0; i < 6; i++)
+    h.ingest(
+      feed,
+      [row(100000 + i * 20000, 'bus', { lat: 42 + i / 100 })],
+      100000 + i * 20000,
+    );
+  // Two more reports at the current position.
+  h.ingest(feed, [row(220000, 'bus', { lat: 42.05 })], 220000);
+  assert.deepEqual(
+    h.recent('mbta', 'bus', 42.05, -71).map((f) => f[0]),
+    [100000, 120000, 140000, 160000, 180000],
+  );
+  assert.deepEqual(
+    h
+      .recent('mbta', 'bus', 42.05, -71, { sinceMs: 150000, limit: 8 })
+      .map((f) => f[0]),
+    [160000, 180000],
+  );
+  assert.deepEqual(
+    h.recent('mbta', 'bus', 42.05, -71, { limit: 2 }).map((f) => f[0]),
+    [160000, 180000],
+  );
+  // A new trip starts a new stretch.
+  h.ingest(feed, [row(240000, 'bus', { lat: 42.06, tripId: 'next' })], 240000);
+  assert.deepEqual(h.recent('mbta', 'bus', 42.06, -71), []);
+  assert.deepEqual(h.recent('mbta', 'nobody', 0, 0), []);
+});

@@ -613,6 +613,58 @@ y FGC con sus colores, y regenerar los datos es ejecutar un solo comando.
   `npm run dev -- --force`. Causa probable: un segundo Vite en un worktree con
   `node_modules` enlazado comparte `node_modules/.vite`.
 
+### Correcciones antes de 5d — movimiento y estilos (2026-10-13, rama `feat/transit-es-polish`)
+
+Comentarios del usuario: los trenes nacen parados y sin rumbo, se paran en sitios
+al azar, y la red de alta velocidad no tiene el estilo del resto.
+
+**Medido** con ~10 min de los tres feeds (sondeo cada 15 s; FGC cada 60 s) y
+reproducción simulada con el código real de la capa:
+
+- Ningún feed trae rumbo, pero todos traen parada y estado.
+- **Repeticiones:** Renfe y FGC repiten la posición de un tren con hora nueva mientras
+  sigue avanzando. Leídas como fixes, dibujaban parado/salto, o se rechazaban por
+  imposibles (el salto medido desde la última repetición sale a 400+ km/h; desde la
+  primera, ~166 km/h). Cercanías tenía el 58 % del tiempo "parado" y 490 rechazos.
+- **Estados de Renfe:**
+  - Cercanías: `IN_TRANSIT_TO` es la estación que el tren DEJÓ (39/48 se alejan de ella).
+    `INCOMING_AT` trae una posición que no es la del tren (69 % a >120 km/h de la
+    última fiable, a menudo en la estación siguiente a la de destino), y la capa
+    llegaba a aceptarla al verla dos veces. `STOPPED_AT` sí está sobre la estación
+    (mediana 19 m).
+  - AV/LD/MD: `IN_TRANSIT_TO` es la próxima. `STOPPED_AT` está a 11 km de mediana de
+    su estación y se mueve: es la última servida.
+- **Arranque:** con un solo fix el tren espera a la segunda posición distinta (Cercanías
+  p50 65 s, FGC ~2 min).
+
+**Cambios** (genéricos en el registro y opcionales; los feeds de upstream no cambian):
+
+- `interpretStatus(record)` → `stopRelation` (`at`, `arriving`, `next`, `left`, `last`)
+  y `positionUntrusted`. Lo aplica el proxy. La ficha dice "left Sants" / "last stop",
+  y la capa y el historial no usan las posiciones no fiables.
+- `staleRepeats`: una posición repetida solo es un fix si el tren está parado en su
+  parada (`at`). Se compara con la última posición vista, no solo con la aceptada,
+  así que un fantasma repetido no reúne los dos votos.
+- `historyRetention` en los tres feeds. Cada snapshot lleva `recent` (≤ 8 fixes en
+  8 min, del mismo viaje), y un tren nuevo se siembra con ese tramo y empieza
+  dentro de él, con el retraso del feed. Hasta medirlo, se usan los 120 s de
+  reproducción: arrancar a solo ~30 s hacía que toda la flota esperara a la vez a
+  los 20 s.
+- `stopPlaces` → `stopLat`/`stopLon`, para dar rumbo a un tren con un solo fix: hacia
+  la próxima parada (o desde la que dejó) a lo largo de la vía (`courseAlongTrack`).
+- **Red ferroviaria:** el IGN se dibuja a 3 px, como las demás líneas, en un gris
+  único (205, 210, 220) para la vía y las estaciones sin color. Se añaden las 354
+  estaciones AV/LD/MD que no son de Cercanías.
+
+**Resultado en vivo** (servidor con historial; Madrid, 150 s): AV/LD/MD con el 70–80 %
+en marcha desde el primer segundo; Cercanías con el 40–60 % en marcha y ~40 %
+parados en estación (Renfe marca `STOPPED_AT` en casi la mitad de sus registros).
+Sin olas de espera y sin errores de página. Con el servidor recién arrancado (sin
+historial), el arranque sigue necesitando dos posiciones.
+
+**Límite conocido:** un tren de LD parado sin `STOPPED_AT` fiable deja de tener fixes
+nuevos, y a los 90 s su ficha dice "No recent fix" aunque Renfe lo siga publicando.
+
 ### Fase 6 — Ficha enriquecida (datos que llegan y no se muestran)
 
 **Objetivo.** Aprovechar los datos extra con **campos genéricos opcionales** del
