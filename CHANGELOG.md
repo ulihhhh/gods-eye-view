@@ -95,6 +95,11 @@
 
 ## [Unreleased]
 
+- Rail network (Spain) and Barcelona Arrivals get multi-select row pills,
+  kept in share links: CERCANÍAS · FGC · AV/LD · STATIONS, and METRO ·
+  TMB BUS · AMB BUS · LINES. A card about something a pill hides closes,
+  and voice answers about what the map shows.
+
 - The Barcelona arrivals layer draws the bus lines at street scale (from
   5 km, like the stops): TMB's 114 lines in their colours, from TMB's line
   list with the user's key, and AMB's 140 lines along the shape most of
