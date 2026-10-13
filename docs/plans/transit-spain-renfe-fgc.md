@@ -1,9 +1,41 @@
 # Hoja de ruta — Transporte en España (Renfe, FGC, TMB) en el fork
 
-Estado: plan de trabajo **solo para el fork** (`mi-main`), reescrito el 2026-10-12.
+Estado: plan de trabajo **solo para el fork** (`mi-main`), reescrito el 2026-10-12 y
+reordenado el 2026-10-13 (fases 6–10, tras el reanálisis de datos).
 Todo lo técnico se ha comprobado contra los feeds en vivo (incluida una observación de
 10 min) y contra el código de `upstream/main` (591f299). No quedan pendientes de
 investigación.
+
+## Cómo retomar (estado al cierre del 2026-10-13)
+
+- **Hecho y en `mi-main`** (`e1d2fcf`, subido): fases 1–5e. Todas las ramas
+  `feat/transit-es-*` están fusionadas; la siguiente fase sale de `mi-main` en una rama
+  nueva.
+- **Siguiente: Fase 6a — ficha de FGC** (ver Fase 6). Punto de partida:
+  - `src/data/fgcGeotren.js` (`decodeFgcGeotren`): hoy solo lee `lin`, `id`, `ut`,
+    `estacionat_a` y la primera de `properes_parades`. Añadir `desti`, `origen`, la lista
+    completa de paradas, `en_hora`, `ocupacio_*_percent`, `tipus_unitat` y
+    `estacionat_a` como campos genéricos opcionales del registro.
+  - Nombres de parada: el diccionario `stopNames` de FGC (`spainTransitStations.js`).
+  - Ficha: `buildTransitSelectionCopy` en `src/layers/transit/policy.js`.
+  - Horas por parada: el TU de FGC está en
+    `https://dadesobertes.fgc.cat/api/explore/v2.1/catalog/datasets/trip-updates-gtfs_realtime/files/735985017f62fd33b2fe46e31ce53829`
+    (comprobar que el id del fichero no cambia; si cambia, leerlo del endpoint
+    `.../records`).
+- **Entorno:**
+  - Tests con Node 24 de nvm (`source ~/.nvm/nvm.sh && nvm use 24`); el Node 21 del
+    sistema cuelga un test.
+  - Gates: `npm test`, `npm run format:check`, `npm run check:boundaries`. Los módulos
+    nuevos van en `scripts/package-boundaries.json` y `scripts/format-scope.json`.
+  - El `npm run dev` del usuario (puerto 4173) sirve la rama que esté activa. Al tocar
+    `server/providers/*` o `src/sources/*` se reinicia solo, y una vez dejó un 504
+    "Outdated Optimize Dep" que se arregla con `npm run dev -- --force`. Avisar antes de
+    tocar código de servidor.
+  - El panel de navegador de la app no pasa de "Initializing photorealistic world…":
+    para verificar en vivo, un script de Puppeteer con Chrome visible (`headless:
+false`; el patrón está en `scripts/qa-transit.mjs`).
+  - No meter en el repo respuestas de TMB como fixtures (licencia ligada a la app):
+    fixtures mínimos hechos a mano.
 
 ## 0. Decisiones de partida
 
