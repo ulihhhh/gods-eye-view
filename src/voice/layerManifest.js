@@ -435,6 +435,18 @@ const layers = [
     },
   },
   {
+    id: 'tmb-arrivals',
+    aliases: ['metro arrivals', 'bus arrivals', 'tmb', 'barcelona metro'],
+    context: false,
+    query: {
+      fields: {
+        name: ['t'],
+        kind: ['t'],
+        lines: ['t'],
+      },
+    },
+  },
+  {
     id: 'liveuamap',
     aliases: ['conflict map', 'live ua map'],
     context: false,

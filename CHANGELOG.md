@@ -95,6 +95,14 @@
 
 ## [Unreleased]
 
+- Add a TMB Arrivals layer for Barcelona: metro stations (from city scale)
+  and TMB bus stops (at street scale) as points; clicking one shows the next
+  trains or buses, counting down and refreshed every 15 s while the card is
+  open. Needs the TMB key from POWER UP and says so when it is missing. The
+  server keeps the station list for a day, caches each stop's arrivals for
+  15 s, builds every TMB URL itself and caps upstream arrival requests at 30
+  a minute; the key never reaches the browser.
+
 - Add FGC to the Transit layer: live trains on Barcelona's FGC lines
   (Barcelona–Vallès and Llobregat–Anoia), with the metro lines L6, L7, L8 and
   L12 shown as subway. Positions come from FGC's Geotren open data, which

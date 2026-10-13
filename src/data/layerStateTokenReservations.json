@@ -34,5 +34,6 @@
   ["aemet-uv-index", "zd"],
   ["aemet-warnings", "ze"],
   ["aemet-weather-imagery", "zf"],
-  ["liveuamap", "zg"]
+  ["liveuamap", "zg"],
+  ["tmb-arrivals", "zh"]
 ]

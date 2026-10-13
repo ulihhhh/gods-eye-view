@@ -184,6 +184,12 @@ export const DATA_CREDITS = [
       '<a href="https://opendata.aemet.es" target="_blank" rel="noopener">opendata.aemet.es</a>',
   },
   {
+    key: 'tmb',
+    html:
+      'Barcelona metro &amp; bus arrivals: © TMB (Transports Metropolitans de Barcelona) — ' +
+      '<a href="https://developer.tmb.cat" target="_blank" rel="noopener">developer.tmb.cat</a>',
+  },
+  {
     key: 'google-news-rss',
     html:
       'Cockpit regional headlines: ' +
