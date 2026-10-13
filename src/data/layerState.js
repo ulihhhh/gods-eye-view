@@ -573,7 +573,7 @@ export const LAYER_STATE_TOKEN_RESERVATIONS =
  * owns stable URL ordering.
  */
 export const LAYER_STATE_REGISTRY = Object.freeze([
-  // Fork-local layers (AEMET, liveuamap, TMB) own the `za`–`zh` block of the
+  // Fork-local layers (AEMET, liveuamap, TMB, rail) own the `za`–`zi` block of the
   // two-character namespace, which upstream allocates last. The free digits
   // they used to borrow are upstream's next allocations, so keeping them
   // here would collide with every new upstream layer.
@@ -705,6 +705,12 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
     token: 's',
     disposition: 'enabled+options',
     optionOwner: 'satellites',
+  }),
+  // Fork-local (`z*` block): Spanish rail lines and stations.
+  Object.freeze({
+    id: 'spain-rail-network',
+    token: 'zi',
+    disposition: 'enabled-only',
   }),
   Object.freeze({
     id: 'street-level',

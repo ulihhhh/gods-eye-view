@@ -6,6 +6,7 @@ import {
   TRANSIT_MAX_RETRY_AFTER_MS,
   TRANSIT_PROXY_TTL_MS,
   TransitFeedShapeError,
+  applyStopNames,
   buildTransitSnapshot,
   transitCacheState,
   transitFeedTtlMs,
@@ -118,5 +119,34 @@ test('an operator answering 429 is left alone for at least a minute', async () =
     assert.equal(calls.length, 1, 'the operator is not asked again');
   } finally {
     service.close();
+  }
+});
+
+test('a station dictionary names known stops and leaves the rest as ids', () => {
+  const names = Object.freeze({ PC: 'Pl. Catalunya', LONG: 'x'.repeat(121) });
+  const vehicles = [
+    { id: 'a', stopId: 'PC' },
+    { id: 'b', stopId: 'ZZ' },
+    { id: 'c', stopId: 'LONG' },
+    { id: 'd', stopId: 'toString' },
+    { id: 'e', stopId: '__proto__' },
+    { id: 'f' },
+  ];
+  const named = applyStopNames(vehicles, names);
+  assert.deepEqual(
+    named.map((vehicle) => vehicle.stopName ?? null),
+    ['Pl. Catalunya', null, null, null, null, null],
+  );
+  assert.equal(named[1], vehicles[1], 'an unnamed vehicle is passed through');
+  assert.equal(applyStopNames(vehicles, null), vehicles);
+});
+
+test('a feed with stopNames loads its dictionary once and names every poll', async () => {
+  const { SPAIN_TRANSIT_FEEDS } = await import('./transitFeedsSpain.js');
+  for (const feed of SPAIN_TRANSIT_FEEDS) {
+    assert.equal(typeof feed.stopNames, 'function', feed.id);
+    const names = await feed.stopNames();
+    assert.ok(Object.keys(names).length > 100, feed.id);
+    assert.equal(await feed.stopNames(), names, 'loaded once, then shared');
   }
 });

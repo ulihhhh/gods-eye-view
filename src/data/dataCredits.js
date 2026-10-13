@@ -196,6 +196,13 @@ export const DATA_CREDITS = [
       '<a href="https://www.amb.cat/web/area-metropolitana/dades-obertes" target="_blank" rel="noopener">amb.cat open data</a> (Law 37/2007)',
   },
   {
+    key: 'spain-rail-network',
+    html:
+      'Spanish rail lines &amp; stations: Renfe Operadora (' +
+      '<a href="https://data.renfe.com" target="_blank" rel="noopener">data.renfe.com</a>) and FGC (' +
+      '<a href="https://dadesobertes.fgc.cat" target="_blank" rel="noopener">dadesobertes.fgc.cat</a>), CC BY 4.0',
+  },
+  {
     key: 'bicing',
     html:
       'Bicing stations: Barcelona City Council (B:SM) — ' +

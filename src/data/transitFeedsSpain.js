@@ -8,7 +8,10 @@
  *
  * Pure data + pure helpers, like the registry itself: no Cesium, no Node
  * built-ins, and no import from `transitFeeds.js` (which imports this file).
+ * Station names come from a bundled pack, loaded only when a feed is first
+ * fetched (`stopNames`).
  */
+import { spainStationNames } from './spainTransitStations.js';
 
 /**
  * Renfe Cercanías labels are `<line>-<train>` with an optional platform
@@ -109,6 +112,7 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     defaultMode: 'rail',
     routeMode: railOnly,
     deriveRoute: renfeCercaniasRoute,
+    stopNames: () => spainStationNames('renfe-cercanias'),
   }),
   Object.freeze({
     id: 'renfe-ld',
@@ -129,6 +133,7 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     // under one train number, at positions up to kilometres apart. Cercanías
     // keeps them: it adds the line, the platform and the train's own time.
     yieldsTo: 'renfe-cercanias',
+    stopNames: () => spainStationNames('renfe-ld'),
   }),
   Object.freeze({
     id: 'fgc-geotren',
@@ -154,5 +159,6 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     terms: FGC_TERMS,
     defaultMode: 'rail',
     routeMode: fgcRouteMode,
+    stopNames: () => spainStationNames('fgc'),
   }),
 ]);

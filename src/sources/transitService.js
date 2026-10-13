@@ -141,6 +141,42 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
     return wait;
   }
 
+  /** @type {Map<string, {promise: Promise<object|null>, at: number}>} */
+  const stopNameLoads = new Map();
+
+  /**
+   * The feed's station dictionary (registry `stopNames()`), loaded once and
+   * shared. A failed load serves the snapshot without names and is retried
+   * after a minute, never on every poll.
+   * @returns {Promise<Readonly<Record<string, string>>|null>}
+   */
+  function stopNamesFor(feed, now) {
+    if (typeof feed.stopNames !== 'function') return Promise.resolve(null);
+    const known = stopNameLoads.get(feed.id);
+    if (known && (known.ok || now - known.at < 60_000)) return known.promise;
+    const load = {
+      at: now,
+      ok: false,
+      promise: Promise.resolve()
+        .then(() => feed.stopNames())
+        .then(
+          (names) => {
+            load.ok = Boolean(names);
+            return names || null;
+          },
+          (error) => {
+            console.warn(
+              `[transit] ${feed.id} station names unavailable:`,
+              error?.message || error,
+            );
+            return null;
+          },
+        ),
+    };
+    stopNameLoads.set(feed.id, load);
+    return load.promise;
+  }
+
   /**
    * Apply the registry's `yieldsTo`: drop vehicles the preferred feed reported
    * in its latest cached snapshot (fresh or serve-stale). Before that feed has
@@ -214,9 +250,10 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
         response,
         TRANSIT_PROXY_MAX_BODY_BYTES,
       );
+      const stopNames = await stopNamesFor(feed, now);
       const snapshot = yieldShared(
         feed,
-        buildTransitSnapshot(feed, bytes, now),
+        buildTransitSnapshot(feed, bytes, now, { stopNames }),
       );
       if (closed) throw new Error('Transit provider closed');
       history.ingest(feed, snapshot.vehicles, Date.now());

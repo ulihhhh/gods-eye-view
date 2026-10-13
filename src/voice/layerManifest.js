@@ -453,6 +453,12 @@ const layers = [
     },
   },
   {
+    id: 'spain-rail-network',
+    aliases: ['rail network', 'train lines', 'cercanias lines', 'rodalies'],
+    context: false,
+    noQuery: 'static line and station geometry; no live records',
+  },
+  {
     id: 'liveuamap',
     aliases: ['conflict map', 'live ua map'],
     context: false,

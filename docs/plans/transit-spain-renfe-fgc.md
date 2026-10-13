@@ -504,6 +504,70 @@ Todos los `stopId` de Renfe en tiempo real que se probaron existen en sus GTFS.
 **Hecho cuando** la ficha nombra las estaciones, se ven las líneas de Cercanías/Rodalies
 y FGC con sus colores, y regenerar los datos es ejecutar un solo comando.
 
+**Subfases** (decidido al empezar, 2026-10-13; rama `feat/transit-es-network`):
+
+- **5a — Diccionario de estaciones y nombres en la ficha** — ✅ hecho 2026-10-13.
+- **5b —** trazado de Cercanías/Rodalies y FGC con color oficial, y marcadores de
+  estación a escala de calle.
+- **5c —** red de larga distancia del IGN.
+- **5d —** geometría de TMB y AMB, servida por el servidor (TMB, por clave y licencia;
+  AMB, porque su licencia no permite alterar el contenido).
+
+**Resultado 5a:**
+
+- **Script** `scripts/build-spain-transit-network.mjs`: un solo comando, con
+  `--from DIR` para usar descargas locales. Escribe
+  `src/data/local_data/spain_transit/stations.json` (97 KB) y su `SOURCE.md`:
+  - Renfe Cercanías: 1.151 estaciones; Renfe AV/LD/MD: 1.006;
+  - FGC: 110 iniciales de Geotren, 98 con coordenadas. Las 12 sin punto son
+    funiculares y cremalleras, que el GTFS de FGC no trae.
+  - Lee los zips con el `readZipEntries` del proxy AMB. El parser CSV pasa a un módulo
+    compartido, `src/data/gtfsCsv.js`.
+- **Enganche genérico** `stopNames` en el registro (`() => Promise<{stopId: name}>`):
+  - `transitService` carga el diccionario una vez por feed; si falla, sirve sin nombres
+    y reintenta al minuto;
+  - `buildTransitSnapshot(…, {stopNames})` añade `stopName` con `applyStopNames`
+    (máximo 120 caracteres, solo propiedades propias);
+  - la ficha dice "stopped at Sarrià" / "next stop Pl. Catalunya". Sin nombre conserva
+    "stop SR".
+  - Las filas de España usan `spainStationNames(network)`
+    (`src/data/spainTransitStations.js`, `loadBundledJson`).
+- **En vivo:**
+  - Cercanías: 293/293 trenes con nombre. LD: todos los que traen parada. FGC: 61/61.
+  - Ficha real: "🚇 Route L6 … Last report: next stop Pl. Catalunya".
+  - `qa:transit` (Barcelona, sección de ciudades) pasa.
+- **Validación:** `npm test` da 6.571 tests, 0 fallos. Pasan boundaries y build.
+- **Resultado 5b (2026-10-13):**
+  - El script también escribe `lines.json` (295 KB, por debajo del presupuesto de
+    600 KB): 72 líneas de Cercanías/Rodalies en 15 núcleos y 19 de FGC, con 16.569
+    puntos tras Douglas–Peucker a 10 m. De Cercanías se dibuja un sentido por línea (se
+    descarta `_INV`); FGC sale de `gtfs_routes`, que trae geometría y color.
+  - **Capa nueva del fork** "Rail network (Spain)" (`spain-rail-network`, token
+    **`zi`**, `src/data/spainRailNetworkLayer.js`). Las vías no van en la capa Transit:
+    se pueden ver sin trenes y no toca código de upstream.
+    - Líneas: un solo `GroundPolylinePrimitive` con color por instancia (3 px, a ras de
+      suelo, `ClassificationType.BOTH`), el mismo primitivo que upstream usa para
+      estelas y tráfico.
+    - Estaciones: 1.249 puntos (Cercanías y FGC con coordenadas), visibles a ≤ 8 km y
+      dibujados sobre el mesh 3D hasta esa misma distancia.
+    - Al pulsar una línea o una estación sale una ficha ("🛤 R2 · Rodalies de
+      Catalunya · line", "🚉 Barcelona-Sants · Renfe Cercanías station · 71801"). No se
+      usan etiquetas de Cesium (upstream las prohíbe por test).
+    - Nombres de núcleo por prefijo: 45 Cartagena, 46 Ferrol y 47 León son las redes de
+      ancho métrico (deducido por geografía).
+  - **Datos de origen tal cual:** FGC publica S9 y L8 con la misma geometría (salen
+    fusionadas), el Montserrat (MM) sin color (gris neutro), y la R1 de Rodalies con dos
+    colores en `routes.txt` (se queda el más frecuente, `094188`).
+  - **En vivo:** Barcelona a 45 km muestra todas las líneas de Rodalies y FGC con su
+    color, y la vista de España, todos los núcleos. El clic en Sants abre su ficha. Sin
+    errores de página.
+  - **Pins del fork:** catálogo 38 → 39; `REGISTERED_LAYER_IDS` 37 → 38; ledger 38
+    reservas, "39 published" y `l` de 96; esquema de voz 30819 más sus hashes.
+- **Incidencia:** se rompió la caché de dependencias de Vite de un servidor de desarrollo
+  (504 "Outdated Optimize Dep" en `cesium.js`), y la app no arrancaba. Se arregla con
+  `npm run dev -- --force`. Causa probable: un segundo Vite en un worktree con
+  `node_modules` enlazado comparte `node_modules/.vite`.
+
 ### Fase 6 — Ficha enriquecida (datos que llegan y no se muestran)
 
 **Objetivo.** Aprovechar los datos extra con **campos genéricos opcionales** del
