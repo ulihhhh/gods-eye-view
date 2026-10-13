@@ -243,10 +243,11 @@ export function normalizeAmbStopsPayload(payload) {
 
 /**
  * Every place the layer draws, keyed by entity id. TMB's stops win where
- * AMB lists the same stop code; AMB's fill in everywhere else.
+ * AMB lists the same stop code (`alsoAmb`); AMB's fill in everywhere else.
  * @param {{metro: object[], bus: object[]}|null} tmb
  * @param {object[]|null} amb
- * @returns {Map<string, {kind: 'metro'|'bus'|'amb', place: object}>}
+ * @returns {Map<string, {kind: 'metro'|'bus'|'amb', place: object,
+ *   alsoAmb?: boolean}>}
  */
 export function mergeArrivalPlaces(tmb, amb) {
   const places = new Map();
@@ -256,10 +257,73 @@ export function mergeArrivalPlaces(tmb, amb) {
   }
   const tmbStops = new Set((tmb?.bus || []).map((stop) => stop.id));
   for (const stop of amb || []) {
-    if (tmbStops.has(String(Number(stop.id)))) continue;
+    const code = String(Number(stop.id));
+    if (tmbStops.has(code)) {
+      places.get(tmbPlaceEntityId('bus', code)).alsoAmb = true;
+      continue;
+    }
     places.set(tmbPlaceEntityId('amb', stop.id), { kind: 'amb', place: stop });
   }
   return places;
+}
+
+/**
+ * What the row's pills switch: metro stations, TMB bus stops, AMB bus stops,
+ * and the drawn routes (metro and bus) apart from their stops.
+ */
+export const TMB_ARRIVALS_DEFAULT_PARAMS = Object.freeze({
+  metro: true,
+  tmbBus: true,
+  ambBus: true,
+  lines: true,
+});
+
+const TMB_ARRIVALS_CHIPS = Object.freeze([
+  Object.freeze({ key: 'metro', label: 'METRO', title: 'TMB metro' }),
+  Object.freeze({ key: 'tmbBus', label: 'TMB BUS', title: 'TMB buses' }),
+  Object.freeze({
+    key: 'ambBus',
+    label: 'AMB BUS',
+    title: 'AMB metropolitan buses',
+  }),
+  Object.freeze({
+    key: 'lines',
+    label: 'LINES',
+    title: 'Metro and bus routes (stops stay)',
+  }),
+]);
+
+/**
+ * Whether the pills show a place. A stop both operators serve is drawn as
+ * TMB's and stays while either bus pill is on.
+ * @param {{kind: string, alsoAmb?: boolean}} entry
+ * @param {typeof TMB_ARRIVALS_DEFAULT_PARAMS} params
+ * @returns {boolean}
+ */
+export function tmbPlaceShown(entry, params) {
+  if (entry?.kind === 'metro') return params.metro;
+  if (entry?.kind === 'bus')
+    return params.tmbBus || (Boolean(entry.alsoAmb) && params.ambBus);
+  return entry?.kind === 'amb' && params.ambBus;
+}
+
+/**
+ * The row's pills, each switching on its own.
+ * @param {typeof TMB_ARRIVALS_DEFAULT_PARAMS} params
+ * @returns {{chips: object[], legend: object[]}}
+ */
+export function tmbArrivalsRowControls(params) {
+  return {
+    chips: TMB_ARRIVALS_CHIPS.map(({ key, label, title }) => ({
+      id: key,
+      label,
+      active: params[key],
+      state: params[key] ? 'active' : 'idle',
+      title,
+      params: { [key]: !params[key] },
+    })),
+    legend: [],
+  };
 }
 
 /**
@@ -350,28 +414,60 @@ export function createTmbArrivalsLayer({
   let _clickHandler = null;
   /** @type {Cesium.GroundPolylinePrimitive|null} metro line geometry */
   let _linesPrimitive = null;
-  /** @type {Cesium.GroundPolylinePrimitive|null} bus route geometry */
-  let _busLinesPrimitive = null;
-  /** Server fetch times of the bus routes drawn, to skip identical redraws. */
-  let _busLinesKey = null;
+  /** Bus route geometry per operator, and the server fetch time drawn. */
+  const _busLines = {
+    tmb: { primitive: null, key: null },
+    amb: { primitive: null, key: null },
+  };
+  let _params = { ...TMB_ARRIVALS_DEFAULT_PARAMS };
 
-  function _removeBusLines() {
-    if (_busLinesPrimitive && _viewer?.scene?.groundPrimitives)
-      _viewer.scene.groundPrimitives.remove(_busLinesPrimitive);
-    _busLinesPrimitive = null;
-    _busLinesKey = null;
+  function _removeBusLines(operator) {
+    for (const name of operator ? [operator] : ['tmb', 'amb']) {
+      const slot = _busLines[name];
+      if (slot.primitive && _viewer?.scene?.groundPrimitives)
+        _viewer.scene.groundPrimitives.remove(slot.primitive);
+      slot.primitive = null;
+      slot.key = null;
+    }
+  }
+
+  /** Apply the layer switch and the pills to every primitive and place. */
+  function _applyVisibility() {
+    if (_linesPrimitive)
+      _linesPrimitive.show = _enabled && _params.metro && _params.lines;
+    if (_busLines.tmb.primitive)
+      _busLines.tmb.primitive.show =
+        _enabled && _params.tmbBus && _params.lines;
+    if (_busLines.amb.primitive)
+      _busLines.amb.primitive.show =
+        _enabled && _params.ambBus && _params.lines;
+    if (_dataSource) {
+      _dataSource.entities.suspendEvents();
+      for (const entity of _dataSource.entities.values) {
+        const entry = _places.get(entity.id);
+        entity.show = Boolean(entry && tmbPlaceShown(entry, _params));
+      }
+      _dataSource.entities.resumeEvents();
+    }
+    // A card about a place the pills just hid closes with it.
+    if (_selection) {
+      const entry = _places.get(_selection.entityId);
+      if (!entry || !tmbPlaceShown(entry, _params)) _clearSelection();
+    }
   }
 
   /**
-   * TMB's and AMB's bus routes on the ground in their line colours, shown
+   * One operator's bus routes on the ground in their line colours, shown
    * only at street scale (the bus stops' distance), in pieces so they
    * appear around the camera. Not pickable: a click belongs to the stops.
+   * @param {'tmb'|'amb'} operator
    * @param {object[]} lines
-   * @param {string} key
+   * @param {number|null} key Server fetch time.
    */
-  function _drawBusLines(lines, key) {
-    if (key === _busLinesKey && _busLinesPrimitive) return;
-    _removeBusLines();
+  function _drawBusLines(operator, lines, key) {
+    const slot = _busLines[operator];
+    if (key !== null && key === slot.key && slot.primitive) return;
+    _removeBusLines(operator);
     if (!lines.length || !_viewer?.scene?.groundPrimitives) return;
     let supported = false;
     try {
@@ -405,20 +501,21 @@ export function createTmbArrivalsLayer({
         }
       }
     }
-    _busLinesPrimitive = _viewer.scene.groundPrimitives.add(
+    slot.primitive = _viewer.scene.groundPrimitives.add(
       new Cesium.GroundPolylinePrimitive({
         geometryInstances: instances,
         appearance: new Cesium.PolylineColorAppearance(),
         classificationType: Cesium.ClassificationType.BOTH,
         allowPicking: false,
         asynchronous: true,
-        show: _enabled,
+        show: false, // _applyVisibility decides
       }),
     );
-    _busLinesKey = key;
+    slot.key = key;
     // The metro stays on top of the bus routes that arrive after it.
     if (_linesPrimitive)
       _viewer.scene.groundPrimitives.raiseToTop?.(_linesPrimitive);
+    _applyVisibility();
   }
 
   let _busLinesRequest = null;
@@ -430,10 +527,8 @@ export function createTmbArrivalsLayer({
     ])
       .then(([tmbBus, ambBus]) => {
         if (!_viewer) return;
-        _drawBusLines(
-          [...ambBus.lines, ...tmbBus.lines],
-          `${ambBus.fetchedAt}/${tmbBus.fetchedAt}`,
-        );
+        _drawBusLines('amb', ambBus.lines, ambBus.fetchedAt);
+        _drawBusLines('tmb', tmbBus.lines, tmbBus.fetchedAt);
       })
       .finally(() => {
         _busLinesRequest = null;
@@ -745,8 +840,7 @@ export function createTmbArrivalsLayer({
     enable(viewer) {
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
-      if (_linesPrimitive) _linesPrimitive.show = true;
-      if (_busLinesPrimitive) _busLinesPrimitive.show = true;
+      _applyVisibility();
       overlayHost.setVisible(TMB_ARRIVALS_SELECTED_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer);
       registerPickOwner(LAYER_ID, (pickedId) =>
@@ -758,8 +852,7 @@ export function createTmbArrivalsLayer({
       _enabled = false;
       _clearSelection();
       if (_dataSource) _dataSource.show = false;
-      if (_linesPrimitive) _linesPrimitive.show = false;
-      if (_busLinesPrimitive) _busLinesPrimitive.show = false;
+      _applyVisibility();
       overlayHost.setVisible(TMB_ARRIVALS_SELECTED_OVERLAY_SOURCE_ID, false);
       _removeClickHandler();
       unregisterPickOwner(LAYER_ID);
@@ -787,6 +880,7 @@ export function createTmbArrivalsLayer({
       for (const entity of entities) _dataSource.entities.add(entity);
       _dataSource.entities.resumeEvents();
       if (tmb.catalog) _drawMetroLines(tmb.catalog.lines);
+      _applyVisibility();
       if (_selection) {
         const still = _places.get(_selection.entityId);
         if (still) {
@@ -836,8 +930,10 @@ export function createTmbArrivalsLayer({
         ? Math.max(1, Math.floor(maxCount))
         : 200;
       const result = [];
-      for (const { kind, place } of _places.values()) {
+      for (const entry of _places.values()) {
         if (result.length >= limit) break;
+        if (!tmbPlaceShown(entry, _params)) continue; // what the map shows
+        const { kind, place } = entry;
         result.push({
           id: place.id,
           name: place.name,
@@ -852,6 +948,30 @@ export function createTmbArrivalsLayer({
 
     getStats() {
       return { count: _count, lastUpdate: _lastUpdate, error: _lastError };
+    },
+
+    /**
+     * `{metro, tmbBus, ambBus, lines}` booleans, from the row's pills or a
+     * share link. Any subset may be given; unknown keys are ignored.
+     */
+    setParams(params = {}) {
+      let changed = false;
+      for (const key of Object.keys(TMB_ARRIVALS_DEFAULT_PARAMS)) {
+        if (params[key] === undefined) continue;
+        const next = params[key] !== false;
+        if (_params[key] !== next) changed = true;
+        _params[key] = next;
+      }
+      if (changed) _applyVisibility();
+      return true;
+    },
+
+    getParams() {
+      return { ..._params };
+    },
+
+    getRowControls() {
+      return tmbArrivalsRowControls(_params);
     },
 
     // Test-only hooks: drive the real selection state machine without a

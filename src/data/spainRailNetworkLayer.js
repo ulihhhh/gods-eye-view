@@ -204,6 +204,71 @@ export function spainRailStationRgb(station) {
   return colours.size > 1 ? INTERCHANGE_RGB : NETWORK_RGB;
 }
 
+/**
+ * The networks a row pill switches: Cercanías / Rodalies, FGC, and the
+ * national network (IGN track and the AV/LD/MD stations). `stations` hides
+ * or shows every station point of the networks that are on.
+ */
+export const SPAIN_RAIL_DEFAULT_PARAMS = Object.freeze({
+  cercanias: true,
+  fgc: true,
+  national: true,
+  stations: true,
+});
+
+const SPAIN_RAIL_CHIPS = Object.freeze([
+  Object.freeze({
+    key: 'cercanias',
+    label: 'CERCANÍAS',
+    title: 'Renfe Cercanías / Rodalies lines and stations',
+  }),
+  Object.freeze({
+    key: 'fgc',
+    label: 'FGC',
+    title: 'FGC lines and stations',
+  }),
+  Object.freeze({
+    key: 'national',
+    label: 'AV/LD',
+    title: 'National rail network (IGN) and AV/LD/MD stations',
+  }),
+  Object.freeze({
+    key: 'stations',
+    label: 'STATIONS',
+    title: 'Station points',
+  }),
+]);
+
+/**
+ * Which pill owns a line or a station: `cercanias`, `fgc` or `national`.
+ * @param {{network?: string}} item
+ * @returns {'cercanias'|'fgc'|'national'}
+ */
+export function spainRailGroup(item) {
+  if (item?.network === 'fgc') return 'fgc';
+  if (item?.network === 'renfe-ld') return 'national';
+  return 'cercanias';
+}
+
+/**
+ * The row's pills, one per network plus STATIONS, each switching on its own.
+ * @param {typeof SPAIN_RAIL_DEFAULT_PARAMS} params
+ * @returns {{chips: object[], legend: object[]}}
+ */
+export function spainRailRowControls(params) {
+  return {
+    chips: SPAIN_RAIL_CHIPS.map(({ key, label, title }) => ({
+      id: key,
+      label,
+      active: params[key],
+      state: params[key] ? 'active' : 'idle',
+      title,
+      params: { [key]: !params[key] },
+    })),
+    legend: [],
+  };
+}
+
 /** Entity / instance ids: `spain-rail-network:line:<n>`, `…:station:<id>`. */
 export function parseSpainRailPickId(pickedId) {
   const match =
@@ -256,10 +321,15 @@ export function createSpainRailNetworkLayer({
 } = {}) {
   let _viewer = null;
   let _dataSource = null;
-  /** @type {Cesium.GroundPolylinePrimitive|null} */
-  let _linesPrimitive = null;
-  /** @type {Cesium.GroundPolylinePrimitive|null} */
-  let _ignPrimitive = null;
+  /**
+   * One ground-polyline primitive per network, so a pill switches it
+   * without rebuilding anything.
+   * @type {{national: Cesium.GroundPolylinePrimitive|null,
+   *   cercanias: Cesium.GroundPolylinePrimitive|null,
+   *   fgc: Cesium.GroundPolylinePrimitive|null}}
+   */
+  const _primitives = { national: null, cercanias: null, fgc: null };
+  let _params = { ...SPAIN_RAIL_DEFAULT_PARAMS };
   let _lines = [];
   let _ignPaths = [];
   /** @type {Map<string, object>} station id → station */
@@ -386,12 +456,44 @@ export function createSpainRailNetworkLayer({
   }
 
   function _removeLines() {
-    for (const primitive of [_ignPrimitive, _linesPrimitive]) {
-      if (primitive && _viewer)
-        _viewer.scene.groundPrimitives.remove(primitive);
+    for (const group of Object.keys(_primitives)) {
+      if (_primitives[group] && _viewer)
+        _viewer.scene.groundPrimitives.remove(_primitives[group]);
+      _primitives[group] = null;
     }
-    _linesPrimitive = null;
-    _ignPrimitive = null;
+  }
+
+  /** Apply the layer switch and the pills to every primitive and station. */
+  function _applyVisibility() {
+    for (const [group, primitive] of Object.entries(_primitives))
+      if (primitive) primitive.show = _enabled && _params[group];
+    if (_dataSource) {
+      _dataSource.entities.suspendEvents();
+      for (const entity of _dataSource.entities.values) {
+        const station = _stations.get(
+          parseSpainRailPickId(entity.id)?.key ?? '',
+        );
+        entity.show = Boolean(
+          station && _params.stations && _params[spainRailGroup(station)],
+        );
+      }
+      _dataSource.entities.resumeEvents();
+    }
+    // A card about something the pills just hid closes with it.
+    const selected = parseSpainRailPickId(_selectedKey);
+    if (selected) {
+      const item =
+        selected.kind === 'station'
+          ? _stations.get(selected.key)
+          : selected.kind === 'line'
+            ? _lines[Number(selected.key)]
+            : { network: 'renfe-ld' };
+      const shown =
+        selected.kind === 'station'
+          ? _params.stations && _params[spainRailGroup(item)]
+          : _params[spainRailGroup(item)];
+      if (!shown) _clearSelection();
+    }
   }
 
   function _groundPolylines(instances) {
@@ -401,7 +503,7 @@ export function createSpainRailNetworkLayer({
         appearance: new Cesium.PolylineColorAppearance(),
         classificationType: Cesium.ClassificationType.BOTH,
         asynchronous: true,
-        show: _enabled,
+        show: false, // _applyVisibility decides
       }),
     );
   }
@@ -425,7 +527,7 @@ export function createSpainRailNetworkLayer({
       const color = Cesium.ColorGeometryInstanceAttribute.fromColor(
         Cesium.Color.fromBytes(...NETWORK_RGB, 235),
       );
-      _ignPrimitive = _groundPolylines(
+      _primitives.national = _groundPolylines(
         _ignPaths.map(
           (path, index) =>
             new Cesium.GeometryInstance({
@@ -439,14 +541,14 @@ export function createSpainRailNetworkLayer({
         ),
       );
     }
-    const instances = [];
+    const instances = { cercanias: [], fgc: [] };
     _lines.forEach((line, index) => {
       const [r, g, b] = spainRailLineRgb(line);
       const color = Cesium.ColorGeometryInstanceAttribute.fromColor(
         Cesium.Color.fromBytes(r, g, b, 235),
       );
       for (const path of line.paths) {
-        instances.push(
+        instances[spainRailGroup(line)].push(
           new Cesium.GeometryInstance({
             id: `${LAYER_ID}:line:${index}`,
             geometry: new Cesium.GroundPolylineGeometry({
@@ -458,7 +560,10 @@ export function createSpainRailNetworkLayer({
         );
       }
     });
-    _linesPrimitive = _groundPolylines(instances);
+    for (const group of ['cercanias', 'fgc'])
+      if (instances[group].length)
+        _primitives[group] = _groundPolylines(instances[group]);
+    _applyVisibility();
   }
 
   function _buildStations(stations) {
@@ -490,6 +595,7 @@ export function createSpainRailNetworkLayer({
       );
     }
     _dataSource.entities.resumeEvents();
+    _applyVisibility();
   }
 
   const layer = {
@@ -511,8 +617,7 @@ export function createSpainRailNetworkLayer({
     enable(viewer) {
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
-      if (_linesPrimitive) _linesPrimitive.show = true;
-      if (_ignPrimitive) _ignPrimitive.show = true;
+      _applyVisibility();
       overlayHost.setVisible(SPAIN_RAIL_SELECTED_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer);
       registerPickOwner(LAYER_ID, (pickedId) =>
@@ -524,8 +629,7 @@ export function createSpainRailNetworkLayer({
       _enabled = false;
       _clearSelection();
       if (_dataSource) _dataSource.show = false;
-      if (_linesPrimitive) _linesPrimitive.show = false;
-      if (_ignPrimitive) _ignPrimitive.show = false;
+      _applyVisibility();
       overlayHost.setVisible(SPAIN_RAIL_SELECTED_OVERLAY_SOURCE_ID, false);
       _removeClickHandler();
       unregisterPickOwner(LAYER_ID);
@@ -587,6 +691,30 @@ export function createSpainRailNetworkLayer({
 
     getStats() {
       return { count: _count, lastUpdate: _lastUpdate, error: _lastError };
+    },
+
+    /**
+     * `{cercanias, fgc, national, stations}` booleans, from the row's pills
+     * or a share link. Any subset may be given; unknown keys are ignored.
+     */
+    setParams(params = {}) {
+      let changed = false;
+      for (const key of Object.keys(SPAIN_RAIL_DEFAULT_PARAMS)) {
+        if (params[key] === undefined) continue;
+        const next = params[key] !== false;
+        if (_params[key] !== next) changed = true;
+        _params[key] = next;
+      }
+      if (changed) _applyVisibility();
+      return true;
+    },
+
+    getParams() {
+      return { ..._params };
+    },
+
+    getRowControls() {
+      return spainRailRowControls(_params);
     },
 
     // Test-only hooks.

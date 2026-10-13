@@ -457,6 +457,19 @@ const OPTION_GROUPS = Object.freeze({
     booleanOption('showFields', 'f', true),
     booleanOption('verifiedOnly', 'v', false),
   ]),
+  // Fork-local: the row pills of the two Spanish transit layers.
+  'spain-rail-network': Object.freeze([
+    booleanOption('cercanias', 'c', true),
+    booleanOption('fgc', 'f', true),
+    booleanOption('national', 'n', true),
+    booleanOption('stations', 's', true),
+  ]),
+  'tmb-arrivals': Object.freeze([
+    booleanOption('metro', 'm', true),
+    booleanOption('tmbBus', 'b', true),
+    booleanOption('ambBus', 'a', true),
+    booleanOption('lines', 'l', true),
+  ]),
 });
 
 export const SHARE_TRACKING_RESTORE_POLICIES = Object.freeze({
@@ -710,7 +723,8 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({
     id: 'spain-rail-network',
     token: 'zi',
-    disposition: 'enabled-only',
+    disposition: 'enabled+options',
+    optionOwner: 'spain-rail-network',
   }),
   Object.freeze({
     id: 'street-level',
@@ -727,7 +741,8 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({
     id: 'tmb-arrivals',
     token: 'zh',
-    disposition: 'enabled-only',
+    disposition: 'enabled+options',
+    optionOwner: 'tmb-arrivals',
   }),
   Object.freeze({
     id: 'traffic',

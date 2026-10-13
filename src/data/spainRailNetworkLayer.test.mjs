@@ -14,6 +14,8 @@ import {
   spainRailNetworkLabel,
   spainRailStationRgb,
   spainRailStationsFromPack,
+  spainRailGroup,
+  SPAIN_RAIL_DEFAULT_PARAMS,
 } from './spainRailNetworkLayer.js';
 import { loadBundledJson } from './bundledJson.js';
 import { isOwnedByOtherLayer } from './pickRegistry.js';
@@ -295,4 +297,89 @@ test('stations take their line colour, white at interchanges, slate on no line',
     'Lines: L6 S1',
     'Source: FGC open data',
   ]);
+});
+
+test('the pills switch Cercanías, FGC, the national network and the stations on their own', async () => {
+  assert.equal(spainRailGroup({ network: 'fgc' }), 'fgc');
+  assert.equal(spainRailGroup({ network: 'renfe-ld' }), 'national');
+  assert.equal(spainRailGroup({ network: 'renfe-cercanias' }), 'cercanias');
+  const layer = createSpainRailNetworkLayer({
+    overlayHost: { setEntries() {}, setVisible() {}, clearSource() {} },
+    loadJson: async (url) => {
+      const name = url.pathname.split('/').pop();
+      if (name === 'ign_rail.json') return { paths: [[-3, 40, -2.9, 40.1]] };
+      return name === 'lines.json' ? LINES : STATIONS;
+    },
+  });
+  const viewer = fakeViewer();
+  try {
+    layer.init(viewer);
+    layer.enable(viewer);
+    assert.equal(await layer.update(), true);
+    const chips = layer.getRowControls().chips;
+    assert.deepEqual(
+      chips.map((chip) => [chip.label, chip.active]),
+      [
+        ['CERCANÍAS', true],
+        ['FGC', true],
+        ['AV/LD', true],
+        ['STATIONS', true],
+      ],
+    );
+    const shown = () =>
+      viewer._dataSources[0].entities.values
+        .filter((entity) => entity.show)
+        .map((entity) => entity.id.split(':').slice(2).join(':'))
+        .sort();
+    assert.deepEqual(shown(), [
+      'fgc:PC',
+      'renfe-cercanias:71801',
+      'renfe-ld:60911',
+    ]);
+    assert.equal(
+      layer._selectForTest('spain-rail-network:station:fgc:PC'),
+      true,
+    );
+    layer.setParams({ fgc: false, national: false });
+    assert.deepEqual(shown(), ['renfe-cercanias:71801']);
+    assert.equal(layer._selectedKeyForTest(), null, 'the FGC card closed');
+    layer.setParams({ stations: false });
+    assert.deepEqual(shown(), []);
+    assert.deepEqual(layer.getParams(), {
+      ...SPAIN_RAIL_DEFAULT_PARAMS,
+      fgc: false,
+      national: false,
+      stations: false,
+    });
+    assert.deepEqual(layer.getRowControls().chips[3].params, {
+      stations: true,
+    });
+  } finally {
+    layer.destroy(viewer);
+  }
+});
+
+test('the pills of both Spanish layers travel in a share link', async () => {
+  const {
+    createDefaultLayerState,
+    encodeLayerStateParams,
+    decodeLayerStateParams,
+  } = await import('./layerState.js');
+  const state = createDefaultLayerState();
+  state.enabledLayerIds = ['spain-rail-network', 'tmb-arrivals'];
+  state.options['spain-rail-network'].fgc = false;
+  state.options['tmb-arrivals'].lines = false;
+  const params = encodeLayerStateParams(new URLSearchParams('v=2'), state);
+  const options = params.get('lo').split('_');
+  assert.ok(options.includes('zi.f.0'), params.get('lo'));
+  assert.ok(options.includes('zh.l.0'), params.get('lo'));
+  assert.equal(
+    options.filter((option) => /^z[hi]\./.test(option)).length,
+    2,
+    'defaults are left out',
+  );
+  const decoded = decodeLayerStateParams(params);
+  assert.equal(decoded.options['spain-rail-network'].fgc, false);
+  assert.equal(decoded.options['spain-rail-network'].cercanias, true);
+  assert.equal(decoded.options['tmb-arrivals'].lines, false);
 });

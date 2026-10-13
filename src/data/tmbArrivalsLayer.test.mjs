@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
 import {
+  TMB_ARRIVALS_DEFAULT_PARAMS,
   TMB_ARRIVALS_SELECTED_OVERLAY_SOURCE_ID,
   TMB_BUS_MAX_DISTANCE_M,
   TMB_CARD_REFRESH_MS,
@@ -15,6 +16,7 @@ import {
   splitPathIntoPieces,
   tmbPlaceColorRgb,
   tmbPlaceEntityId,
+  tmbPlaceShown,
 } from './tmbArrivalsLayer.js';
 import { isOwnedByOtherLayer } from './pickRegistry.js';
 
@@ -433,6 +435,67 @@ test('bus routes are validated, cut into pieces, and never hold up the stops', a
   try {
     assert.equal(await h.layer.update(), true);
     assert.ok(h.viewer._dataSources[0].entities.values.length > 0);
+  } finally {
+    h.layer.destroy(h.viewer);
+  }
+});
+
+test('the pills switch metro, each bus operator and the routes on their own', async () => {
+  const places = mergeArrivalPlaces(CATALOG, [
+    { id: '000108', name: 'Plaça B', lat: 41.37, lon: 2.15 },
+    { id: '100005', name: 'Escola', lat: 41.36, lon: 2.09 },
+  ]);
+  assert.equal(places.get('tmb-arrivals:bus:108').alsoAmb, true);
+  const shown = (params) =>
+    [...places]
+      .filter(([, entry]) =>
+        tmbPlaceShown(entry, { ...TMB_ARRIVALS_DEFAULT_PARAMS, ...params }),
+      )
+      .map(([id]) => id)
+      .sort();
+  assert.deepEqual(shown({ metro: false, ambBus: false }), [
+    'tmb-arrivals:bus:108',
+  ]);
+  assert.deepEqual(
+    shown({ metro: false, tmbBus: false }),
+    ['tmb-arrivals:amb:100005', 'tmb-arrivals:bus:108'],
+    'a stop AMB also serves stays for the AMB pill',
+  );
+  assert.deepEqual(shown({ tmbBus: false, ambBus: false }), [
+    'tmb-arrivals:metro:6660100',
+  ]);
+
+  const h = harness(() => json(200, CATALOG));
+  try {
+    assert.equal(await h.layer.update(), true);
+    const chips = h.layer.getRowControls().chips;
+    assert.deepEqual(
+      chips.map((chip) => [chip.label, chip.active]),
+      [
+        ['METRO', true],
+        ['TMB BUS', true],
+        ['AMB BUS', true],
+        ['LINES', true],
+      ],
+    );
+    assert.deepEqual(chips[0].params, { metro: false }, 'a click flips one');
+    h.layer._selectPlaceForTest('tmb-arrivals:metro:6660100');
+    assert.ok(h.layer._selectionForTest());
+    assert.equal(h.layer.setParams(chips[0].params), true);
+    assert.deepEqual(h.layer.getParams(), {
+      ...TMB_ARRIVALS_DEFAULT_PARAMS,
+      metro: false,
+    });
+    const entities = h.viewer._dataSources[0].entities;
+    assert.equal(entities.getById('tmb-arrivals:metro:6660100').show, false);
+    assert.equal(entities.getById('tmb-arrivals:bus:108').show, true);
+    assert.equal(h.layer._selectionForTest(), null, 'its card closes');
+    assert.equal(h.layer.getRowControls().chips[0].active, false);
+    assert.deepEqual(
+      h.layer.getAnalystRecords().map((record) => record.kind),
+      ['bus'],
+      'voice answers about what the map shows',
+    );
   } finally {
     h.layer.destroy(h.viewer);
   }
