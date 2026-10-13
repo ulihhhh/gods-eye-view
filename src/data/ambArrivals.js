@@ -98,6 +98,75 @@ export function buildAmbTrips(tripsCsv) {
   return trips;
 }
 
+/**
+ * Each line's route on the map, from the static GTFS: per line and
+ * direction the shape most of its trips follow, as AMB publishes it (points
+ * kept, rounded to 6 decimals, ~0.1 m), with the line's name, description
+ * and colour. Lines without a shape are left out.
+ * @param {{shapesCsv: string, tripsCsv: string, routesCsv: string}} files
+ * @returns {Array<{name: string, desc: string, color: string|null,
+ *   paths: number[][]}>} In line-name order.
+ */
+export function buildAmbLines({ shapesCsv, tripsCsv, routesCsv }) {
+  // Trips per shape, per line and direction.
+  const usage = new Map();
+  for (const row of parseCsv(tripsCsv)) {
+    const routeId = row.route_id?.trim();
+    const shapeId = row.shape_id?.trim();
+    if (!routeId || !shapeId) continue;
+    const key = `${routeId}\u0000${row.direction_id?.trim() || ''}`;
+    if (!usage.has(key)) usage.set(key, new Map());
+    const counts = usage.get(key);
+    counts.set(shapeId, (counts.get(shapeId) || 0) + 1);
+  }
+  const chosen = new Map(); // shapeId → the route ids drawn along it
+  for (const [key, counts] of usage) {
+    const [shapeId] = [...counts].sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+    )[0];
+    if (!chosen.has(shapeId)) chosen.set(shapeId, new Set());
+    chosen.get(shapeId).add(key.split('\u0000')[0]);
+  }
+  const points = new Map(); // shapeId → [[sequence, lon, lat]]
+  for (const row of parseCsv(shapesCsv)) {
+    const shapeId = row.shape_id?.trim();
+    if (!chosen.has(shapeId)) continue;
+    const lat = row.shape_pt_lat?.trim() ? Number(row.shape_pt_lat) : NaN;
+    const lon = row.shape_pt_lon?.trim() ? Number(row.shape_pt_lon) : NaN;
+    const sequence = Number(row.shape_pt_sequence);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
+    if (!Number.isFinite(sequence)) continue;
+    if (!points.has(shapeId)) points.set(shapeId, []);
+    points.get(shapeId).push([sequence, lon, lat]);
+  }
+  const routes = new Map();
+  for (const row of parseCsv(routesCsv)) {
+    const id = row.route_id?.trim();
+    const name = row.route_short_name?.trim() || row.route_long_name?.trim();
+    if (!id || !name) continue;
+    const color = row.route_color?.trim().toUpperCase();
+    routes.set(id, {
+      name,
+      desc: (row.route_long_name?.trim() || '').slice(0, 120),
+      color: /^[0-9A-F]{6}$/.test(color || '') ? color : null,
+      paths: [],
+    });
+  }
+  for (const [shapeId, routeIds] of chosen) {
+    const list = points.get(shapeId);
+    if (!list || list.length < 2) continue;
+    list.sort((a, b) => a[0] - b[0]);
+    const flat = [];
+    for (const [, lon, lat] of list)
+      flat.push(Number(lon.toFixed(6)), Number(lat.toFixed(6)));
+    for (const routeId of routeIds) routes.get(routeId)?.paths.push(flat);
+  }
+  return [...routes.values()]
+    .filter((route) => route.paths.length)
+    .sort((a, b) => a.name.localeCompare(b.name, 'ca', { numeric: true }));
+}
+
 // --- GTFS-Realtime TripUpdates ----------------------------------------------
 
 function readBoundedString(pbf, target) {

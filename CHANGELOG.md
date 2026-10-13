@@ -95,6 +95,13 @@
 
 ## [Unreleased]
 
+- The Barcelona arrivals layer draws the bus lines at street scale (from
+  5 km, like the stops): TMB's 114 lines in their colours, from TMB's line
+  list with the user's key, and AMB's 140 lines along the shape most of
+  their trips follow, from the daily GTFS. Both are served by the server
+  (`/api/tmb/bus-lines`, `/api/amb/lines`), never bundled; the routes load
+  after the stops and are thinner than the metro, which stays on top.
+
 - Spanish trains in the Transit layer start moving as soon as they appear:
   the proxy retains Renfe's and FGC's recent positions (as it already did
   for MBTA) and hands each train its last few minutes (`recent`), which the

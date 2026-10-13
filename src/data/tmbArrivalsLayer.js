@@ -21,6 +21,10 @@ import { buildTmbArrivalsCopy } from './tmbArrivals.js';
  * - TMB (keyed): the developer key stays on the server. This layer only
  *   calls `/api/tmb/stations` and `/api/tmb/arrivals/<kind>/<id>`.
  * - AMB (keyless): `/api/amb/stops` and `/api/amb/arrivals/<stopId>`.
+ * - Bus routes, drawn at street scale: `/api/tmb/bus-lines` (keyed) and
+ *   `/api/amb/lines`, both served by the server from the operators' own
+ *   data, never bundled (TMB's licence binds it to the app; AMB's forbids
+ *   altering it).
  * A stop both list (same code: AMB "000108" is TMB 108) is drawn once, as
  * TMB's: iBus already includes the AMB lines that call there. Without a TMB
  * key the layer still draws every AMB stop and says the rest needs the key.
@@ -32,6 +36,8 @@ import { buildTmbArrivalsCopy } from './tmbArrivals.js';
 const LAYER_ID = 'tmb-arrivals';
 const STATIONS_URL = '/api/tmb/stations';
 const AMB_STOPS_URL = '/api/amb/stops';
+const TMB_BUS_LINES_URL = '/api/tmb/bus-lines';
+const AMB_LINES_URL = '/api/amb/lines';
 
 /** Arrivals URL of a station or stop. */
 function arrivalsUrl(kind, id) {
@@ -128,6 +134,75 @@ export function parseTmbPlaceEntityId(entityId) {
   return match ? { kind: match[1], id: match[2] } : null;
 }
 
+function validLine(line) {
+  return (
+    line &&
+    typeof line.name === 'string' &&
+    Array.isArray(line.paths) &&
+    line.paths.length > 0 &&
+    line.paths.every(
+      (path) =>
+        Array.isArray(path) &&
+        path.length >= 4 &&
+        path.length % 2 === 0 &&
+        path.every(Number.isFinite),
+    )
+  );
+}
+
+/**
+ * Validate a bus line list (`/api/tmb/bus-lines`, `/api/amb/lines`); null
+ * when it is not one.
+ * @returns {{lines: object[], fetchedAt: number|null}|null}
+ */
+export function normalizeBusLinesPayload(payload) {
+  if (!Array.isArray(payload?.lines)) return null;
+  return {
+    lines: payload.lines.filter(validLine),
+    fetchedAt: Number.isFinite(payload.fetchedAt) ? payload.fetchedAt : null,
+  };
+}
+
+/**
+ * Bus route width on screen: half the metro's, and a little transparent.
+ * TMB's H, V and D buses and AMB's lines share colours with metro lines;
+ * the width says which is which.
+ */
+export const TMB_BUS_LINE_WIDTH_PX = 2;
+
+/** Length of the pieces a bus route is drawn in, in metres. */
+export const BUS_LINE_PIECE_M = 2_000;
+
+/**
+ * Cut a flat [lon, lat, …] path into consecutive pieces of about `pieceM`
+ * metres that share their end points. Cesium judges an instance's display
+ * distance from its centre, so a 20 km route drawn whole would vanish while
+ * the camera sat over one end of it; in pieces, the routes appear around the
+ * camera the way the stops do.
+ * @param {number[]} flat
+ * @param {number} [pieceM]
+ * @returns {number[][]}
+ */
+export function splitPathIntoPieces(flat, pieceM = BUS_LINE_PIECE_M) {
+  const pieces = [];
+  let piece = [flat[0], flat[1]];
+  let length = 0;
+  for (let i = 2; i + 1 < flat.length; i += 2) {
+    const cos = Math.cos((flat[i + 1] * Math.PI) / 180);
+    length +=
+      Math.hypot((flat[i] - flat[i - 2]) * cos, flat[i + 1] - flat[i - 1]) *
+      111_320;
+    piece.push(flat[i], flat[i + 1]);
+    if (length >= pieceM && i + 2 < flat.length) {
+      pieces.push(piece);
+      piece = [flat[i], flat[i + 1]];
+      length = 0;
+    }
+  }
+  if (piece.length >= 4) pieces.push(piece);
+  return pieces;
+}
+
 /** Validate the proxy's catalogue before replacing the last good one. */
 export function normalizeTmbCatalogPayload(payload) {
   if (!Array.isArray(payload?.metro) || !Array.isArray(payload?.bus))
@@ -140,18 +215,6 @@ export function normalizeTmbCatalogPayload(payload) {
     Number.isFinite(place.lon) &&
     Math.abs(place.lat) <= 90 &&
     Math.abs(place.lon) <= 180;
-  const validLine = (line) =>
-    line &&
-    typeof line.name === 'string' &&
-    Array.isArray(line.paths) &&
-    line.paths.length > 0 &&
-    line.paths.every(
-      (path) =>
-        Array.isArray(path) &&
-        path.length >= 4 &&
-        path.length % 2 === 0 &&
-        path.every(Number.isFinite),
-    );
   return {
     metro: payload.metro.filter(valid),
     bus: payload.bus.filter(valid),
@@ -287,6 +350,113 @@ export function createTmbArrivalsLayer({
   let _clickHandler = null;
   /** @type {Cesium.GroundPolylinePrimitive|null} metro line geometry */
   let _linesPrimitive = null;
+  /** @type {Cesium.GroundPolylinePrimitive|null} bus route geometry */
+  let _busLinesPrimitive = null;
+  /** Server fetch times of the bus routes drawn, to skip identical redraws. */
+  let _busLinesKey = null;
+
+  function _removeBusLines() {
+    if (_busLinesPrimitive && _viewer?.scene?.groundPrimitives)
+      _viewer.scene.groundPrimitives.remove(_busLinesPrimitive);
+    _busLinesPrimitive = null;
+    _busLinesKey = null;
+  }
+
+  /**
+   * TMB's and AMB's bus routes on the ground in their line colours, shown
+   * only at street scale (the bus stops' distance), in pieces so they
+   * appear around the camera. Not pickable: a click belongs to the stops.
+   * @param {object[]} lines
+   * @param {string} key
+   */
+  function _drawBusLines(lines, key) {
+    if (key === _busLinesKey && _busLinesPrimitive) return;
+    _removeBusLines();
+    if (!lines.length || !_viewer?.scene?.groundPrimitives) return;
+    let supported = false;
+    try {
+      supported = Cesium.GroundPolylinePrimitive.isSupported(_viewer.scene);
+    } catch {
+      supported = false; // no WebGL context to ask
+    }
+    if (!supported) return;
+    const distance =
+      new Cesium.DistanceDisplayConditionGeometryInstanceAttribute(
+        0,
+        TMB_BUS_MAX_DISTANCE_M + BUS_LINE_PIECE_M / 2,
+      );
+    const instances = [];
+    for (const line of lines) {
+      const [r, g, b] = hexToRgb(line.color) ?? UNKNOWN_RGB;
+      const color = Cesium.ColorGeometryInstanceAttribute.fromColor(
+        Cesium.Color.fromBytes(r, g, b, 170),
+      );
+      for (const path of line.paths) {
+        for (const piece of splitPathIntoPieces(path)) {
+          instances.push(
+            new Cesium.GeometryInstance({
+              geometry: new Cesium.GroundPolylineGeometry({
+                positions: Cesium.Cartesian3.fromDegreesArray(piece),
+                width: TMB_BUS_LINE_WIDTH_PX,
+              }),
+              attributes: { color, distanceDisplayCondition: distance },
+            }),
+          );
+        }
+      }
+    }
+    _busLinesPrimitive = _viewer.scene.groundPrimitives.add(
+      new Cesium.GroundPolylinePrimitive({
+        geometryInstances: instances,
+        appearance: new Cesium.PolylineColorAppearance(),
+        classificationType: Cesium.ClassificationType.BOTH,
+        allowPicking: false,
+        asynchronous: true,
+        show: _enabled,
+      }),
+    );
+    _busLinesKey = key;
+    // The metro stays on top of the bus routes that arrive after it.
+    if (_linesPrimitive)
+      _viewer.scene.groundPrimitives.raiseToTop?.(_linesPrimitive);
+  }
+
+  let _busLinesRequest = null;
+  /** Load both operators' routes (one load at a time) and draw them. */
+  function _refreshBusLines() {
+    _busLinesRequest ??= Promise.all([
+      _loadBusLines(TMB_BUS_LINES_URL),
+      _loadBusLines(AMB_LINES_URL),
+    ])
+      .then(([tmbBus, ambBus]) => {
+        if (!_viewer) return;
+        _drawBusLines(
+          [...ambBus.lines, ...tmbBus.lines],
+          `${ambBus.fetchedAt}/${tmbBus.fetchedAt}`,
+        );
+      })
+      .finally(() => {
+        _busLinesRequest = null;
+      });
+    return _busLinesRequest;
+  }
+
+  /** @returns {Promise<{lines: object[], fetchedAt: number|null}>} one operator's bus routes, or none */
+  async function _loadBusLines(url) {
+    try {
+      const response = await fetchImpl(url);
+      if (!response.ok) return { lines: [], fetchedAt: null };
+      return (
+        normalizeBusLinesPayload(await response.json()) || {
+          lines: [],
+          fetchedAt: null,
+        }
+      );
+    } catch (error) {
+      console.warn('[Data:TmbArrivals] bus routes fetch error:', error);
+      return { lines: [], fetchedAt: null };
+    }
+  }
 
   function _removeMetroLines() {
     if (_linesPrimitive && _viewer?.scene?.groundPrimitives)
@@ -576,6 +746,7 @@ export function createTmbArrivalsLayer({
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
       if (_linesPrimitive) _linesPrimitive.show = true;
+      if (_busLinesPrimitive) _busLinesPrimitive.show = true;
       overlayHost.setVisible(TMB_ARRIVALS_SELECTED_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer);
       registerPickOwner(LAYER_ID, (pickedId) =>
@@ -588,12 +759,16 @@ export function createTmbArrivalsLayer({
       _clearSelection();
       if (_dataSource) _dataSource.show = false;
       if (_linesPrimitive) _linesPrimitive.show = false;
+      if (_busLinesPrimitive) _busLinesPrimitive.show = false;
       overlayHost.setVisible(TMB_ARRIVALS_SELECTED_OVERLAY_SOURCE_ID, false);
       _removeClickHandler();
       unregisterPickOwner(LAYER_ID);
     },
 
     async update() {
+      // Routes decorate the map and are large: they load on their own,
+      // and the stops never wait for them.
+      void _refreshBusLines();
       const [tmb, amb] = await Promise.all([
         _loadTmbCatalog(),
         _loadAmbStops(),
@@ -634,6 +809,7 @@ export function createTmbArrivalsLayer({
 
     destroy(viewer) {
       _removeMetroLines();
+      _removeBusLines();
       _clearSelection();
       _removeClickHandler();
       unregisterPickOwner(LAYER_ID);

@@ -7,8 +7,10 @@ import {
   TMB_STATUS_TTL_MS,
   classifyTmbStatus,
   createTmbArrivalsService,
+  createTmbBusLinesService,
   createTmbCatalogService,
   createTmbStatusService,
+  tmbBusLinesUrl,
   tmbCatalogUrls,
   tmbCredentials,
   tmbProxy,
@@ -221,6 +223,36 @@ const LINES_BODY = {
     },
   ],
 };
+const BUS_LINES_BODY = {
+  type: 'FeatureCollection',
+  features: [
+    {
+      geometry: {
+        type: 'MultiLineString',
+        coordinates: [
+          [
+            [2.16, 41.38],
+            [2.17, 41.39],
+          ],
+          [
+            [2.17, 41.39],
+            [2.16, 41.38],
+          ],
+        ],
+      },
+      properties: {
+        NOM_LINIA: '24',
+        DESC_LINIA: 'Pl. Catalunya / El Carmel',
+        COLOR_LINIA: 'DA291C',
+        ORDRE_LINIA: 24,
+      },
+    },
+    {
+      geometry: { type: 'LineString', coordinates: [[2.1, 41.4]] },
+      properties: { NOM_LINIA: 'X', COLOR_LINIA: 'zz' },
+    },
+  ],
+};
 const IMETRO_BODY = {
   timestamp: 1_000,
   linies: [
@@ -278,6 +310,7 @@ function tmbApi(override = () => null) {
       '/v1/transit/linies/metro/estacions': METRO_BODY,
       '/v1/transit/parades': BUS_BODY,
       '/v1/transit/linies/metro': LINES_BODY,
+      '/v1/transit/linies/bus': BUS_LINES_BODY,
       '/v1/itransit/metro/estacions': IMETRO_BODY,
       '/v1/itransit/bus/parades/108': IBUS_BODY,
     }[parsed.pathname];
@@ -550,4 +583,85 @@ test('the catalogue carries metro line geometry, and survives without it', async
   const fallback = await broken.catalog();
   assert.deepEqual(fallback.lines, []);
   assert.equal(fallback.metro.length, 1, 'stations still served');
+});
+
+test('bus routes are asked for once a day, trimmed, and kept when a refresh fails', async () => {
+  const url = new URL(tmbBusLinesUrl({ appId: 'a', appKey: 'b' }));
+  assert.equal(url.pathname, '/v1/transit/linies/bus');
+  assert.match(url.searchParams.get('propertyName'), /GEOMETRY/);
+  assert.match(url.searchParams.get('propertyName'), /DESC_LINIA/);
+  let clock = 1_000;
+  let fail = false;
+  const { fetchImpl, calls } = tmbApi(() => (fail ? { status: 500 } : null));
+  const service = createTmbBusLinesService({
+    env: PAIR,
+    fetchImpl,
+    now: () => clock,
+  });
+  const [a, b] = await Promise.all([service.lines(), service.lines()]);
+  assert.deepEqual(a, b);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].init.redirect, 'error');
+  assert.deepEqual(a.lines, [
+    {
+      name: '24',
+      desc: 'Pl. Catalunya / El Carmel',
+      color: 'DA291C',
+      paths: [
+        [2.16, 41.38, 2.17, 41.39],
+        [2.17, 41.39, 2.16, 41.38],
+      ],
+    },
+  ]);
+  clock += TMB_CATALOG_TTL_MS;
+  fail = true;
+  assert.deepEqual(
+    await service.lines(),
+    a,
+    "yesterday's routes are still right",
+  );
+  assert.equal(calls.length, 2);
+  await assert.rejects(
+    createTmbBusLinesService({ env: {}, fetchImpl }).lines(),
+    (error) => error.code === 'no_key',
+  );
+  await assert.rejects(
+    createTmbBusLinesService({
+      env: PAIR,
+      fetchImpl: tmbApi(() => ({ status: 401 })).fetchImpl,
+    }).lines(),
+    (error) => error.code === 'rejected',
+  );
+});
+
+test('the bus route list is served on its exact path, GET only', async () => {
+  const handlers = new Map();
+  const plugin = tmbProxy({ env: PAIR, fetchImpl: tmbApi().fetchImpl });
+  plugin.configureServer({
+    middlewares: { use: (path, fn) => handlers.set(path, fn) },
+  });
+  const call = async (url, method = 'GET') => {
+    const res = {
+      code: 0,
+      body: '',
+      writeHead(code) {
+        this.code = code;
+      },
+      setHeader() {},
+      end(text) {
+        this.body = text;
+      },
+    };
+    await handlers.get('/api/tmb/bus-lines')(
+      { method, url, headers: { host: 'localhost:4173' }, socket: {} },
+      res,
+    );
+    return res;
+  };
+  const ok = await call('/');
+  assert.equal(ok.code, 200);
+  assert.equal(JSON.parse(ok.body).lines[0].name, '24');
+  assert.doesNotMatch(ok.body, /fixture-secret/);
+  assert.equal((await call('/x')).code, 404);
+  assert.equal((await call('/', 'POST')).code, 405);
 });

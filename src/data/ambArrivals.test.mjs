@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildAmbArrivalsIndex,
+  buildAmbLines,
   buildAmbRoutes,
   buildAmbStops,
   buildAmbTrips,
@@ -10,6 +11,7 @@ import {
 } from './ambArrivals.js';
 import {
   ROUTES_CSV,
+  SHAPES_CSV,
   STOPS_CSV,
   TRIPS_CSV,
   encodeTripUpdates,
@@ -120,4 +122,36 @@ test('the index groups by line and destination, soonest first, and drops departe
     },
   ]);
   assert.equal(index.has('000108'), false);
+});
+
+test('each line is drawn along the shape most of its trips follow, per direction', () => {
+  const lines = buildAmbLines({
+    shapesCsv: SHAPES_CSV,
+    tripsCsv: TRIPS_CSV,
+    routesCsv: ROUTES_CSV,
+  });
+  assert.deepEqual(lines, [
+    {
+      name: '87',
+      desc: 'Horta-Gràcia',
+      color: 'FFAA00',
+      // `sh`, in point order; `sh2` (one trip) is not drawn.
+      paths: [[2.16, 41.4, 2.1601, 41.4001, 2.1602, 41.4002]],
+    },
+    {
+      name: 'A1',
+      desc: 'Aerobús',
+      color: '9FD6F6',
+      paths: [[2.16, 41.4, 2.1601, 41.4001, 2.1602, 41.4002]],
+    },
+  ]);
+  assert.deepEqual(
+    buildAmbLines({
+      shapesCsv: '',
+      tripsCsv: TRIPS_CSV,
+      routesCsv: ROUTES_CSV,
+    }),
+    [],
+    'no shapes, no lines',
+  );
 });

@@ -511,7 +511,9 @@ y FGC con sus colores, y regenerar los datos es ejecutar un solo comando.
   estación a escala de calle.
 - **5c —** red de larga distancia del IGN.
 - **5d —** geometría de TMB y AMB, servida por el servidor (TMB, por clave y licencia;
-  AMB, porque su licencia no permite alterar el contenido).
+  AMB, porque su licencia no permite alterar el contenido) — ✅ hecho 2026-10-13
+  (rama `feat/transit-es-bus-geometry`). Los tramos de metro (`trams`) pasan a la
+  Fase 8.
 
 **Resultado 5a:**
 
@@ -664,6 +666,26 @@ historial), el arranque sigue necesitando dos posiciones.
 
 **Límite conocido:** un tren de LD parado sin `STOPPED_AT` fiable deja de tener fixes
 nuevos, y a los 90 s su ficha dice "No recent fix" aunque Renfe lo siga publicando.
+
+**Resultado 5d (2026-10-13, rama `feat/transit-es-bus-geometry`):**
+
+- **TMB:** `/api/tmb/bus-lines` pide `/v1/transit/linies/bus` una vez al día
+  (`propertyName` con `NOM_LINIA`, `DESC_LINIA`, `COLOR_LINIA`, `ORDRE_LINIA` y
+  `GEOMETRY`): 114 líneas, ~21.600 puntos, 415 KB. Rojo `DA291C` en las
+  convencionales; el color de TMB en las H, V y D. Sin clave → 503 `no_key`, como el
+  resto de TMB.
+- **AMB:** `/api/amb/lines` sale del mismo GTFS diario que las paradas (ahora también
+  lee `shapes.txt`). Por línea y sentido, el trazado que siguen más viajes: 140 líneas,
+  263 trazados, 63.630 puntos, 1,2 MB. Los puntos se sirven tal cual (6 decimales),
+  sin simplificar, porque la licencia no deja alterar el contenido. Un mismo trazado
+  puede servir a varias líneas.
+- **En la capa:** las rutas se cargan aparte y nunca retrasan las paradas. Se dibujan a
+  2 px, con alfa 170 y por debajo del metro (4 px, encima). Se parten en tramos de
+  ~2 km con `DistanceDisplayCondition` hasta 6 km: Cesium mide la distancia al centro
+  de cada instancia, y una línea entera desaparecía aunque la cámara estuviera sobre
+  uno de sus extremos.
+- **En vivo:** Eixample a 3 km y 1,2 km con TMB y AMB, y L'Hospitalet a 2,5 km con
+  AMB. A 9 km solo queda el metro. Sin errores de página.
 
 ### Fase 6 — Ficha enriquecida (datos que llegan y no se muestran)
 

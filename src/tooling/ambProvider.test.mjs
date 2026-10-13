@@ -12,6 +12,7 @@ import {
 import {
   ROUTES_CSV,
   STOPS_CSV,
+  SHAPES_CSV,
   TRIPS_CSV,
   encodeTripUpdates,
 } from '../data/ambArrivalsFixtures.mjs';
@@ -196,6 +197,11 @@ test('the AMB routes answer GET only and map errors to status codes', async () =
     );
     return res;
   };
+  const lines = await call('/api/amb/lines', '/');
+  assert.equal(lines.code, 200);
+  assert.deepEqual(JSON.parse(lines.body).lines, [], 'this GTFS has no shapes');
+  assert.equal((await call('/api/amb/lines', '/x')).code, 404);
+  assert.equal((await call('/api/amb/lines', '/', 'POST')).code, 405);
   const stops = await call('/api/amb/stops', '/');
   assert.equal(stops.code, 200);
   assert.equal(JSON.parse(stops.body).stops[0].id, '000108');
@@ -206,4 +212,29 @@ test('the AMB routes answer GET only and map errors to status codes', async () =
   assert.equal((await call('/api/amb/arrivals', '/999999')).code, 404);
   assert.equal((await call('/api/amb/arrivals', '/100005/x')).code, 404);
   assert.equal((await call('/api/amb/arrivals', '/100005', 'POST')).code, 405);
+});
+
+test('line routes come from the same daily GTFS download as the stops', async () => {
+  const withShapes = makeZip({
+    'stops.txt': STOPS_CSV,
+    'routes.txt': ROUTES_CSV,
+    'trips.txt': TRIPS_CSV,
+    'shapes.txt': SHAPES_CSV,
+  });
+  const { fetchImpl, calls } = ambApi({ gtfs: () => withShapes });
+  const service = createAmbArrivalsService({ fetchImpl, now: () => NOW });
+  const [{ lines, fetchedAt }, { stops }] = await Promise.all([
+    service.lines(),
+    service.stops(),
+  ]);
+  assert.deepEqual(
+    lines.map((line) => [line.name, line.color, line.paths.length]),
+    [
+      ['87', 'FFAA00', 1],
+      ['A1', '9FD6F6', 1],
+    ],
+  );
+  assert.equal(fetchedAt, NOW);
+  assert.equal(stops.length, 2);
+  assert.equal(calls.length, 1);
 });
