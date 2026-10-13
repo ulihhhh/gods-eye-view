@@ -360,3 +360,17 @@ test('an answer for a card already closed is dropped', async () => {
     h.layer.destroy(h.viewer);
   }
 });
+
+test('catalogue lines are validated; a server without them still works', () => {
+  const line = {
+    name: 'L1',
+    color: 'CE1126',
+    paths: [[2.17, 41.38, 2.18, 41.39]],
+  };
+  const kept = normalizeTmbCatalogPayload({
+    ...CATALOG,
+    lines: [line, { name: 'L2', paths: [[1, 2, 3]] }, null],
+  });
+  assert.deepEqual(kept.lines, [line]);
+  assert.deepEqual(normalizeTmbCatalogPayload(CATALOG).lines, []);
+});

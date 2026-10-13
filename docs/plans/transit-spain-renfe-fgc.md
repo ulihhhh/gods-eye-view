@@ -563,6 +563,51 @@ y FGC con sus colores, y regenerar los datos es ejecutar un solo comando.
     errores de página.
   - **Pins del fork:** catálogo 38 → 39; `REGISTERED_LAYER_IDS` 37 → 38; ledger 38
     reservas, "39 published" y `l` de 96; esquema de voz 30819 más sus hashes.
+- **Resultado 5c (2026-10-13, rama `feat/transit-es-ign`):**
+  - **Script aparte** `scripts/build-spain-rail-ign.mjs`, porque es lento (decenas de
+    minutos) y frágil, con `--cache DIR`. Genera `ign_rail.json` (345 KB): 377 de las 378
+    líneas de tipo tren, 35.376 tramos encadenados en 2.110 trazados y 21.696 puntos
+    (Douglas–Peucker a 50 m, 4 decimales).
+  - **El WFS del IGN** (`tn-ra:RailwayType`, `RailwayLine` y `RailwayLink`) tiene tres
+    trabas:
+    - el proxy corta a los 60 s;
+    - las páginas con líneas enormes fallan, así que se parten en mitades hasta llegar a
+      elementos sueltos, y lo que nunca responde se salta y queda en `meta.skipped`
+      (21 líneas, de las que solo 1 era de tren);
+    - la paginación profunda (`startIndex` ≳ 24.000) siempre da timeout, así que los
+      tramos se piden por cuadrículas BBOX de 1° en quadtree (las que llegan a 3.000
+      se parten en 4; 155 peticiones).
+  - Los tramos no traen atributos: el tipo va por línea (`RailwayType` → `RailwayLine`
+    → tramos). El ancho de vía (`NominalTrackGauge`) está vacío casi siempre, así que no
+    distingue la alta velocidad.
+  - **En la capa:** la red IGN se dibuja debajo, en gris fino de 1,5 px; los colores de
+    Cercanías y FGC van encima. Al pulsarla: "🛤 Railway · © IGN". La capa sigue
+    funcionando si falta el pack.
+- **Añadido en la misma rama, a petición del usuario:**
+  - **Trazado del metro de TMB** en la capa de llegadas: `/v1/transit/linies/metro`
+    (11 líneas, 25 KB, con color oficial) entra en el catálogo de 24 h del servidor, y la
+    capa lo dibuja a ras de suelo (4 px, sin selección al pulsar).
+  - **Estaciones de Renfe y FGC con el estilo del metro:** 9 px, color de su línea,
+    blanco en las de enlace y pizarra si no pasa ninguna línea dibujada. El script asigna
+    las líneas a cada estación por geometría (trazado a ≤ 80 m), en
+    `lines.json → stationLines`: 936 estaciones. La ficha lista sus líneas.
+  - **Distancias de visibilidad:** 75 km para las estaciones de metro (TMB) y de tren
+    (Renfe, FGC). Las paradas de bus siguen a 5 km.
+  - **Los trenes siguen la vía** (enganche genérico `trackGeometry`, como `stopNames`):
+    - `src/data/trackFollow.js` indexa las vías en una rejilla de ~1 km;
+      `pathBetween(a, b, línea)` proyecta los dos fixes (≤ 150 m) sobre el mismo trazado
+      y devuelve el recorrido por la vía, con los extremos exactamente en los fixes;
+    - devuelve null, y se queda la recta, si un fix está lejos, si los dos no comparten
+      trazado o si el desvío es absurdo (> 3 × la recta + 500 m);
+    - `trails.prepareEntry` (capa Transit) genera con él los puntos de cada tramo a ras
+      de suelo, y el icono toma el rumbo de la vía en cada trozo. `contactPlayback`
+      (compartido con aviones y barcos) no se toca;
+    - vías por feed: Cercanías sus líneas (por nombre), FGC las suyas ("S9 · L8" se
+      separa) y LD la red IGN más la de Cercanías.
+    - **Medido con fixes reales** de 522 vehículos durante 2,5 min (tramos en
+      movimiento): Cercanías 371/376 (99 %), FGC 50/50 y LD 373/382 (98 %; un 31 % sin
+      el pack IGN). En vivo, un R2 seleccionado junto a Sants deja su estela sobre la
+      vía.
 - **Incidencia:** se rompió la caché de dependencias de Vite de un servidor de desarrollo
   (504 "Outdated Optimize Dep" en `cesium.js`), y la app no arrancaba. Se arregla con
   `npm run dev -- --force`. Causa probable: un segundo Vite en un worktree con

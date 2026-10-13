@@ -54,7 +54,7 @@ export const TMB_CARD_REFRESH_MS = 15_000;
 /** Camera distances beyond which each kind of marker is not drawn. */
 // Metro: 137 points, readable from a whole-metropolitan-area view. Bus stops
 // (TMB and AMB, ~6,000): only once the camera is down at neighbourhood scale.
-export const TMB_METRO_MAX_DISTANCE_M = 150_000;
+export const TMB_METRO_MAX_DISTANCE_M = 75_000;
 export const TMB_BUS_MAX_DISTANCE_M = 5_000;
 
 const DEFAULT_OVERLAY_HOST = Object.freeze({
@@ -140,11 +140,28 @@ export function normalizeTmbCatalogPayload(payload) {
     Number.isFinite(place.lon) &&
     Math.abs(place.lat) <= 90 &&
     Math.abs(place.lon) <= 180;
+  const validLine = (line) =>
+    line &&
+    typeof line.name === 'string' &&
+    Array.isArray(line.paths) &&
+    line.paths.length > 0 &&
+    line.paths.every(
+      (path) =>
+        Array.isArray(path) &&
+        path.length >= 4 &&
+        path.length % 2 === 0 &&
+        path.every(Number.isFinite),
+    );
   return {
     metro: payload.metro.filter(valid),
     bus: payload.bus.filter(valid),
+    // Older servers sent no line geometry; the stations still work.
+    lines: Array.isArray(payload.lines) ? payload.lines.filter(validLine) : [],
   };
 }
+
+/** Metro line width on screen. */
+export const TMB_METRO_LINE_WIDTH_PX = 4;
 
 /** Validate the AMB proxy's stop list; null when it is not one. */
 export function normalizeAmbStopsPayload(payload) {
@@ -268,6 +285,58 @@ export function createTmbArrivalsLayer({
   let _tick = null;
   /** @type {Cesium.ScreenSpaceEventHandler|null} */
   let _clickHandler = null;
+  /** @type {Cesium.GroundPolylinePrimitive|null} metro line geometry */
+  let _linesPrimitive = null;
+
+  function _removeMetroLines() {
+    if (_linesPrimitive && _viewer?.scene?.groundPrimitives)
+      _viewer.scene.groundPrimitives.remove(_linesPrimitive);
+    _linesPrimitive = null;
+  }
+
+  /**
+   * TMB's metro lines on the ground in their own colours, under the station
+   * points. Not pickable: a click there belongs to the stations.
+   */
+  function _drawMetroLines(lines) {
+    _removeMetroLines();
+    if (!lines.length || !_viewer?.scene?.groundPrimitives) return;
+    let supported = false;
+    try {
+      supported = Cesium.GroundPolylinePrimitive.isSupported(_viewer.scene);
+    } catch {
+      supported = false; // no WebGL context to ask
+    }
+    if (!supported) return;
+    const instances = [];
+    for (const line of lines) {
+      const [r, g, b] = hexToRgb(line.color) ?? UNKNOWN_RGB;
+      const color = Cesium.ColorGeometryInstanceAttribute.fromColor(
+        Cesium.Color.fromBytes(r, g, b, 230),
+      );
+      for (const path of line.paths) {
+        instances.push(
+          new Cesium.GeometryInstance({
+            geometry: new Cesium.GroundPolylineGeometry({
+              positions: Cesium.Cartesian3.fromDegreesArray(path),
+              width: TMB_METRO_LINE_WIDTH_PX,
+            }),
+            attributes: { color },
+          }),
+        );
+      }
+    }
+    _linesPrimitive = _viewer.scene.groundPrimitives.add(
+      new Cesium.GroundPolylinePrimitive({
+        geometryInstances: instances,
+        appearance: new Cesium.PolylineColorAppearance(),
+        classificationType: Cesium.ClassificationType.BOTH,
+        allowPicking: false,
+        asynchronous: true,
+        show: _enabled,
+      }),
+    );
+  }
 
   function _placePosition(place) {
     return Cesium.Cartesian3.fromDegrees(
@@ -506,6 +575,7 @@ export function createTmbArrivalsLayer({
     enable(viewer) {
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
+      if (_linesPrimitive) _linesPrimitive.show = true;
       overlayHost.setVisible(TMB_ARRIVALS_SELECTED_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer);
       registerPickOwner(LAYER_ID, (pickedId) =>
@@ -517,6 +587,7 @@ export function createTmbArrivalsLayer({
       _enabled = false;
       _clearSelection();
       if (_dataSource) _dataSource.show = false;
+      if (_linesPrimitive) _linesPrimitive.show = false;
       overlayHost.setVisible(TMB_ARRIVALS_SELECTED_OVERLAY_SOURCE_ID, false);
       _removeClickHandler();
       unregisterPickOwner(LAYER_ID);
@@ -540,6 +611,7 @@ export function createTmbArrivalsLayer({
       _dataSource.entities.removeAll();
       for (const entity of entities) _dataSource.entities.add(entity);
       _dataSource.entities.resumeEvents();
+      if (tmb.catalog) _drawMetroLines(tmb.catalog.lines);
       if (_selection) {
         const still = _places.get(_selection.entityId);
         if (still) {
@@ -561,6 +633,7 @@ export function createTmbArrivalsLayer({
     },
 
     destroy(viewer) {
+      _removeMetroLines();
       _clearSelection();
       _removeClickHandler();
       unregisterPickOwner(LAYER_ID);

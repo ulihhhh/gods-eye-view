@@ -143,6 +143,54 @@ export function buildTmbBusStops(collection) {
   return [...stops.values()].sort((a, b) => Number(a.id) - Number(b.id));
 }
 
+/**
+ * Metro line geometry from TMB's line list (`/transit/linies/metro`), as flat
+ * [lon, lat, …] paths with the line's own colour, in TMB's line order.
+ * @param {unknown} collection GeoJSON FeatureCollection from TMB.
+ * @returns {Array<{name: string, color: string|null, paths: number[][]}>|null}
+ */
+export function buildTmbMetroLines(collection) {
+  if (!Array.isArray(collection?.features)) return null;
+  const lines = [];
+  for (const feature of collection.features) {
+    const p = feature?.properties || {};
+    const name = text(p.NOM_LINIA);
+    const geometry = feature?.geometry;
+    const parts =
+      geometry?.type === 'MultiLineString'
+        ? geometry.coordinates
+        : geometry?.type === 'LineString'
+          ? [geometry.coordinates]
+          : [];
+    const paths = [];
+    for (const part of Array.isArray(parts) ? parts : []) {
+      const flat = [];
+      for (const point of Array.isArray(part) ? part : []) {
+        const lon = Number(point?.[0]);
+        const lat = Number(point?.[1]);
+        if (finiteCoordinate(lat, lon))
+          flat.push(Number(lon.toFixed(6)), Number(lat.toFixed(6)));
+      }
+      if (flat.length >= 4) paths.push(flat);
+    }
+    if (!name || !paths.length) continue;
+    const order = Number(p.ORDRE_LINIA);
+    lines.push({
+      name,
+      color: color(p.COLOR_LINIA),
+      order: Number.isFinite(order) ? order : Number.MAX_SAFE_INTEGER,
+      paths,
+    });
+  }
+  return lines
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
+    .map(({ name, color: lineColor, paths }) => ({
+      name,
+      color: lineColor,
+      paths,
+    }));
+}
+
 function arrivalTimes(list, field = 'temps_arribada') {
   if (!Array.isArray(list)) return [];
   return list

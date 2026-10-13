@@ -130,6 +130,7 @@ function metroTransitRouteMode(routeId) {
  *   yieldsTo?: string, format?: string, minIntervalMs?: number,
  *   reportIntervalMs?: number,
  *   stopNames?: () => Promise<Readonly<Record<string, string>>>,
+ *   trackGeometry?: () => Promise<Array<{routes?: string[]|null, paths: number[][]}>>,
  * }>>}
  */
 export const TRANSIT_FEED_REGISTRY = Object.freeze([
