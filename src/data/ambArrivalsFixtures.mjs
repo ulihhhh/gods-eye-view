@@ -19,10 +19,23 @@ export const ROUTES_CSV = [
   '130,72,"A1","Aerobús",,3,,9fd6f6,333333',
 ].join('\n');
 
+// Route 129 direction 0 runs mostly on `sh` (two trips) and once on `sh2`.
+export const SHAPES_CSV = [
+  'shape_id,shape_pt_lat,shape_pt_lon,shape_pt_sequence',
+  'sh,41.4002,2.1602,2',
+  'sh,41.4,2.16,0',
+  'sh,41.4001,2.1601,1',
+  'sh2,41.5,2.2,0',
+  'sh2,41.5001,2.2001,1',
+  'gone,41.6,2.3,0',
+  'gone,41.6001,2.3001,1',
+].join('\n');
+
 export const TRIPS_CSV = [
   'route_id,service_id,trip_id,direction_id,shape_id,wheelchair_accessible,trip_short_name,trip_headsign',
   '129,s,129.1,0,sh,1,,Gràcia',
   '129,s,129.2,0,sh,1,,Gràcia',
+  '129,s,129.3,0,sh2,1,,Gràcia',
   '130,s,130.1,1,sh,1,,"Aeroport T1"',
 ].join('\n');
 

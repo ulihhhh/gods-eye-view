@@ -3,6 +3,7 @@ import { readResponseJsonCapped } from './common/http.js';
 import {
   TMB_BUS_ID_PATTERN,
   TMB_METRO_ID_PATTERN,
+  buildTmbBusLines,
   buildTmbBusStops,
   buildTmbMetroLines,
   buildTmbMetroStations,
@@ -26,6 +27,9 @@ import {
  *   GET /api/tmb/stations → {metro: [...], bus: [...], lines: [...], fetchedAt}
  *     Metro station groups, bus stops and metro line geometry, trimmed and
  *     cached for a day.
+ *   GET /api/tmb/bus-lines → {lines: [{name, desc, color, paths}], fetchedAt}
+ *     Bus line geometry, cached for a day; asked for apart from the
+ *     stations because it is larger and only drawn at street scale.
  *   GET /api/tmb/arrivals/metro/<group> and /api/tmb/arrivals/bus/<code>
  *     → {kind, id, fetchedAt, routes: [...]}: next arrivals, cached 15 s.
  *     The id must name a station or stop in the catalogue; the server
@@ -179,6 +183,13 @@ const METRO_LINE_FIELDS = [
   'ORDRE_LINIA',
   'GEOMETRY',
 ];
+const BUS_LINE_FIELDS = [
+  'NOM_LINIA',
+  'DESC_LINIA',
+  'COLOR_LINIA',
+  'ORDRE_LINIA',
+  'GEOMETRY',
+];
 
 /** A TMB failure the routes turn into a status code, never into its body. */
 export class TmbError extends Error {
@@ -229,6 +240,13 @@ export function tmbCatalogUrls(credentials) {
       propertyName: METRO_LINE_FIELDS.join(','),
     }),
   };
+}
+
+/** Bus line list URL: names, colours and geometry only. */
+export function tmbBusLinesUrl(credentials) {
+  return tmbApiUrl('/transit/linies/bus', credentials, {
+    propertyName: BUS_LINE_FIELDS.join(','),
+  });
 }
 
 /** iMetro URL for every per-line code of one station group. */
@@ -360,6 +378,60 @@ export function createTmbCatalogService({
 }
 
 /**
+ * Bus line geometry: one TMB request a day, single-flight, and the last good
+ * copy kept when a refresh fails (never when TMB refused the key).
+ * @param {{env?: Record<string, string|undefined>, fetchImpl?: typeof fetch,
+ *   now?: () => number}} [options]
+ */
+export function createTmbBusLinesService({
+  env = process.env,
+  fetchImpl = fetch,
+  now = Date.now,
+} = {}) {
+  /** @type {{pair: string, value: object, fetchedAt: number}|null} */
+  let last = null;
+  /** @type {{pair: string, promise: Promise<object>}|null} */
+  let inflight = null;
+
+  async function load(credentials, pair) {
+    const body = await fetchTmbJson(
+      fetchImpl,
+      tmbBusLinesUrl(credentials),
+      TMB_CATALOG_MAX_BYTES,
+    );
+    const lines = buildTmbBusLines(body);
+    if (!lines?.length) throw new TmbError('unavailable');
+    const fetchedAt = now();
+    last = { pair, value: { lines, fetchedAt }, fetchedAt };
+    return last;
+  }
+
+  return {
+    /** @returns {Promise<{lines: object[], fetchedAt: number}>} */
+    async lines() {
+      const credentials = tmbCredentials(env);
+      if (!credentials) throw new TmbError('no_key');
+      const pair = `${credentials.appId}\u0000${credentials.appKey}`;
+      if (last?.pair === pair && now() - last.fetchedAt < TMB_CATALOG_TTL_MS)
+        return last.value;
+      if (inflight?.pair !== pair) {
+        const promise = load(credentials, pair).finally(() => {
+          if (inflight?.promise === promise) inflight = null;
+        });
+        inflight = { pair, promise };
+      }
+      try {
+        return (await inflight.promise).value;
+      } catch (error) {
+        if (last?.pair === pair && error?.code !== 'rejected')
+          return last.value;
+        throw error;
+      }
+    },
+  };
+}
+
+/**
  * Next arrivals at one station group or bus stop: cached per id, one
  * request in flight per id, and a per-minute ceiling on upstream calls.
  * @param {{env?: Record<string, string|undefined>, fetchImpl?: typeof fetch,
@@ -467,6 +539,7 @@ export function tmbProxy(options = {}) {
   const service = createTmbStatusService(options);
   const catalog = createTmbCatalogService(options);
   const arrivals = createTmbArrivalsService({ ...options, catalog });
+  const busLines = createTmbBusLinesService(options);
   function install(server) {
     server.middlewares.use(
       '/api/tmb/status',
@@ -489,6 +562,21 @@ export function tmbProxy(options = {}) {
           return sendJson(res, 405, { error: 'Method not allowed' });
         try {
           return sendJson(res, 200, await catalog.catalog());
+        } catch (error) {
+          return sendTmbError(res, error);
+        }
+      }),
+    );
+    server.middlewares.use(
+      '/api/tmb/bus-lines',
+      sameSiteGated(async (req, res) => {
+        const rest = String(req.url || '/').split('?')[0];
+        if (rest !== '/' && rest !== '')
+          return sendJson(res, 404, { error: 'not_found' });
+        if (req.method !== 'GET')
+          return sendJson(res, 405, { error: 'Method not allowed' });
+        try {
+          return sendJson(res, 200, await busLines.lines());
         } catch (error) {
           return sendTmbError(res, error);
         }

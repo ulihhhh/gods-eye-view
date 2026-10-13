@@ -144,12 +144,13 @@ export function buildTmbBusStops(collection) {
 }
 
 /**
- * Metro line geometry from TMB's line list (`/transit/linies/metro`), as flat
- * [lon, lat, …] paths with the line's own colour, in TMB's line order.
+ * Line geometry from one of TMB's line lists, as flat [lon, lat, …] paths
+ * with the line's own colour and description, in TMB's line order.
  * @param {unknown} collection GeoJSON FeatureCollection from TMB.
- * @returns {Array<{name: string, color: string|null, paths: number[][]}>|null}
+ * @returns {Array<{name: string, desc: string, color: string|null,
+ *   paths: number[][]}>|null}
  */
-export function buildTmbMetroLines(collection) {
+function buildTmbLines(collection) {
   if (!Array.isArray(collection?.features)) return null;
   const lines = [];
   for (const feature of collection.features) {
@@ -177,18 +178,53 @@ export function buildTmbMetroLines(collection) {
     const order = Number(p.ORDRE_LINIA);
     lines.push({
       name,
+      desc: text(p.DESC_LINIA).slice(0, 120),
       color: color(p.COLOR_LINIA),
       order: Number.isFinite(order) ? order : Number.MAX_SAFE_INTEGER,
       paths,
     });
   }
-  return lines
-    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
-    .map(({ name, color: lineColor, paths }) => ({
+  return lines.sort(
+    (a, b) => a.order - b.order || a.name.localeCompare(b.name),
+  );
+}
+
+/**
+ * Metro line geometry from TMB's line list (`/transit/linies/metro`), as flat
+ * [lon, lat, …] paths with the line's own colour, in TMB's line order.
+ * @param {unknown} collection GeoJSON FeatureCollection from TMB.
+ * @returns {Array<{name: string, color: string|null, paths: number[][]}>|null}
+ */
+export function buildTmbMetroLines(collection) {
+  return (
+    buildTmbLines(collection)?.map(({ name, color: lineColor, paths }) => ({
       name,
       color: lineColor,
       paths,
-    }));
+    })) ?? null
+  );
+}
+
+/**
+ * Bus line geometry from TMB's bus line list (`/transit/linies/bus`): each
+ * line's route as TMB draws it, with its colour (red for the conventional
+ * lines, TMB's own for the H, V and D network) and its description
+ * ("Pl. Catalunya / El Carmel").
+ * @param {unknown} collection GeoJSON FeatureCollection from TMB.
+ * @returns {Array<{name: string, desc: string, color: string|null,
+ *   paths: number[][]}>|null}
+ */
+export function buildTmbBusLines(collection) {
+  return (
+    buildTmbLines(collection)?.map(
+      ({ name, desc, color: lineColor, paths }) => ({
+        name,
+        desc,
+        color: lineColor,
+        paths,
+      }),
+    ) ?? null
+  );
 }
 
 function arrivalTimes(list, field = 'temps_arribada') {

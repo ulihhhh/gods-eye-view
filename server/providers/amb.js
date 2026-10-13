@@ -4,6 +4,7 @@ import { readResponseBytesCapped } from './common/http.js';
 import {
   AMB_STOP_ID_PATTERN,
   buildAmbArrivalsIndex,
+  buildAmbLines,
   buildAmbRoutes,
   buildAmbStops,
   buildAmbTrips,
@@ -14,13 +15,16 @@ import {
  * AMB (Àrea Metropolitana de Barcelona) bus arrivals — keyless.
  *
  * Two fixed upstream files, both from ambmobilitat.cat:
- *   - the static GTFS zip (stops, lines, trip headsigns), refreshed daily;
+ *   - the static GTFS zip (stops, lines, trip headsigns and line shapes),
+ *     refreshed daily;
  *   - the GTFS-Realtime TripUpdates feed, refreshed at most every 30 s and
  *     shared by every stop, so the number of stops viewers ask about never
  *     changes the traffic sent to AMB.
  *
  * Routes:
  *   GET /api/amb/stops → {stops: [{id, code, name, lat, lon}], fetchedAt}
+ *   GET /api/amb/lines → {lines: [{name, desc, color, paths}], fetchedAt}
+ *     Each line's route as AMB publishes it, from the same daily GTFS.
  *   GET /api/amb/arrivals/<stopId> → {kind: 'amb', id, fetchedAt, routes}
  *     `fetchedAt` is the feed's own timestamp (the licence asks for the date
  *     of the last update to be cited).
@@ -45,7 +49,7 @@ const AMB_REQUEST_TIMEOUT_MS = 30_000;
 const AMB_GTFS_MAX_BYTES = 32 * 1024 * 1024;
 const AMB_GTFS_ENTRY_MAX_BYTES = 16 * 1024 * 1024;
 const AMB_TRIP_UPDATES_MAX_BYTES = 4 * 1024 * 1024;
-const GTFS_FILES = ['stops.txt', 'routes.txt', 'trips.txt'];
+const GTFS_FILES = ['stops.txt', 'routes.txt', 'trips.txt', 'shapes.txt'];
 
 /** An AMB failure the routes turn into a status code. */
 export class AmbError extends Error {
@@ -160,15 +164,25 @@ export function createAmbArrivalsService({
     } catch {
       throw new AmbError('unavailable');
     }
-    if (GTFS_FILES.some((name) => !files.has(name)))
+    // Shapes only draw the lines; arrivals work without them.
+    if (GTFS_FILES.some((name) => name !== 'shapes.txt' && !files.has(name)))
       throw new AmbError('unavailable');
     const stops = buildAmbStops(files.get('stops.txt').toString('utf8'));
     if (!stops.length) throw new AmbError('unavailable');
+    const routesCsv = files.get('routes.txt').toString('utf8');
+    const tripsCsv = files.get('trips.txt').toString('utf8');
     schedule = {
       stops,
       stopIds: new Set(stops.map((stop) => stop.id)),
-      routes: buildAmbRoutes(files.get('routes.txt').toString('utf8')),
-      trips: buildAmbTrips(files.get('trips.txt').toString('utf8')),
+      routes: buildAmbRoutes(routesCsv),
+      trips: buildAmbTrips(tripsCsv),
+      lines: files.has('shapes.txt')
+        ? buildAmbLines({
+            shapesCsv: files.get('shapes.txt').toString('utf8'),
+            tripsCsv,
+            routesCsv,
+          })
+        : [],
       fetchedAt: now(),
     };
     return schedule;
@@ -233,6 +247,11 @@ export function createAmbArrivalsService({
       const current = await currentSchedule();
       return { stops: current.stops, fetchedAt: current.fetchedAt };
     },
+    /** @returns {Promise<{lines: object[], fetchedAt: number}>} */
+    async lines() {
+      const current = await currentSchedule();
+      return { lines: current.lines, fetchedAt: current.fetchedAt };
+    },
     /**
      * @param {string} stopId
      * @returns {Promise<{kind: 'amb', id: string, fetchedAt: number,
@@ -268,7 +287,8 @@ function sendAmbError(res, error) {
 }
 
 /**
- * Vite plugin: `/api/amb/stops` and `/api/amb/arrivals/<stopId>`.
+ * Vite plugin: `/api/amb/stops`, `/api/amb/lines` and
+ * `/api/amb/arrivals/<stopId>`.
  * @param {Parameters<typeof createAmbArrivalsService>[0]} [options]
  * @returns {import('vite').Plugin}
  */
@@ -285,6 +305,21 @@ export function ambProxy(options = {}) {
           return sendJson(res, 405, { error: 'Method not allowed' });
         try {
           return sendJson(res, 200, await service.stops());
+        } catch (error) {
+          return sendAmbError(res, error);
+        }
+      }),
+    );
+    server.middlewares.use(
+      '/api/amb/lines',
+      sameSiteGated(async (req, res) => {
+        const rest = String(req.url || '/').split('?')[0];
+        if (rest !== '/' && rest !== '')
+          return sendJson(res, 404, { error: 'not_found' });
+        if (req.method !== 'GET')
+          return sendJson(res, 405, { error: 'Method not allowed' });
+        try {
+          return sendJson(res, 200, await service.lines());
         } catch (error) {
           return sendAmbError(res, error);
         }

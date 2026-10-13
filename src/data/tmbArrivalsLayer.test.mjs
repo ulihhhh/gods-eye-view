@@ -9,8 +9,10 @@ import {
   createTmbArrivalsLayer,
   mergeArrivalPlaces,
   normalizeAmbStopsPayload,
+  normalizeBusLinesPayload,
   normalizeTmbCatalogPayload,
   parseTmbPlaceEntityId,
+  splitPathIntoPieces,
   tmbPlaceColorRgb,
   tmbPlaceEntityId,
 } from './tmbArrivalsLayer.js';
@@ -58,10 +60,18 @@ const json = (status, body) => ({
   json: async () => body,
 });
 
-/** `amb` answers `/api/amb/stops`; `answer` everything else. */
-function harness(answer, amb = json(200, { stops: [], fetchedAt: 1 })) {
+/**
+ * `amb` answers `/api/amb/stops`, `routes` the two bus route lists (kept
+ * apart in `routeRequests`); `answer` everything else.
+ */
+function harness(
+  answer,
+  amb = json(200, { stops: [], fetchedAt: 1 }),
+  routes = () => json(200, { lines: [], fetchedAt: 1 }),
+) {
   let clock = 100_000;
   const requests = [];
+  const routeRequests = [];
   const calls = [];
   const timers = [];
   const layer = createTmbArrivalsLayer({
@@ -71,6 +81,10 @@ function harness(answer, amb = json(200, { stops: [], fetchedAt: 1 })) {
       clearSource: (...args) => calls.push(['clear', ...args]),
     },
     fetchImpl: async (url) => {
+      if (url === '/api/tmb/bus-lines' || url === '/api/amb/lines') {
+        routeRequests.push(url);
+        return routes(url);
+      }
       requests.push(url);
       return url === '/api/amb/stops' ? amb : answer(url);
     },
@@ -89,6 +103,7 @@ function harness(answer, amb = json(200, { stops: [], fetchedAt: 1 })) {
     layer,
     viewer,
     requests,
+    routeRequests,
     calls,
     timers,
     lastCard,
@@ -144,6 +159,10 @@ test('the catalogue draws metro stations from city scale and bus stops at street
     assert.deepEqual(h.requests.sort(), [
       '/api/amb/stops',
       '/api/tmb/stations',
+    ]);
+    assert.deepEqual(h.routeRequests.sort(), [
+      '/api/amb/lines',
+      '/api/tmb/bus-lines',
     ]);
     const entities = h.viewer._dataSources[0].entities;
     const station = entities.getById('tmb-arrivals:metro:6660100');
@@ -373,4 +392,48 @@ test('catalogue lines are validated; a server without them still works', () => {
   });
   assert.deepEqual(kept.lines, [line]);
   assert.deepEqual(normalizeTmbCatalogPayload(CATALOG).lines, []);
+});
+
+test('bus routes are validated, cut into pieces, and never hold up the stops', async () => {
+  assert.equal(normalizeBusLinesPayload({}), null);
+  assert.deepEqual(
+    normalizeBusLinesPayload({
+      lines: [
+        { name: '24', color: 'DA291C', paths: [[2.1, 41.4, 2.11, 41.4]] },
+        { name: 'bad', paths: [[2.1, 41.4, 2.11]] },
+      ],
+      fetchedAt: 5,
+    }),
+    {
+      lines: [
+        { name: '24', color: 'DA291C', paths: [[2.1, 41.4, 2.11, 41.4]] },
+      ],
+      fetchedAt: 5,
+    },
+  );
+  // ~5.6 km due east in 0.0675° steps (~5.6 km at 41.4°): three pieces
+  // sharing their ends.
+  const path = [];
+  for (let i = 0; i <= 10; i++) path.push(2 + i * 0.00675, 41.4);
+  const pieces = splitPathIntoPieces(path, 2_000);
+  assert.ok(pieces.length >= 2, `${pieces.length} pieces`);
+  for (let i = 1; i < pieces.length; i++)
+    assert.deepEqual(pieces[i].slice(0, 2), pieces[i - 1].slice(-2));
+  assert.deepEqual(pieces[0].slice(0, 2), [2, 41.4]);
+  assert.deepEqual(pieces.at(-1).slice(-2), path.slice(-2));
+  assert.deepEqual(splitPathIntoPieces([2, 41, 2.001, 41]), [
+    [2, 41, 2.001, 41],
+  ]);
+  // A route list that never answers does not keep the stops off the map.
+  const h = harness(
+    () => json(200, CATALOG),
+    undefined,
+    () => new Promise(() => {}),
+  );
+  try {
+    assert.equal(await h.layer.update(), true);
+    assert.ok(h.viewer._dataSources[0].entities.values.length > 0);
+  } finally {
+    h.layer.destroy(h.viewer);
+  }
 });
