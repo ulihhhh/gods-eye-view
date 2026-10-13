@@ -37,8 +37,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // omit top-level anyOf (OpenAI rejects it). Contacts list routing preserves
     // requested radius and center authority in descriptions only.
     // Street Level adds its toggle enum values and generated alias hint.
-    // The fork's AEMET and Liveuamap manifest entries add theirs.
-    'cc2479690ab163a9bec2fe7ae62ada337405f9094d0457784b445c9e40ba2c80',
+    // The fork's AEMET, Liveuamap and TMB manifest entries add theirs.
+    '1aeb4f3cff9e36b51c6e28aae5333c8271e7ff5612d2e4ff196145dfdc2cf6da',
   );
 });
 

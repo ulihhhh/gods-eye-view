@@ -573,7 +573,7 @@ export const LAYER_STATE_TOKEN_RESERVATIONS =
  * owns stable URL ordering.
  */
 export const LAYER_STATE_REGISTRY = Object.freeze([
-  // Fork-local layers (AEMET, liveuamap) own the `za`–`zg` block of the
+  // Fork-local layers (AEMET, liveuamap, TMB) own the `za`–`zh` block of the
   // two-character namespace, which upstream allocates last. The free digits
   // they used to borrow are upstream's next allocations, so keeping them
   // here would collide with every new upstream layer.
@@ -715,6 +715,12 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
   Object.freeze({
     id: 'telegeography-submarine-cables',
     token: 'u',
+    disposition: 'enabled-only',
+  }),
+  // Fork-local (`z*` block): TMB next arrivals, Barcelona.
+  Object.freeze({
+    id: 'tmb-arrivals',
+    token: 'zh',
     disposition: 'enabled-only',
   }),
   Object.freeze({

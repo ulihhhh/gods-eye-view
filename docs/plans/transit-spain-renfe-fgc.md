@@ -290,7 +290,7 @@ servidor (`.env`) y se ofrecen en el panel POWER UP, con enlace al registro en
 developer.tmb.cat. El navegador nunca ve la clave: todas las llamadas pasan por un
 proxy propio (`/api/tmb/...`) que solo admite rutas fijas.
 
-**4b — Panel de próximas llegadas.** Al pulsar una estación de metro (iMetro) o una
+**4b — Panel de próximas llegadas** — ✅ hecho 2026-10-13. Al pulsar una estación de metro (iMetro) o una
 parada de bus (iBus), bajo demanda y con caché corta (~15 s). Sin clave, la capa dice
 claramente que necesita una. Rama `feat/transit-es-tmb-arrivals`.
 
@@ -361,6 +361,41 @@ también los recuentos del manifiesto de voz y de DATA_SOURCES si los hay.
 
 **Hecho cuando** la clave se guarda desde POWER UP y se valida contra la API, y el panel
 muestra las llegadas reales de una estación y una parada.
+
+**Resultado 4b (2026-10-13, rama `feat/transit-es-tmb-arrivals`):**
+
+- Implementado como estaba planeado:
+  - `server/providers/tmb.js`: `/api/tmb/stations` y `/api/tmb/arrivals/{metro|bus}/<id>`;
+  - `src/data/tmbArrivals.js`: normalizadores y ficha, sin Cesium;
+  - `src/data/tmbArrivalsLayer.js`: capa `tmb-arrivals`, token `zh`.
+- Catálogo en vivo: 137 estaciones (las 3 "Planificat" fuera) y 2.723 paradas, 229 KB
+  servidos. TMB lo da recortado con `propertyName=…,GEOMETRY`: sin `GEOMETRY` llega
+  sin coordenadas, y las paradas pasan de 1,9 MB a 646 KB.
+- Diferencias con el plan:
+  - El catálogo se carga al activar la capa, esté donde esté la cámara: el servidor lo
+    guarda 24 h, así que son 2 peticiones a TMB al día.
+  - El tope es de **30 peticiones de llegadas a TMB por minuto** en total, no de ids
+    distintos. Es más simple y más estricto; una ficha abierta gasta 4.
+  - **Los puntos se dibujan sobre el mesh 3D** (`disableDepthTestDistance` igual a su
+    distancia máxima: 40 km metro, 3 km bus). En Pl. Catalunya el punto medio de los
+    andenes queda bajo el mesh, que lo tapaba y se quedaba el clic. Al no verse a más de
+    40 km, no aparecen al otro lado del globo.
+- Validación:
+  - Tests nuevos: 8 del módulo puro, 7 de la capa y 7 más en `tmbProvider.test.mjs`
+    (15 en total). `npm test` da 6.547, 0 fallos. Pasan format, boundaries, `doctor` y
+    build.
+  - En vivo, con Puppeteer: al pulsar Catalunya sale "L1 → Fondo · 3 min / L3 → Trinitat
+    Nova · 2 min, 6 min … Source: TMB iMetro · 12:25". La parada 108 lista 16 líneas,
+    AMB incluidas (X86, L95…). Con la ficha abierta hay 3 refrescos en 46 s, y Escape
+    la cierra.
+  - Rutas: 404 para ids fuera del catálogo y 403 si la petición viene de otro sitio.
+- **Pins del fork que cambian:**
+  - catálogo de capas 37 → 38 (`constructCatalog.test`, `sourceComposition.test`);
+  - `REGISTERED_LAYER_IDS` 36 → 37 (`layerState.test`);
+  - ledger 36 → 37 reservas, "38 published" y `l` de 93 caracteres
+    (`layerStateTokenLedger.test`);
+  - esquema de voz: longitud 30732 más los hashes de `firstRunExperience.test` y
+    `actionSchemas.test`.
 
 **4c — (Después de la 4b) Ampliación AMB y bicis compartidas.** Decidido el 2026-10-13:
 las paradas AMB no entran en la 4b. Van en una ampliación posterior, junto con AMBici y
