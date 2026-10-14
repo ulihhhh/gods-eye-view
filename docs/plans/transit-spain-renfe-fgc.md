@@ -8,10 +8,10 @@ investigación.
 
 ## Cómo retomar (estado al cierre del 2026-10-13)
 
-- **Hecho y en `mi-main`**: fases 1–5f. Todas las ramas `feat/transit-es-*` están
+- **Hecho y en `mi-main`**: fases 1–5f y 6a. Todas las ramas `feat/transit-es-*` están
   fusionadas; la siguiente fase sale de `mi-main` en una rama nueva.
-- **Orden acordado el 2026-10-14:** 5f ✅ → 6a → 6b → 6c (seguir al tren seleccionado
-  con la cámara).
+- **Orden acordado el 2026-10-14:** 5f ✅ → 6a ✅ → 6b → 6c (seguir al tren
+  seleccionado con la cámara).
 - **Siguiente: Fase 6a — ficha de FGC** (ver Fase 6). Punto de partida:
   - `src/data/fgcGeotren.js` (`decodeFgcGeotren`): hoy solo lee `lin`, `id`, `ut`,
     `estacionat_a` y la primera de `properes_parades`. Añadir `desti`, `origen`, la lista
@@ -842,7 +842,8 @@ cambian):
 
 **Subfases:**
 
-- **6a — FGC** (todo llega ya en Geotren, más el TU de FGC para las horas).
+- **6a — FGC** (todo llega ya en Geotren, más el TU de FGC para las horas). ✅ hecha
+  2026-10-14, ver "Resultado 6a".
 - **6b — Renfe**: un servicio diario en el servidor con `routes.txt` y `trips.txt` de los
   dos GTFS (tipo y destino), más los `trip_updates` de Renfe con la caché del proxy de
   Transit (15 s, mismo host). Enganche genérico del registro, como `stopNames`:
@@ -854,6 +855,35 @@ capturas de una ficha de cada operador.
 
 **Hecho cuando** una ficha de FGC muestra destino, próximas paradas, puntualidad y
 ocupación, y una de Renfe muestra tipo, destino, retraso y próximas paradas.
+
+**Resultado 6a (2026-10-14, rama `feat/transit-es-fgc-card`):**
+
+- **Geotren** (`fgcGeotren.js`) añade campos opcionales: `destinationStopId`,
+  `originStopId`, `nextStopIds` (lista completa), `onTime` (`en_hora`), `carLoads`
+  (`ocupacio_*_percent`, 0–100) y `vehicleType` (`tipus_unitat`).
+- **Enganche genérico `tripUpdates: {url, minIntervalMs?, stopKey?}`** en el registro:
+  el servicio descarga el TripUpdates a la vez que las posiciones (caché propia,
+  conserva el último índice 5 min si falla, nunca bloquea las posiciones) y
+  `transitServiceFields.js` lo une por `tripId`: `nextStops [{stopId, name, at}]`
+  (≤ 8, sin las ya pasadas), `nextStopsMore`, `delaySec`, y nombra `destination` /
+  `origin`. Sin TU, las próximas paradas salen de `nextStopIds`, sin hora. Lo usará
+  Renfe en la 6b.
+- El decodificador de TripUpdates pasa de `ambArrivals.js` a `gtfsTripUpdates.js`
+  (AMB lo reexporta) y lee el `delay` del viaje y de la parada como int32 (antes,
+  zigzag; AMB no lo usaba).
+- FGC: los `stop_id` del TU son estación + dígito de andén (`PC1`): `fgcTripStopKey`
+  quita un dígito (`M41` → `M4`). El id del fichero del TU no ha cambiado desde el
+  2026-10-13. Licencia del dataset `trip-updates-gtfs_realtime`: CC BY 4.0, la misma
+  atribución. Cuota: 1.440 + 1.440 peticiones al día, dentro de las 5.000.
+- Fila nueva opcional del registro `timeZone` (`Europe/Madrid` en las tres filas
+  españolas) para las horas de la ficha.
+- Ficha (`src/layers/transit/serviceCopy.js`, tres enganches en `policy.js`): título
+  `Route S2 → Sabadell Parc Nord`; `On time · from Pl. Catalunya` (o `+4 min late` /
+  `Running late`); `Next: Muntaner 11:25 · La Bonanova 11:26 · … · +16`;
+  `Load by car: 32% · 22% · 32% · 22%`; `· series 113` en la línea del vehículo.
+- **Cobertura medida en vivo (11:20):** 55 trenes; destino 55, próximas paradas 55,
+  con hora 49 (89 %), ocupación 40, serie 52, fuera de hora 1. Ningún retraso en
+  segundos (FGC no lo publica).
 
 ### Fase 6c — Seguir al tren seleccionado con la cámara — pendiente
 

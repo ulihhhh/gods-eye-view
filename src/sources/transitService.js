@@ -31,6 +31,10 @@ import {
   transitResponseHeaders,
   transitUpstreamHeaders,
 } from '../data/transitProxy.js';
+import { indexTripUpdates } from '../data/transitServiceFields.js';
+
+/** A TripUpdates index this old is no longer joined to positions. */
+export const TRANSIT_TRIP_UPDATES_STALE_MS = 5 * 60_000;
 
 /**
  * Fetch a registered feed, resolving each redirect hop BEFORE following it.
@@ -185,6 +189,77 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
     return load.promise;
   }
 
+  /** @type {Map<string, {at: number, fetchedAt: number|null, index: Map<string, object>|null, promise: Promise<object|null>|null}>} */
+  const tripUpdateLoads = new Map();
+
+  /**
+   * The feed's TripUpdates index (registry `tripUpdates`), fetched at most
+   * once per its own interval (`minIntervalMs`, else the proxy TTL) and
+   * shared by every position refresh. A failed fetch keeps the last index
+   * while it is younger than TRANSIT_TRIP_UPDATES_STALE_MS, and is not
+   * retried before the interval passes. Never rejects: positions are served
+   * without next-stop times rather than not at all.
+   * @param {object} feed
+   * @param {number} now
+   * @returns {Promise<Map<string, object>|null>}
+   */
+  function tripUpdatesFor(feed, now) {
+    const source = feed.tripUpdates;
+    if (!source?.url) return Promise.resolve(null);
+    const known = tripUpdateLoads.get(feed.id);
+    if (known?.promise) return known.promise;
+    const usable = (load) =>
+      load?.index && now - load.fetchedAt < TRANSIT_TRIP_UPDATES_STALE_MS
+        ? load.index
+        : null;
+    if (known && now - known.at < transitFeedTtlMs(source))
+      return Promise.resolve(usable(known));
+    const load = {
+      at: now,
+      fetchedAt: known?.fetchedAt ?? null,
+      index: known?.index ?? null,
+      promise: null,
+    };
+    load.promise = (async () => {
+      const controller = new AbortController();
+      controllers.add(controller);
+      const timeout = setTimeout(
+        () => controller.abort(),
+        TRANSIT_PROXY_TIMEOUT_MS,
+      );
+      try {
+        const { response, finalUrl } = await fetchTransitFeed(
+          { ...feed, url: source.url, format: 'gtfs-rt' },
+          controller.signal,
+          fetchImpl,
+        );
+        if (!isAcceptableTransitUpstreamUrl(finalUrl))
+          throw new Error('upstream is not https');
+        if (!response.ok) throw new Error(`upstream HTTP ${response.status}`);
+        const bytes = await readResponseBytesCapped(
+          response,
+          TRANSIT_PROXY_MAX_BODY_BYTES,
+        );
+        load.index = indexTripUpdates(bytes);
+        load.fetchedAt = now;
+      } catch (error) {
+        if (!closed)
+          console.warn(
+            `[transit] ${feed.id} trip updates unavailable:`,
+            error?.message || error,
+          );
+      } finally {
+        clearTimeout(timeout);
+        controller.abort();
+        controllers.delete(controller);
+        load.promise = null;
+      }
+      return usable(load);
+    })();
+    tripUpdateLoads.set(feed.id, load);
+    return load.promise;
+  }
+
   /**
    * The stretch each vehicle travelled just before its current position, from
    * the retained history (`recent: [[tMs, lat, lon], …]`, oldest first), so a
@@ -244,6 +319,8 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
       TRANSIT_PROXY_TIMEOUT_MS,
     );
     const previous = cache.get(feed.id);
+    // Asked beside the positions, not after them.
+    const tripUpdates = tripUpdatesFor(feed, now);
     try {
       const { response, finalUrl } = await fetchTransitFeed(
         feed,
@@ -287,13 +364,18 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
         response,
         TRANSIT_PROXY_MAX_BODY_BYTES,
       );
-      const [stopNames, stopPlaces] = await Promise.all([
+      const [stopNames, stopPlaces, tripIndex] = await Promise.all([
         stopDictionaryFor(feed, 'stopNames', now),
         stopDictionaryFor(feed, 'stopPlaces', now),
+        tripUpdates,
       ]);
       const snapshot = yieldShared(
         feed,
-        buildTransitSnapshot(feed, bytes, now, { stopNames, stopPlaces }),
+        buildTransitSnapshot(feed, bytes, now, {
+          stopNames,
+          stopPlaces,
+          tripUpdates: tripIndex,
+        }),
       );
       if (closed) throw new Error('Transit provider closed');
       history.ingest(feed, snapshot.vehicles, Date.now());

@@ -128,8 +128,22 @@ export function fgcRouteMode(routeId) {
 const FGC_TERMS = Object.freeze({
   quote:
     'Creative Commons Attribution License 4.0 (cc-by 4.0) — attributions: Ferrocarrils de la Generalitat de Catalunya',
-  note: 'Quoted from the dataset metadata of posicionament-dels-trens on dadesobertes.fgc.cat. The anonymous API allows 5,000 requests a day per IP (X-RateLimit-* headers, reset at midnight UTC); minIntervalMs keeps one process polling all day near 1,440. Geotren regenerates about every two minutes, so asking more often gains nothing.',
+  note: 'Quoted from the dataset metadata of posicionament-dels-trens (and, identically, trip-updates-gtfs_realtime) on dadesobertes.fgc.cat. The anonymous API allows 5,000 requests a day per IP (X-RateLimit-* headers, reset at midnight UTC), shared by both datasets; minIntervalMs keeps one process polling each all day near 1,440 (2,880 together). Geotren regenerates about every two minutes, so asking more often gains nothing.',
 });
+
+/**
+ * FGC's GTFS-Realtime TripUpdates: a predicted time at every stop left on
+ * each trip, keyed by Geotren's trip id. The Opendatasoft file id has been
+ * stable since the dataset was first read (2026-10-13); the dataset's
+ * `records` endpoint lists it if it ever changes.
+ */
+const FGC_TRIP_UPDATES_URL =
+  'https://dadesobertes.fgc.cat/api/explore/v2.1/catalog/datasets/trip-updates-gtfs_realtime/files/735985017f62fd33b2fe46e31ce53829';
+
+/** FGC trip-update stops are a station code plus a platform digit ("PC1"). */
+export function fgcTripStopKey(stopId) {
+  return /^[A-Z0-9]{2,6}$/.test(stopId) ? stopId.slice(0, -1) : stopId;
+}
 
 /** Spanish registry rows, in presentation order. */
 export const SPAIN_TRANSIT_FEEDS = Object.freeze([
@@ -147,6 +161,7 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     defaultEnabled: true,
     terms: RENFE_TERMS,
     defaultMode: 'rail',
+    timeZone: 'Europe/Madrid',
     routeMode: railOnly,
     deriveRoute: renfeCercaniasRoute,
     interpretStatus: renfeCercaniasStatus,
@@ -174,6 +189,7 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     defaultEnabled: true,
     terms: RENFE_TERMS,
     defaultMode: 'rail',
+    timeZone: 'Europe/Madrid',
     routeMode: railOnly,
     // Catalan regional trains (R15, R16, R17…) are published in both feeds
     // under one train number, at positions up to kilometres apart. Cercanías
@@ -209,9 +225,15 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     defaultEnabled: true,
     terms: FGC_TERMS,
     defaultMode: 'rail',
+    timeZone: 'Europe/Madrid',
     routeMode: fgcRouteMode,
     staleRepeats: true,
     historyRetention: true,
+    tripUpdates: Object.freeze({
+      url: FGC_TRIP_UPDATES_URL,
+      minIntervalMs: 60_000,
+      stopKey: fgcTripStopKey,
+    }),
     stopNames: () => spainStationNames('fgc'),
     stopPlaces: () => spainStationPlaces('fgc'),
     trackGeometry: () => spainTrackLines('fgc'),

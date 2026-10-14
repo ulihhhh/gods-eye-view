@@ -12,6 +12,7 @@ import {
 } from './movement.js';
 import { PLAYBACK_MAX_DELAY_MS } from '../../data/contactPlayback.js';
 import { transitStopRelation } from '../../data/transitStopRelation.js';
+import { transitServiceCopy } from './serviceCopy.js';
 
 export const TRANSIT_SELECTED_OVERLAY_SOURCE_ID = 'transit-selected';
 export const TRANSIT_SELECTED_OVERLAY_SOURCE_OPTIONS = Object.freeze({
@@ -385,7 +386,8 @@ export function buildTransitSelectionCopy(
     : record.label
       ? `Vehicle ${record.label}`
       : `Vehicle ${record.id}`;
-  const title = `${icon} ${routeLabel}`;
+  const service = transitServiceCopy(feed, record);
+  const title = `${icon} ${routeLabel}${service.destination ? ` → ${service.destination}` : ''}`;
   // The mode is said in words on its own line. A glyph and a route id do not
   // tell a reader that the dot on Tremont Street is a subway train, and a
   // subway drawn on a street reads as a bug until the card says what it is.
@@ -399,6 +401,7 @@ export function buildTransitSelectionCopy(
   else if (shown?.word === 'WAITING') motion.push('Waiting for update');
   else if (shown) motion.push('Moving');
   if (motion.length) details.push(motion.join(' · '));
+  details.push(...service.lines);
   const reportedMotion = [];
   if (Number.isFinite(record.speedMps))
     reportedMotion.push(`reported ${Math.round(record.speedMps * 3.6)} km/h`);
@@ -438,7 +441,7 @@ export function buildTransitSelectionCopy(
     details.push('Shown at street level · depth not in the feed');
   }
   details.push(
-    `Vehicle ${record.id}${record.label && record.label !== record.id ? ` · ${record.label}` : ''}`,
+    `Vehicle ${record.id}${record.label && record.label !== record.id ? ` · ${record.label}` : ''}${service.vehicleType ? ` · series ${service.vehicleType}` : ''}`,
   );
   const ageS = Math.round(
     (Number.isFinite(entry?.sample?.latestReportAgeMs)

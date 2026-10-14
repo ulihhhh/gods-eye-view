@@ -12,11 +12,10 @@
  * Reuse is authorised under Spanish Law 37/2007: cite AMB and the date of the
  * last update, and do not alter the content.
  */
-import { PbfReader } from 'pbf';
-import { GTFS_MAX_ENTITIES, GTFS_MAX_STRING_CHARS } from './gtfsRealtime.js';
 import { parseCsv } from './gtfsCsv.js';
+import { decodeTripUpdates } from './gtfsTripUpdates.js';
 
-export { parseCsv };
+export { parseCsv, decodeTripUpdates };
 
 /** AMB stop ids are six digits ("000108" is TMB's stop 108). */
 export const AMB_STOP_ID_PATTERN = /^\d{6}$/;
@@ -26,9 +25,6 @@ export const AMB_ARRIVALS_PER_ROUTE = 3;
 
 /** A prediction this far in the past is a bus that has gone. */
 const DEPARTED_GRACE_MS = 60_000;
-
-/** Stop time updates read per trip; a long route has well under 100 stops. */
-const MAX_STOPS_PER_TRIP = 400;
 
 // --- Static GTFS ------------------------------------------------------------
 
@@ -165,121 +161,6 @@ export function buildAmbLines({ shapesCsv, tripsCsv, routesCsv }) {
   return [...routes.values()]
     .filter((route) => route.paths.length)
     .sort((a, b) => a.name.localeCompare(b.name, 'ca', { numeric: true }));
-}
-
-// --- GTFS-Realtime TripUpdates ----------------------------------------------
-
-function readBoundedString(pbf, target) {
-  const value = pbf.readString();
-  if (value.length <= GTFS_MAX_STRING_CHARS) return value;
-  target.oversize = true;
-  return null;
-}
-
-function readHeader(tag, header, pbf) {
-  if (tag === 2) header.incrementality = pbf.readVarint();
-  else if (tag === 3) header.timestamp = pbf.readVarint();
-}
-
-function readTrip(tag, trip, pbf) {
-  if (tag === 1) trip.tripId = readBoundedString(pbf, trip);
-  else if (tag === 5) trip.routeId = readBoundedString(pbf, trip);
-  else if (tag === 4) trip.scheduleRelationship = pbf.readVarint();
-}
-
-function readVehicle(tag, vehicle, pbf) {
-  if (tag === 1) vehicle.id = readBoundedString(pbf, vehicle);
-  else if (tag === 2) vehicle.label = readBoundedString(pbf, vehicle);
-}
-
-function readStopTimeEvent(tag, event, pbf) {
-  if (tag === 1) event.delay = pbf.readSVarint();
-  else if (tag === 2) event.time = pbf.readVarint();
-}
-
-function readStopTimeUpdate(tag, update, pbf) {
-  if (tag === 1) update.stopSequence = pbf.readVarint();
-  else if (tag === 2) update.arrival = pbf.readMessage(readStopTimeEvent, {});
-  else if (tag === 3) update.departure = pbf.readMessage(readStopTimeEvent, {});
-  else if (tag === 4) update.stopId = readBoundedString(pbf, update);
-  else if (tag === 5) update.scheduleRelationship = pbf.readVarint();
-}
-
-function readTripUpdate(tag, tripUpdate, pbf) {
-  if (tag === 1) tripUpdate.trip = pbf.readMessage(readTrip, {});
-  else if (tag === 3) tripUpdate.vehicle = pbf.readMessage(readVehicle, {});
-  else if (tag === 2) {
-    if (tripUpdate.stops.length >= MAX_STOPS_PER_TRIP) return;
-    tripUpdate.stops.push(pbf.readMessage(readStopTimeUpdate, {}));
-  }
-}
-
-function readEntity(tag, entity, pbf) {
-  if (tag === 1) entity.id = readBoundedString(pbf, entity);
-  else if (tag === 2) entity.isDeleted = pbf.readBoolean();
-  else if (tag === 3)
-    entity.tripUpdate = pbf.readMessage(readTripUpdate, { stops: [] });
-}
-
-function readMessage(tag, message, pbf) {
-  if (tag === 1) message.header = pbf.readMessage(readHeader, {});
-  else if (tag === 2) {
-    if (message.entities.length >= GTFS_MAX_ENTITIES) {
-      message.truncated = true;
-      return;
-    }
-    message.entities.push(pbf.readMessage(readEntity, {}));
-  }
-}
-
-/** StopTimeUpdate.ScheduleRelationship.SKIPPED and TripDescriptor CANCELED. */
-const STOP_SKIPPED = 1;
-const TRIP_CANCELED = 3;
-
-/**
- * Decode a TripUpdates feed into plain trips with their predicted stop
- * times (epoch ms). Skipped stops, cancelled trips and deleted entities are
- * left out.
- * @param {Uint8Array|ArrayBuffer} bytes
- * @returns {{timestamp: number|null, trips: Array<{tripId: string,
- *   routeId: string|null, vehicleId: string|null, vehicleLabel: string|null,
- *   stops: Array<{stopId: string, time: number}>}>}}
- */
-export function decodeTripUpdates(bytes) {
-  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  const message = new PbfReader(view).readFields(readMessage, {
-    header: {},
-    entities: [],
-    truncated: false,
-  });
-  const trips = [];
-  for (const entity of message.entities) {
-    const update = entity.tripUpdate;
-    if (!update || entity.isDeleted || entity.oversize) continue;
-    const trip = update.trip || {};
-    if (!trip.tripId || trip.oversize) continue;
-    if (trip.scheduleRelationship === TRIP_CANCELED) continue;
-    const stops = [];
-    for (const stop of update.stops) {
-      if (!stop.stopId || stop.oversize) continue;
-      if (stop.scheduleRelationship === STOP_SKIPPED) continue;
-      const seconds = stop.arrival?.time ?? stop.departure?.time;
-      if (!Number.isFinite(seconds) || seconds <= 0) continue;
-      stops.push({ stopId: stop.stopId, time: seconds * 1000 });
-    }
-    trips.push({
-      tripId: trip.tripId,
-      routeId: trip.routeId || null,
-      vehicleId: update.vehicle?.id || null,
-      vehicleLabel: update.vehicle?.label || null,
-      stops,
-    });
-  }
-  const seconds = message.header?.timestamp;
-  return {
-    timestamp: Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null,
-    trips,
-  };
 }
 
 /**

@@ -37,6 +37,21 @@ const CAR_LEVEL_FIELDS = Object.freeze([
   'ocupacio_m2_tram',
 ]);
 
+/** Per-car load in percent, in the order the cars are listed. */
+const CAR_PERCENT_FIELDS = Object.freeze([
+  'ocupacio_mi_percent',
+  'ocupacio_ri_percent',
+  'ocupacio_m1_percent',
+  'ocupacio_m2_percent',
+]);
+
+/** Station codes read from `properes_parades`; a line has about 30. */
+const MAX_NEXT_STOPS = 40;
+
+/** Station codes are a few letters ("PC", "TR"); unit series a few digits. */
+const STATION_CODE = /^[A-Z0-9]{1,6}$/;
+const UNIT_SERIES = /^[A-Za-z0-9-]{1,8}$/;
+
 function shortString(value) {
   if (typeof value !== 'string') return null;
   const text = value.trim();
@@ -71,9 +86,45 @@ function positionOf(record) {
  * @returns {string|null}
  */
 export function firstNextStop(text) {
-  if (typeof text !== 'string') return null;
-  const match = /"parada"\s*:\s*"([^"]{1,16})"/.exec(text);
-  return match ? match[1] : null;
+  return nextStops(text)[0] ?? null;
+}
+
+/**
+ * Every station code of `properes_parades`, in order.
+ * @param {unknown} text
+ * @returns {string[]}
+ */
+export function nextStops(text) {
+  if (typeof text !== 'string') return [];
+  const codes = [];
+  for (const [, code] of text.matchAll(/"parada"\s*:\s*"([^"]{1,16})"/g)) {
+    if (codes.length >= MAX_NEXT_STOPS) break;
+    if (STATION_CODE.test(code)) codes.push(code);
+  }
+  return codes;
+}
+
+const stationCode = (value) => {
+  const text = shortString(value);
+  return text && STATION_CODE.test(text) ? text : null;
+};
+
+/** `en_hora` is the string "True" or "False". */
+function onTimeOf(value) {
+  if (value === true || value === 'True' || value === 'true') return true;
+  if (value === false || value === 'False' || value === 'false') return false;
+  return null;
+}
+
+/** Each car's load in percent (0–100), or null when Geotren has none. */
+function carLoadsOf(fields) {
+  const loads = [];
+  for (const name of CAR_PERCENT_FIELDS) {
+    const value = finite(fields?.[name]);
+    if (value !== null && value >= 0 && value <= 100)
+      loads.push(Math.round(value));
+  }
+  return loads.length ? loads : null;
 }
 
 /** Busiest car's level mapped to the GTFS enum, or null without data. */
@@ -103,8 +154,14 @@ export function normalizeGeotrenRecord(record) {
   const tripId = shortString(fields.id);
   const id = shortString(fields.ut) || tripId;
   if (!id) return null;
-  const parkedAt = shortString(fields.estacionat_a);
-  const next = firstNextStop(fields.properes_parades);
+  const parkedAt = stationCode(fields.estacionat_a);
+  const upcoming = nextStops(fields.properes_parades);
+  const next = upcoming[0] ?? null;
+  const series = shortString(fields.tipus_unitat);
+  const onTime = onTimeOf(fields.en_hora);
+  const carLoads = carLoadsOf(fields);
+  const destination = stationCode(fields.desti);
+  const origin = stationCode(fields.origen);
   return {
     id,
     lat: Number(lat.toFixed(6)),
@@ -119,6 +176,13 @@ export function normalizeGeotrenRecord(record) {
     stopId: parkedAt || next,
     status: parkedAt ? 'STOPPED_AT' : next ? 'IN_TRANSIT_TO' : null,
     occupancy: occupancyOf(fields),
+    // Generic optional service fields (see transitProxy applyServiceNames).
+    ...(destination ? { destinationStopId: destination } : {}),
+    ...(origin ? { originStopId: origin } : {}),
+    ...(upcoming.length ? { nextStopIds: upcoming } : {}),
+    ...(onTime === null ? {} : { onTime }),
+    ...(carLoads ? { carLoads } : {}),
+    ...(series && UNIT_SERIES.test(series) ? { vehicleType: series } : {}),
   };
 }
 

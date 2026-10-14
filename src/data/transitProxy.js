@@ -20,6 +20,7 @@ import {
 } from './gtfsRealtime.js';
 import { getTransitFeed } from './transitFeeds.js';
 import { decodeFgcGeotren } from './fgcGeotren.js';
+import { applyServiceFields } from './transitServiceFields.js';
 import {
   TRANSIT_STANDARD_STOP_RELATION,
   TRANSIT_STOP_RELATIONS,
@@ -307,6 +308,9 @@ export function transitFeedTtlMs(feed) {
  *   loaded; each vehicle whose `stopId` it names gains `stopName`.
  *   `stopPlaces`: the feed's station positions (`feed.stopPlaces()`); each
  *   vehicle whose stop it places gains `stopLat` / `stopLon`.
+ *   `tripUpdates`: the feed's TripUpdates index (registry `tripUpdates`),
+ *   when fetched; vehicles gain next stops with times and a delay (see
+ *   transitServiceFields.js).
  * @returns {{ feedId: string, name: string, fetchedAt: number, feedTimestamp: number|null,
  *   version: string|null, entityCount: number, truncated: boolean, count: number, vehicles: object[] }}
  */
@@ -314,7 +318,7 @@ export function buildTransitSnapshot(
   feed,
   bytes,
   now = Date.now(),
-  { stopNames = null, stopPlaces = null } = {},
+  { stopNames = null, stopPlaces = null, tripUpdates = null } = {},
 ) {
   const decoded = transitFormatFor(feed).decode(bytes);
   if (decoded.incrementality !== GTFS_INCREMENTALITY_FULL_DATASET) {
@@ -334,12 +338,20 @@ export function buildTransitSnapshot(
     count: decoded.vehicles.length,
     vehicles: repairVehicleTimestamps(
       applyStopPlaces(
-        applyStopNames(
-          applyStatusSemantics(
-            feed,
-            applyDerivedRoutes(feed, decoded.vehicles),
+        applyServiceFields(
+          applyStopNames(
+            applyStatusSemantics(
+              feed,
+              applyDerivedRoutes(feed, decoded.vehicles),
+            ),
+            stopNames,
           ),
-          stopNames,
+          {
+            stopNames,
+            tripUpdates,
+            stopKey: feed.tripUpdates?.stopKey ?? null,
+            now,
+          },
         ),
         stopPlaces,
       ),
