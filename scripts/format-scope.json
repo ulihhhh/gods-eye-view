@@ -742,6 +742,8 @@
   "src/data/renfeTripDetails.test.mjs",
   "src/data/zipEntries.js",
   "src/layers/transit/serviceCopy.js",
+  "src/layers/transit/follow.js",
+  "src/layers/transit/follow.test.mjs",
   "src/data/transitProxy.js",
   "src/data/transitProxy.test.mjs",
   "src/data/gtfsRealtime.js",

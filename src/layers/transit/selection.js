@@ -61,6 +61,7 @@ export function createSelection({ state, services, parts }) {
       entry.fetchedAt,
       entry,
     );
+    if (parts.follow) copy.details.push(parts.follow.cardLine(entry.key));
     // The TEXT is what the throttle is for, and it is republished only when
     // it has changed: the anchor is live through its getter, so re-sending
     // an identical card would only make the host re-solve its layout.
@@ -73,6 +74,8 @@ export function createSelection({ state, services, parts }) {
       entry.mode,
     );
     if (card) {
+      // Clickable: a click on the card toggles following (follow.js).
+      if (parts.follow) card.interactive = true;
       state._selectedCardText = text;
       state._overlayHost.setEntries(
         TRANSIT_SELECTED_OVERLAY_SOURCE_ID,
@@ -90,6 +93,7 @@ export function createSelection({ state, services, parts }) {
     parts.trails.clear();
     state._selectedKey = null;
     state._selectedCardText = null;
+    parts.follow?.stop();
     state._detectRevision += 1;
     // Cleared first: the styling path reads the selection from state.
     if (entry) parts.rendering.paintSelected(entry, false);
@@ -110,6 +114,17 @@ export function createSelection({ state, services, parts }) {
 
   function onKeyDown(event) {
     if (event.key === 'Escape' && state._selectedKey) clearSelection();
+    else if (
+      (event.key === 't' || event.key === 'T') &&
+      state._selectedKey &&
+      parts.follow &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !/^(INPUT|TEXTAREA|SELECT)$/.test(event.target?.tagName || '') &&
+      !event.target?.isContentEditable
+    )
+      parts.follow.toggle();
   }
 
   function installClickHandler(viewer) {
@@ -121,6 +136,7 @@ export function createSelection({ state, services, parts }) {
       // Ambient selection never competes for a pointer a tool has claimed:
       // placing a draw vertex on top of a bus must not also select the bus.
       if (!isPointerFree()) return;
+      if (parts.follow?.handleCardClick(click.position)) return;
       const scene = viewer.scene;
       // Pick buffers precede post-processing. Map a sensor pixel back through
       // the active shader's barrel distortion and quantization before picking.

@@ -4,6 +4,7 @@ import { createState } from './state.js';
 import { createHeight } from './height.js';
 import { createRendering } from './rendering.js';
 import { createSelection } from './selection.js';
+import { createFollow } from './follow.js';
 import { createIngestion } from './ingestion.js';
 import { createViewport } from './viewport.js';
 import { createQueries } from './queries.js';
@@ -47,6 +48,7 @@ export function createTransitLayer({
   parts.trails = createTrails(context);
   parts.height = createHeight(context);
   parts.selection = createSelection(context);
+  parts.follow = createFollow(context);
   parts.rendering = createRendering(context);
   parts.ingestion = createIngestion(context);
   parts.viewport = createViewport(context);

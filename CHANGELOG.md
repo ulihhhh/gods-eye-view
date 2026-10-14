@@ -114,6 +114,14 @@
   Mapillary only and hide while GOOGLE STREET VIEW is lit; its globe marker
   is a Google-blue view cone.
 
+- A selected transit vehicle can be followed with the camera: click its
+  card or press T. The camera flies to a chase view behind it, then moves
+  with the drawn vehicle and turns, smoothed, with its course along the
+  track, while the reader can still orbit and zoom around it. Clicking the
+  card or T again, closing the card, Escape, or another camera owner (a
+  flight, aircraft tracking) ends it; a vehicle that leaves the feed ends it
+  with a short note on the map.
+
 - Renfe train cards say what the train is and where it is going
   (`ALVIA 04073 → Santander`, `Route C1 → Lebrija`), its delay (`+8 min
 late`, `1 min early`) and its next stop with Renfe's predicted time. The
