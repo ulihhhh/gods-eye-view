@@ -110,13 +110,19 @@ test('an operator answering 429 is left alone for at least a minute', async () =
         method: 'GET',
       });
     const first = await get();
+    // The trip updates beside the positions were asked at the same moment.
+    const asked = calls.length;
+    assert.equal(
+      calls.filter((url) => url.includes('vehicle_positions')).length,
+      1,
+    );
     assert.equal(first.status, 502);
     const wait = Number(first.headers.get('Retry-After'));
     assert.ok(wait >= 119 && wait <= 120, `Retry-After ${wait}`);
     const second = await get();
     assert.equal(second.status, 503);
     assert.equal(second.headers.get('X-Transit-Backoff'), 'cooldown');
-    assert.equal(calls.length, 1, 'the operator is not asked again');
+    assert.equal(calls.length, asked, 'the operator is not asked again');
   } finally {
     service.close();
   }

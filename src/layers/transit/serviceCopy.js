@@ -1,7 +1,7 @@
 /**
  * Card lines for the optional service fields of a transit record
- * (`destination`, `origin`, `delaySec`, `onTime`, `nextStops`, `carLoads`,
- * `vehicleType`; see src/data/transitServiceFields.js). A record without
+ * (`serviceName`, `destination`, `origin`, `delaySec`, `onTime`,
+ * `nextStops`, `carLoads`, `vehicleType`; see src/data/transitServiceFields.js). A record without
  * them gets nothing, so feeds that never set them keep their card as it was.
  */
 
@@ -50,8 +50,8 @@ function punctuality(record) {
 /**
  * @param {object} feed Registry entry (`timeZone` for clock times).
  * @param {object} record Vehicle record.
- * @returns {{destination: string|null, lines: string[],
- *   vehicleType: string|null}}
+ * @returns {{routeLabel: string|null, destination: string|null,
+ *   lines: string[], vehicleType: string|null}}
  */
 export function transitServiceCopy(feed, record) {
   const lines = [];
@@ -77,6 +77,10 @@ export function transitServiceCopy(feed, record) {
       `Load by car: ${record.carLoads.map((pct) => `${pct}%`).join(' · ')}`,
     );
   return {
+    // "ALVIA 04073": the service and the train number riders know.
+    routeLabel: record.serviceName
+      ? `${record.serviceName} ${record.label || record.id}`
+      : null,
     destination: record.destination || null,
     lines,
     vehicleType: record.vehicleType || null,

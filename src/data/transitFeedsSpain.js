@@ -19,6 +19,10 @@ import {
   spainStationPlaces,
 } from './spainTransitStations.js';
 import { spainTrackLines } from './spainTrackGeometry.js';
+import {
+  buildCercaniasTripDetails,
+  buildRenfeLdTripDetails,
+} from './renfeTripDetails.js';
 
 /**
  * Renfe Cercanías labels are `<line>-<train>` with an optional platform
@@ -132,6 +136,29 @@ const FGC_TERMS = Object.freeze({
 });
 
 /**
+ * Renfe's static GTFS, read once a day for each trip's service and
+ * destination (registry `tripDetails`; CC BY 4.0, data.renfe.com datasets
+ * horarios-cercanias and horarios-de-alta-velocidad-larga-distancia-y-media-
+ * distancia). Cercanías' `trips.txt` is ~17.5 MB, so the entry cap is
+ * raised above the proxy's usual 16 MB.
+ */
+const RENFE_GTFS_FILES = Object.freeze(['routes.txt', 'trips.txt']);
+const RENFE_CERCANIAS_TRIP_DETAILS = Object.freeze({
+  url: 'https://ssl.renfe.com/ftransit/Fichero_CER_FOMENTO/fomento_transit.zip',
+  files: RENFE_GTFS_FILES,
+  maxBytes: 32 * 1024 * 1024,
+  maxEntryBytes: 32 * 1024 * 1024,
+  build: buildCercaniasTripDetails,
+});
+const RENFE_LD_TRIP_DETAILS = Object.freeze({
+  url: 'https://ssl.renfe.com/gtransit/Fichero_AV_LD/google_transit.zip',
+  files: RENFE_GTFS_FILES,
+  maxBytes: 8 * 1024 * 1024,
+  maxEntryBytes: 16 * 1024 * 1024,
+  build: buildRenfeLdTripDetails,
+});
+
+/**
  * FGC's GTFS-Realtime TripUpdates: a predicted time at every stop left on
  * each trip, keyed by Geotren's trip id. The Opendatasoft file id has been
  * stable since the dataset was first read (2026-10-13); the dataset's
@@ -171,6 +198,12 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     // The server keeps each train's recent positions, so a train the browser
     // sees for the first time can start moving from where it was.
     historyRetention: true,
+    // Delay and next stop with its time (datos abiertos "Horarios de viaje
+    // Cercanías", CC BY 4.0); destination from the static GTFS.
+    tripUpdates: Object.freeze({
+      url: 'https://gtfsrt.renfe.com/trip_updates.pb',
+    }),
+    tripDetails: RENFE_CERCANIAS_TRIP_DETAILS,
     stopNames: () => spainStationNames('renfe-cercanias'),
     stopPlaces: () => spainStationPlaces('renfe-cercanias'),
     trackGeometry: () => spainTrackLines('renfe-cercanias'),
@@ -198,6 +231,11 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
     interpretStatus: renfeLdStatus,
     staleRepeats: true,
     historyRetention: true,
+    tripUpdates: Object.freeze({
+      url: 'https://gtfsrt.renfe.com/trip_updates_LD.pb',
+    }),
+    // Service (AVE, ALVIA, MD…) and destination; trip ids carry the date.
+    tripDetails: RENFE_LD_TRIP_DETAILS,
     stopNames: () => spainStationNames('renfe-ld'),
     stopPlaces: () => spainStationPlaces('renfe-ld'),
     trackGeometry: () => spainTrackLines('renfe-ld'),

@@ -8,9 +8,9 @@ investigación.
 
 ## Cómo retomar (estado al cierre del 2026-10-13)
 
-- **Hecho y en `mi-main`**: fases 1–5f y 6a. Todas las ramas `feat/transit-es-*` están
+- **Hecho y en `mi-main`**: fases 1–5f, 6a y 6b. Todas las ramas `feat/transit-es-*` están
   fusionadas; la siguiente fase sale de `mi-main` en una rama nueva.
-- **Orden acordado el 2026-10-14:** 5f ✅ → 6a ✅ → 6b → 6c (seguir al tren
+- **Orden acordado el 2026-10-14:** 5f ✅ → 6a ✅ → 6b ✅ → 6c (seguir al tren
   seleccionado con la cámara).
 - **Siguiente: Fase 6a — ficha de FGC** (ver Fase 6). Punto de partida:
   - `src/data/fgcGeotren.js` (`decodeFgcGeotren`): hoy solo lee `lin`, `id`, `ut`,
@@ -847,7 +847,8 @@ cambian):
 - **6b — Renfe**: un servicio diario en el servidor con `routes.txt` y `trips.txt` de los
   dos GTFS (tipo y destino), más los `trip_updates` de Renfe con la caché del proxy de
   Transit (15 s, mismo host). Enganche genérico del registro, como `stopNames`:
-  `tripDetails` (estático) y `tripUpdatesUrl` (tiempo real).
+  `tripDetails` (estático) y `tripUpdatesUrl` (tiempo real). ✅ hecha 2026-10-14, ver
+  "Resultado 6b".
 
 **Validación.** Tests de `buildTransitSelectionCopy` con y sin cada campo, fixtures
 mínimos hechos a mano, cobertura medida en vivo (% de trenes con cada campo) y
@@ -884,6 +885,40 @@ ocupación, y una de Renfe muestra tipo, destino, retraso y próximas paradas.
 - **Cobertura medida en vivo (11:20):** 55 trenes; destino 55, próximas paradas 55,
   con hora 49 (89 %), ocupación 40, serie 52, fuera de hora 1. Ningún retraso en
   segundos (FGC no lo publica).
+
+**Resultado 6b (2026-10-14, rama `feat/transit-es-renfe-card`):**
+
+- **Datos de hoy:** los `trip_updates` de Renfe traen casi siempre **una** parada por
+  viaje (la siguiente), no 13 como el 2026-10-13: Cercanías 269 de 281 viajes con una,
+  uno con 18; LD 184 de 197 con una, y en LD esa parada suele ser ya pasada (solo 12 de
+  124 trenes tienen una siguiente parada futura). El retraso del viaje (`delay`) viene
+  siempre. Licencias: datasets `horarios-viaje-cercanias`,
+  `horarios-viaje-alta-velocidad-larga-media-distancia`, `horarios-cercanias` y
+  `horarios-de-alta-velocidad-larga-distancia-y-media-distancia`, todos CC BY 4.0.
+- **Registro:** las dos filas de Renfe declaran `tripUpdates` (`trip_updates.pb`,
+  `trip_updates_LD.pb`, TTL del proxy, 15 s) y el enganche nuevo
+  `tripDetails: {url, files, build, maxBytes?, maxEntryBytes?, refreshMs?}`.
+- **Servicio:** `tripDetailsFor` descarga el zip una vez al día (petición condicional,
+  timeout 120 s, tope 64 MB), lee solo `routes.txt` y `trips.txt` con
+  `src/data/zipEntries.js` (lector puro con `DecompressionStream`, sin `node:zlib`) y
+  guarda el `Map` que devuelve `build`. **Nunca bloquea las posiciones:** las primeras
+  respuestas tras arrancar salen sin destino; si falla, conserva el anterior y
+  reintenta en una hora.
+- **Constructores** (`src/data/renfeTripDetails.js`): Cercanías → `destination` del
+  `route_long_name`, que es de **ancho fijo** (40 caracteres de origen, `-` en la
+  posición 40, destino), porque "Chamartín - Clara Campoamor" lleva su propio " - ";
+  216 de 800 rutas no tienen destino. LD → `serviceName` (`route_short_name`: AVE,
+  ALVIA, MD, REG.EXP., AVLO, Intercity…), `originStopId` / `destinationStopId` de los
+  10 primeros dígitos de `route_id`, nombrados con el diccionario de estaciones. Un
+  objeto congelado por ruta compartido por sus viajes (115.819 viajes de Cercanías,
+  9.138 de LD).
+- **Ficha:** `serviceName` → título `ALVIA 04073 → Santander`; Cercanías sigue con
+  `Route C1 → Lebrija`; retraso `+8 min late` / `1 min early` / `On time`.
+- **Cobertura medida en vivo (11:45):** Cercanías 277 trenes → destino 275, retraso
+  275, siguiente parada con hora 274, ≥ 5 min tarde 82. LD 124 → servicio 124, destino
+  124, retraso 124, siguiente parada con hora 12, ≥ 5 min tarde 71.
+- De paso: la fila de FGC en `DATA_SOURCES.md` no puede nombrar la licencia (test
+  `transitQa`); la 6a la había nombrado.
 
 ### Fase 6c — Seguir al tren seleccionado con la cámara — pendiente
 

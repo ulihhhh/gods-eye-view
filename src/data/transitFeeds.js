@@ -135,6 +135,8 @@ function metroTransitRouteMode(routeId) {
  *   stopPlaces?: () => Promise<Readonly<Record<string, [number, number]>>>,
  *   trackGeometry?: () => Promise<Array<{routes?: string[]|null, paths: number[][]}>>,
  *   tripUpdates?: {url: string, minIntervalMs?: number, stopKey?: (stopId: string) => string},
+ *   tripDetails?: {url: string, files: string[], build: (files: Map<string, string>) => Map<string, object>,
+ *     maxBytes?: number, maxEntryBytes?: number, refreshMs?: number},
  *   timeZone?: string,
  * }>>}
  */

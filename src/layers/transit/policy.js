@@ -381,12 +381,14 @@ export function buildTransitSelectionCopy(
   entry = null,
 ) {
   const icon = TRANSIT_MODE_ICON[mode] || TRANSIT_MODE_ICON.unknown;
-  const routeLabel = record.routeId
-    ? `Route ${record.routeId}`
-    : record.label
-      ? `Vehicle ${record.label}`
-      : `Vehicle ${record.id}`;
   const service = transitServiceCopy(feed, record);
+  const routeLabel = service.routeLabel
+    ? service.routeLabel
+    : record.routeId
+      ? `Route ${record.routeId}`
+      : record.label
+        ? `Vehicle ${record.label}`
+        : `Vehicle ${record.id}`;
   const title = `${icon} ${routeLabel}${service.destination ? ` → ${service.destination}` : ''}`;
   // The mode is said in words on its own line. A glyph and a route id do not
   // tell a reader that the dot on Tremont Street is a subway train, and a
