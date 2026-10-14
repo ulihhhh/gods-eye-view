@@ -59,13 +59,19 @@ export async function spainTrackLines(feed) {
     return operatorLines(lines, 'renfe-cercanias', true);
   if (feed === 'fgc') return operatorLines(lines, 'fgc', true);
   if (feed === 'renfe-ld') {
-    // Long-distance trains run anywhere on the national network; the
-    // Cercanías track is part of it where the IGN pack is coarser.
+    // Long-distance trains run anywhere on the national network, including
+    // the track it shares with Cercanías and FGC (`shared`, which the Rail
+    // network layer may not draw); the Cercanías track is part of it where
+    // the IGN pack is coarser.
     const ign = await pack(IGN_URL).catch(() => null);
+    const ignPaths = [
+      ...(Array.isArray(ign?.paths) ? ign.paths : []),
+      ...(Array.isArray(ign?.shared) ? ign.shared : []).flatMap((group) =>
+        Array.isArray(group?.paths) ? group.paths : [],
+      ),
+    ].filter(validPath);
     return [
-      ...(Array.isArray(ign?.paths)
-        ? [{ routes: null, paths: ign.paths.filter(validPath) }]
-        : []),
+      ...(ignPaths.length ? [{ routes: null, paths: ignPaths }] : []),
       ...operatorLines(lines, 'renfe-cercanias', false),
     ];
   }

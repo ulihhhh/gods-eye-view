@@ -8,12 +8,10 @@ investigación.
 
 ## Cómo retomar (estado al cierre del 2026-10-13)
 
-- **Hecho y en `mi-main`** (`e1d2fcf`, subido): fases 1–5e. Todas las ramas
-  `feat/transit-es-*` están fusionadas; la siguiente fase sale de `mi-main` en una rama
-  nueva.
-- **Pendientes anotados por el usuario** (sin orden fijo, se pueden intercalar): Fase 5f
-  (quitar la superposición de la red AV/LD donde comparte vía con Cercanías) y Fase 6c
-  (seguir al tren seleccionado con la cámara).
+- **Hecho y en `mi-main`**: fases 1–5f. Todas las ramas `feat/transit-es-*` están
+  fusionadas; la siguiente fase sale de `mi-main` en una rama nueva.
+- **Orden acordado el 2026-10-14:** 5f ✅ → 6a → 6b → 6c (seguir al tren seleccionado
+  con la cámara).
 - **Siguiente: Fase 6a — ficha de FGC** (ver Fase 6). Punto de partida:
   - `src/data/fgcGeotren.js` (`decodeFgcGeotren`): hoy solo lee `lin`, `id`, `ut`,
     `estacionat_a` y la primera de `properes_parades`. Añadir `desti`, `origen`, la lista
@@ -739,7 +737,7 @@ encendido, así que un enlace solo lleva lo que se apaga):
 - **Decisión del usuario:** las pills **solo filtran la red**, no los trenes en vivo de
   la capa Transit (que es de upstream).
 
-### Fase 5f — Tramos compartidos entre Cercanías y la red nacional — pendiente
+### Fase 5f — Tramos compartidos entre Cercanías y la red nacional — ✅ hecha 2026-10-14
 
 Anotado por el usuario el 2026-10-13. Donde Cercanías/Rodalies y la red del IGN (pill
 AV/LD) usan la misma vía, las dos líneas se dibujan **superpuestas**: la gris del IGN
@@ -763,6 +761,31 @@ tramos compartidos **solo se vea la de Cercanías**.
 **Hecho cuando**, en Madrid (Atocha–Chamartín) y en Barcelona (Sants–Clot), solo se ve
 el color de Cercanías sobre la vía compartida, y al apagar CERCANÍAS la red gris aparece
 entera.
+
+**Resultado (rama `feat/transit-es-shared-track`):**
+
+- Script nuevo `scripts/split-spain-rail-shared.mjs` (también lo llama
+  `build-spain-rail-ign.mjs` al final). Muestrea la vía del IGN cada 20 m y marca cada
+  muestra con las redes (Cercanías, FGC) que tienen una línea a ≤ 70 m. Cierra huecos
+  de < 150 m entre tramos compartidos y descarta tramos compartidos de < 200 m (cruces,
+  bocas de bifurcación). Un tramo queda ligado a una red solo si la tiene cerca
+  ≥ 200 m (o la mitad del tramo), para que un roce con FGC no lo ate a su pill.
+- Pack: `paths` (solo IGN) + `shared[] = {networks, paths}`. Se puede volver a pasar:
+  encadena las piezas y las simplifica otra vez antes de partir (estable a unos bytes).
+- **Medido:** de 18.690 km, 3.993 km pasan a compartidos (595 piezas con Cercanías,
+  23 con FGC, 20 con las dos); 344.777 → 340.090 bytes. Umbral: 40 m daba 3.878 km,
+  60 m 3.973, 70 m 3.994, 90 m 4.031; se eligió 70 (IGN a 50 m de Douglas–Peucker +
+  4 decimales).
+- Capa: una primitiva para la vía solo IGN y otra por cada conjunto de redes
+  (`spainRailIgnShown`: AV/LD encendida y todas las pills que la cubren apagadas). La
+  ficha de un tramo compartido se cierra al volver a encender su pill.
+- `trackGeometry` de LD usa `paths` + `shared`.
+- **En vivo** (Puppeteer con Chrome visible, 9 km y 7,5 km de altura): en Madrid los
+  túneles de Sol y Recoletos solo muestran el color de Cercanías (el de Recoletos se ve
+  gris oscuro: es el color oficial de la C8, que se dibuja encima de C2/C7/C10) y el
+  túnel AV Atocha–Chamartín sigue gris. En Barcelona el túnel AV Sants–Sagrera sigue
+  gris y las R ya no llevan gris al lado. Con CERCANÍAS apagada, la red gris aparece
+  entera y continua. Sin errores de página.
 
 ### Reanálisis de datos (2026-10-13) — qué hay y qué queremos mostrar
 
