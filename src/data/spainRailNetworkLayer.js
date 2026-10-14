@@ -14,7 +14,8 @@ import { loadBundledJson } from './bundledJson.js';
 /**
  * Rail network (Spain, fork-local) — the Cercanías / Rodalies and FGC lines
  * drawn on the ground in the operators' own colours, over the whole national
- * railway network in neutral grey at the same width, and the Cercanías, FGC
+ * railway network in neutral grey at the same width (where the two share
+ * track, only the operator's colour unless its pill is off), and the Cercanías, FGC
  * and AV/LD/MD stations as points once the camera is down at street scale. Clicking a line or a
  * station names it on a card.
  *
@@ -144,6 +145,37 @@ export function normalizeSpainRailIgnPaths(pack) {
       path.length % 2 === 0 &&
       path.every(Number.isFinite),
   );
+}
+
+/**
+ * The IGN track shared with operator lines (`shared[]` in the pack), each
+ * group with the pills (`cercanias`, `fgc`) whose lines cover it.
+ * @returns {Array<{groups: string[], paths: number[][]}>}
+ */
+export function normalizeSpainRailIgnShared(pack) {
+  if (!Array.isArray(pack?.shared)) return [];
+  return pack.shared
+    .map((group) => ({
+      groups: [
+        ...new Set(
+          (Array.isArray(group?.networks) ? group.networks : []).map(
+            (network) => spainRailGroup({ network }),
+          ),
+        ),
+      ].sort(),
+      paths: normalizeSpainRailIgnPaths(group) || [],
+    }))
+    .filter((group) => group.groups.length && group.paths.length);
+}
+
+/**
+ * Whether national track shows: with the AV/LD pill, and — for track shared
+ * with operator lines (`groups`) — only while every one of those operators'
+ * pills is off, so shared track is drawn once.
+ * @param {string[]} groups Covering pills; empty for IGN-only track.
+ */
+export function spainRailIgnShown(groups, params) {
+  return Boolean(params.national && groups.every((group) => !params[group]));
 }
 
 /**
@@ -329,8 +361,19 @@ export function createSpainRailNetworkLayer({
    *   fgc: Cesium.GroundPolylinePrimitive|null}}
    */
   const _primitives = { national: null, cercanias: null, fgc: null };
+  /**
+   * The national track shared with operator lines, one primitive per set
+   * of covering pills.
+   * @type {Array<{groups: string[], primitive: Cesium.GroundPolylinePrimitive}>}
+   */
+  let _sharedPrimitives = [];
   let _params = { ...SPAIN_RAIL_DEFAULT_PARAMS };
   let _lines = [];
+  /**
+   * National track, IGN-only first (`groups` empty), then shared; the
+   * `ign:<index>` pick ids index it.
+   * @type {Array<{path: number[], groups: string[]}>}
+   */
   let _ignPaths = [];
   /** @type {Map<string, object>} station id → station */
   let _stations = new Map();
@@ -398,8 +441,8 @@ export function createSpainRailNetworkLayer({
     const parsed = parseSpainRailPickId(pickedId);
     if (!parsed) return false;
     if (parsed.kind === 'ign') {
-      const path = _ignPaths[Number(parsed.key)];
-      if (!path || !clickPosition) return false;
+      const track = _ignPaths[Number(parsed.key)];
+      if (!track || !clickPosition) return false;
       _showCard(pickedId, 'ign', null, clickPosition);
       return true;
     }
@@ -461,12 +504,23 @@ export function createSpainRailNetworkLayer({
         _viewer.scene.groundPrimitives.remove(_primitives[group]);
       _primitives[group] = null;
     }
+    if (_viewer)
+      for (const { primitive } of _sharedPrimitives)
+        _viewer.scene.groundPrimitives.remove(primitive);
+    _sharedPrimitives = [];
   }
 
   /** Apply the layer switch and the pills to every primitive and station. */
   function _applyVisibility() {
     for (const [group, primitive] of Object.entries(_primitives))
-      if (primitive) primitive.show = _enabled && _params[group];
+      if (primitive)
+        primitive.show =
+          _enabled &&
+          (group === 'national'
+            ? spainRailIgnShown([], _params)
+            : _params[group]);
+    for (const { groups, primitive } of _sharedPrimitives)
+      primitive.show = _enabled && spainRailIgnShown(groups, _params);
     if (_dataSource) {
       _dataSource.entities.suspendEvents();
       for (const entity of _dataSource.entities.values) {
@@ -482,16 +536,16 @@ export function createSpainRailNetworkLayer({
     // A card about something the pills just hid closes with it.
     const selected = parseSpainRailPickId(_selectedKey);
     if (selected) {
-      const item =
-        selected.kind === 'station'
-          ? _stations.get(selected.key)
-          : selected.kind === 'line'
-            ? _lines[Number(selected.key)]
-            : { network: 'renfe-ld' };
       const shown =
         selected.kind === 'station'
-          ? _params.stations && _params[spainRailGroup(item)]
-          : _params[spainRailGroup(item)];
+          ? _params.stations &&
+            _params[spainRailGroup(_stations.get(selected.key))]
+          : selected.kind === 'line'
+            ? _params[spainRailGroup(_lines[Number(selected.key)])]
+            : spainRailIgnShown(
+                _ignPaths[Number(selected.key)]?.groups ?? [],
+                _params,
+              );
       if (!shown) _clearSelection();
     }
   }
@@ -522,24 +576,31 @@ export function createSpainRailNetworkLayer({
       return;
     }
     // The national network first, so the operators' coloured lines draw on
-    // top of the same track.
-    if (_ignPaths.length) {
-      const color = Cesium.ColorGeometryInstanceAttribute.fromColor(
-        Cesium.Color.fromBytes(...NETWORK_RGB, 235),
+    // top of the same track. One primitive for the IGN-only track and one
+    // per set of operators sharing the rest.
+    const ignColor = Cesium.ColorGeometryInstanceAttribute.fromColor(
+      Cesium.Color.fromBytes(...NETWORK_RGB, 235),
+    );
+    /** @type {Map<string, Cesium.GeometryInstance[]>} groups key → instances */
+    const ignInstances = new Map();
+    _ignPaths.forEach(({ path, groups }, index) => {
+      const key = groups.join(',');
+      if (!ignInstances.has(key)) ignInstances.set(key, []);
+      ignInstances.get(key).push(
+        new Cesium.GeometryInstance({
+          id: `${LAYER_ID}:ign:${index}`,
+          geometry: new Cesium.GroundPolylineGeometry({
+            positions: Cesium.Cartesian3.fromDegreesArray(path),
+            width: SPAIN_RAIL_LINE_WIDTH_PX,
+          }),
+          attributes: { color: ignColor },
+        }),
       );
-      _primitives.national = _groundPolylines(
-        _ignPaths.map(
-          (path, index) =>
-            new Cesium.GeometryInstance({
-              id: `${LAYER_ID}:ign:${index}`,
-              geometry: new Cesium.GroundPolylineGeometry({
-                positions: Cesium.Cartesian3.fromDegreesArray(path),
-                width: SPAIN_RAIL_LINE_WIDTH_PX,
-              }),
-              attributes: { color },
-            }),
-        ),
-      );
+    });
+    for (const [key, list] of ignInstances) {
+      const primitive = _groundPolylines(list);
+      if (!key) _primitives.national = primitive;
+      else _sharedPrimitives.push({ groups: key.split(','), primitive });
     }
     const instances = { cercanias: [], fgc: [] };
     _lines.forEach((line, index) => {
@@ -654,7 +715,15 @@ export function createSpainRailNetworkLayer({
         }
         const stations = spainRailStationsFromPack(stationsPack, linesPack);
         _lines = lines;
-        _ignPaths = normalizeSpainRailIgnPaths(ignPack) || [];
+        _ignPaths = [
+          ...(normalizeSpainRailIgnPaths(ignPack) || []).map((path) => ({
+            path,
+            groups: [],
+          })),
+          ...normalizeSpainRailIgnShared(ignPack).flatMap(({ groups, paths }) =>
+            paths.map((path) => ({ path, groups })),
+          ),
+        ];
         _stations = new Map(stations.map((station) => [station.id, station]));
         _lastError = null;
         _buildLines();

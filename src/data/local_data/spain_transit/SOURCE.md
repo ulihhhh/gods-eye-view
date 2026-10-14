@@ -49,6 +49,12 @@ railway lines, and links on no line — sidings and yards — dropped); links
 that meet end to end chained into longer paths (a junction ends a chain);
 Douglas–Peucker at 50 m; coordinates rounded to 4 decimals (~11 m).
 
+Track shared with a Cercanías / Rodalies or FGC line in `lines.json` is
+split off into `shared[] = {networks, paths}` by
+`scripts/split-spain-rail-shared.mjs` (run by the build at the end, or alone
+after `lines.json` changes): within 70 m of an operator line for at least
+200 m, gaps under 150 m closed. `paths` keeps the IGN-only track.
+
 ## Transform (stations)
 
 Names trimmed with inner spaces collapsed; coordinates rounded to

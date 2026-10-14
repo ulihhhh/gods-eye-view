@@ -776,6 +776,7 @@
   "src/data/spainRailNetworkLayer.js",
   "src/data/spainRailNetworkLayer.test.mjs",
   "scripts/build-spain-rail-ign.mjs",
+  "scripts/split-spain-rail-shared.mjs",
   "src/data/spainRailIgn.test.mjs",
   "src/data/spainTrackGeometry.js",
   "src/data/trackFollow.js",

@@ -8,6 +8,7 @@ import {
   buildSpainRailCopy,
   createSpainRailNetworkLayer,
   normalizeSpainRailIgnPaths,
+  normalizeSpainRailIgnShared,
   normalizeSpainRailLines,
   parseSpainRailPickId,
   spainRailLineRgb,
@@ -15,6 +16,7 @@ import {
   spainRailStationRgb,
   spainRailStationsFromPack,
   spainRailGroup,
+  spainRailIgnShown,
   SPAIN_RAIL_DEFAULT_PARAMS,
 } from './spainRailNetworkLayer.js';
 import { loadBundledJson } from './bundledJson.js';
@@ -354,6 +356,79 @@ test('the pills switch Cercanías, FGC, the national network and the stations on
     assert.deepEqual(layer.getRowControls().chips[3].params, {
       stations: true,
     });
+  } finally {
+    layer.destroy(viewer);
+  }
+});
+
+test('national track shared with an operator shows only while that operator is off', async () => {
+  assert.deepEqual(
+    normalizeSpainRailIgnShared({
+      shared: [
+        { networks: ['renfe-cercanias'], paths: [[1, 2, 3, 4], [1]] },
+        { networks: ['fgc', 'renfe-cercanias'], paths: [[5, 6, 7, 8]] },
+        { networks: [], paths: [[1, 2, 3, 4]] },
+        { networks: ['fgc'], paths: [] },
+      ],
+    }),
+    [
+      { groups: ['cercanias'], paths: [[1, 2, 3, 4]] },
+      { groups: ['cercanias', 'fgc'], paths: [[5, 6, 7, 8]] },
+    ],
+  );
+  assert.deepEqual(normalizeSpainRailIgnShared({ paths: [] }), []);
+  const all = { ...SPAIN_RAIL_DEFAULT_PARAMS };
+  assert.equal(spainRailIgnShown([], all), true, 'IGN-only: AV/LD pill');
+  assert.equal(spainRailIgnShown(['cercanias'], all), false, 'drawn once');
+  assert.equal(
+    spainRailIgnShown(['cercanias'], { ...all, cercanias: false }),
+    true,
+  );
+  assert.equal(
+    spainRailIgnShown(['cercanias', 'fgc'], { ...all, cercanias: false }),
+    false,
+    'FGC still covers it',
+  );
+  assert.equal(
+    spainRailIgnShown(['cercanias'], {
+      ...all,
+      cercanias: false,
+      national: false,
+    }),
+    false,
+  );
+
+  const layer = createSpainRailNetworkLayer({
+    overlayHost: { setEntries() {}, setVisible() {}, clearSource() {} },
+    loadJson: async (url) => {
+      const name = url.pathname.split('/').pop();
+      if (name === 'ign_rail.json')
+        return {
+          paths: [[-3, 40, -2.9, 40.1]],
+          shared: [
+            { networks: ['renfe-cercanias'], paths: [[2, 41.3, 2.1, 41.4]] },
+          ],
+        };
+      return name === 'lines.json' ? LINES : STATIONS;
+    },
+  });
+  const viewer = fakeViewer();
+  try {
+    layer.init(viewer);
+    layer.enable(viewer);
+    assert.equal(await layer.update(), true);
+    assert.equal(layer.getStats().count, 7, 'shared track counted');
+    layer.setParams({ cercanias: false });
+    const at = Cesium.Cartesian3.fromDegrees(2.05, 41.35);
+    assert.equal(layer._selectForTest('spain-rail-network:ign:1', at), true);
+    layer.setParams({ fgc: false });
+    assert.equal(layer._selectedKeyForTest(), 'spain-rail-network:ign:1');
+    layer.setParams({ cercanias: true });
+    assert.equal(
+      layer._selectedKeyForTest(),
+      null,
+      'Cercanías back on hides the shared grey and its card',
+    );
   } finally {
     layer.destroy(viewer);
   }

@@ -23,6 +23,8 @@
  *   3. Douglas–Peucker at 50 m (national-scale context; the Cercanías and
  *      FGC lines carry the street-scale detail), 4 decimals (~11 m), flat
  *      [lon, lat, …] paths, sorted for a stable diff.
+ *   4. Split off the track shared with Cercanías / FGC lines (`lines.json`,
+ *      build it first) into `shared[]`: see split-spain-rail-shared.mjs.
  *
  * Usage:
  *   node scripts/build-spain-rail-ign.mjs [--cache DIR]
@@ -380,19 +382,23 @@ async function main(argv) {
   const typePages = await fetchAll('tn-ra:RailwayType', 500, cacheDir);
   const linePages = await fetchAll('tn-ra:RailwayLine', 20, cacheDir);
   const linkPages = await fetchLinksByTiles(cacheDir);
-  const pack = buildIgnRailPack({
-    typePages,
-    linePages,
-    linkPages,
-    generated: new Date().toISOString().slice(0, 10),
-  });
+  const { splitBundledIgnPack } = await import('./split-spain-rail-shared.mjs');
+  const pack = splitBundledIgnPack(
+    buildIgnRailPack({
+      typePages,
+      linePages,
+      linkPages,
+      generated: new Date().toISOString().slice(0, 10),
+    }),
+  );
   pack.meta.skipped = skipped;
   fs.writeFileSync(OUT, `${JSON.stringify(pack)}\n`);
   if (skipped.length)
     console.warn(`Skipped ${skipped.length} features: ${skipped.join(', ')}`);
-  const points = pack.paths.reduce((sum, p) => sum + p.length / 2, 0);
+  const all = [...pack.paths, ...pack.shared.flatMap((group) => group.paths)];
+  const points = all.reduce((sum, p) => sum + p.length / 2, 0);
   console.log(
-    `Wrote ${path.relative(process.cwd(), OUT)} (${fs.statSync(OUT).size} bytes): ${pack.meta.trainLines} train lines, ${pack.meta.links} links → ${pack.paths.length} paths, ${points} points`,
+    `Wrote ${path.relative(process.cwd(), OUT)} (${fs.statSync(OUT).size} bytes): ${pack.meta.trainLines} train lines, ${pack.meta.links} links → ${all.length} paths (${pack.meta.shared.sharedKm} km shared), ${points} points`,
   );
 }
 

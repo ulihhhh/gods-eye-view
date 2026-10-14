@@ -114,6 +114,13 @@
   Mapillary only and hide while GOOGLE STREET VIEW is lit; its globe marker
   is a Google-blue view cone.
 
+- Rail network (Spain) draws track the national network shares with a
+  Cercanías / Rodalies or FGC line once, in the operator's colour: the grey
+  IGN line no longer shows beside it, and comes back where that operator's
+  pill is switched off. The IGN pack carries the shared track apart
+  (`shared[]`, from `scripts/split-spain-rail-shared.mjs`); long-distance
+  trains still follow all of it.
+
 - Rail network (Spain) and Barcelona Arrivals get multi-select row pills,
   kept in share links: CERCANÍAS · FGC · AV/LD · STATIONS, and METRO ·
   TMB BUS · AMB BUS · LINES. A card about something a pill hides closes,
