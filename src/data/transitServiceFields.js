@@ -5,10 +5,12 @@
  * predicted times when the feed has a TripUpdates companion), its delay.
  *
  * Feeds opt in through the registry: a decoder may set `destinationStopId`,
- * `originStopId` and `nextStopIds` (FGC's Geotren does), and a row may
- * declare `tripUpdates: {url, minIntervalMs?, stopKey?}`, which the proxy
- * fetches beside the positions and joins here by `tripId`. Feeds that do
- * neither are returned untouched. Pure: no Cesium, no Node built-ins.
+ * `originStopId` and `nextStopIds` (FGC's Geotren does); a row may declare
+ * `tripUpdates: {url, minIntervalMs?, stopKey?}`, which the proxy fetches
+ * beside the positions, and `tripDetails` (a static GTFS read daily into
+ * `tripId → {serviceName?, destination?, destinationStopId?,
+ * originStopId?}`, Renfe's), both joined here by `tripId`. Feeds that do
+ * none of this are returned untouched. Pure: no Cesium, no Node built-ins.
  */
 import { decodeTripUpdates } from './gtfsTripUpdates.js';
 
@@ -43,10 +45,22 @@ function nameOf(stopNames, id) {
   return name && name.length <= MAX_NAME_CHARS ? name : null;
 }
 
+/** Fields a trip's static details may give a vehicle that lacks them. */
+const DETAIL_FIELDS = Object.freeze([
+  'serviceName',
+  'destination',
+  'destinationStopId',
+  'originStopId',
+]);
+
 /**
  * Add the service fields to decoded vehicles.
  *
- * - `destination` / `origin`: names of `destinationStopId` / `originStopId`.
+ * - `serviceName` (AVE, ALVIA…), `destination`, `destinationStopId`,
+ *   `originStopId`: from the trip's static details, where the vehicle has
+ *   none of its own.
+ * - `destination` / `origin`: names of `destinationStopId` / `originStopId`,
+ *   when not already given.
  * - `nextStops: [{stopId, name?, at?}]` (at most TRANSIT_MAX_NEXT_STOPS) and
  *   `nextStopsMore` (how many more): from the trip's update when it has one,
  *   with predicted times (epoch ms) and stops already passed dropped; else
@@ -57,6 +71,7 @@ function nameOf(stopNames, id) {
  * @param {{stopNames?: Readonly<Record<string, string>>|null,
  *   tripUpdates?: Map<string, {delaySec: number|null,
  *     stops: Array<{stopId: string, time: number}>}>|null,
+ *   tripDetails?: Map<string, Readonly<object>>|null,
  *   stopKey?: ((stopId: string) => string)|null, now?: number}} [options]
  *   `stopKey` maps a trip update's stop id to the feed's station id (FGC
  *   adds a platform digit: "PC1" is Pl. Catalunya).
@@ -67,6 +82,7 @@ export function applyServiceFields(
   {
     stopNames = null,
     tripUpdates = null,
+    tripDetails = null,
     stopKey = null,
     now = Date.now(),
   } = {},
@@ -74,14 +90,20 @@ export function applyServiceFields(
   return vehicles.map((vehicle) => {
     const update =
       tripUpdates && vehicle?.tripId ? tripUpdates.get(vehicle.tripId) : null;
+    const details =
+      tripDetails && vehicle?.tripId ? tripDetails.get(vehicle.tripId) : null;
     const hasOwn =
       vehicle?.destinationStopId ||
       vehicle?.originStopId ||
       Array.isArray(vehicle?.nextStopIds);
-    if (!update && !hasOwn) return vehicle;
+    if (!update && !details && !hasOwn) return vehicle;
     const { nextStopIds, ...record } = vehicle;
-    const destination = nameOf(stopNames, record.destinationStopId);
-    const origin = nameOf(stopNames, record.originStopId);
+    for (const field of DETAIL_FIELDS)
+      if (!record[field] && typeof details?.[field] === 'string')
+        record[field] = details[field];
+    const destination =
+      !record.destination && nameOf(stopNames, record.destinationStopId);
+    const origin = !record.origin && nameOf(stopNames, record.originStopId);
     if (destination) record.destination = destination;
     if (origin) record.origin = origin;
     let stops = [];

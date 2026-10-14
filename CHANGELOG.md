@@ -114,6 +114,15 @@
   Mapillary only and hide while GOOGLE STREET VIEW is lit; its globe marker
   is a Google-blue view cone.
 
+- Renfe train cards say what the train is and where it is going
+  (`ALVIA 04073 → Santander`, `Route C1 → Lebrija`), its delay (`+8 min
+late`, `1 min early`) and its next stop with Renfe's predicted time. The
+  delay and next stop come from Renfe's two trip-updates feeds; the service
+  and destination from Renfe's published timetables, which the proxy reads
+  once a day (`routes.txt` and `trips.txt` only, conditional request) through
+  a new optional registry hook, `tripDetails`, and never waits for. Static
+  zips are read with a small built-in reader (`zipEntries.js`).
+
 - FGC train cards say where the train is going and where it came from,
   whether it runs on time, its next stops with FGC's predicted times
   (`Next: Muntaner 11:25 · La Bonanova 11:26 · …`), each car's load and the

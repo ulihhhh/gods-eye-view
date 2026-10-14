@@ -309,7 +309,9 @@ export function transitFeedTtlMs(feed) {
  *   `stopPlaces`: the feed's station positions (`feed.stopPlaces()`); each
  *   vehicle whose stop it places gains `stopLat` / `stopLon`.
  *   `tripUpdates`: the feed's TripUpdates index (registry `tripUpdates`),
- *   when fetched; vehicles gain next stops with times and a delay (see
+ *   when fetched; vehicles gain next stops with times and a delay.
+ *   `tripDetails`: the feed's static trip lookup (registry `tripDetails`),
+ *   when loaded; vehicles gain a service name and destination (see
  *   transitServiceFields.js).
  * @returns {{ feedId: string, name: string, fetchedAt: number, feedTimestamp: number|null,
  *   version: string|null, entityCount: number, truncated: boolean, count: number, vehicles: object[] }}
@@ -318,7 +320,12 @@ export function buildTransitSnapshot(
   feed,
   bytes,
   now = Date.now(),
-  { stopNames = null, stopPlaces = null, tripUpdates = null } = {},
+  {
+    stopNames = null,
+    stopPlaces = null,
+    tripUpdates = null,
+    tripDetails = null,
+  } = {},
 ) {
   const decoded = transitFormatFor(feed).decode(bytes);
   if (decoded.incrementality !== GTFS_INCREMENTALITY_FULL_DATASET) {
@@ -349,6 +356,7 @@ export function buildTransitSnapshot(
           {
             stopNames,
             tripUpdates,
+            tripDetails,
             stopKey: feed.tripUpdates?.stopKey ?? null,
             now,
           },

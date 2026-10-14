@@ -32,9 +32,15 @@ import {
   transitUpstreamHeaders,
 } from '../data/transitProxy.js';
 import { indexTripUpdates } from '../data/transitServiceFields.js';
+import { readZipTextEntries } from '../data/zipEntries.js';
 
 /** A TripUpdates index this old is no longer joined to positions. */
 export const TRANSIT_TRIP_UPDATES_STALE_MS = 5 * 60_000;
+/** Static trip details (registry `tripDetails`): refresh, retry, limits. */
+export const TRANSIT_TRIP_DETAILS_REFRESH_MS = 24 * 60 * 60_000;
+export const TRANSIT_TRIP_DETAILS_RETRY_MS = 60 * 60_000;
+export const TRANSIT_TRIP_DETAILS_TIMEOUT_MS = 120_000;
+export const TRANSIT_TRIP_DETAILS_MAX_BYTES = 64 * 1024 * 1024;
 
 /**
  * Fetch a registered feed, resolving each redirect hop BEFORE following it.
@@ -260,6 +266,100 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
     return load.promise;
   }
 
+  /** @type {Map<string, {at: number, lookup: Map<string, object>|null, etag: string|null, lastModified: string|null, loading: boolean}>} */
+  const tripDetailLoads = new Map();
+
+  /**
+   * The feed's static trip lookup (registry `tripDetails: {url, files,
+   * build, maxBytes?, maxEntryBytes?}`): a GTFS zip read once a day
+   * (conditional request), the named files handed to `build`. Returns what
+   * is loaded NOW and never waits: the first positions after a start go out
+   * without service names, and a failed load keeps the previous lookup and
+   * is retried after an hour.
+   * @param {object} feed
+   * @param {number} now
+   * @returns {Map<string, object>|null}
+   */
+  function tripDetailsFor(feed, now) {
+    const source = feed.tripDetails;
+    if (!source?.url || typeof source.build !== 'function') return null;
+    const known = tripDetailLoads.get(feed.id);
+    if (known && (known.loading || now < known.at)) return known.lookup;
+    const load = {
+      at: now + TRANSIT_TRIP_DETAILS_RETRY_MS,
+      lookup: known?.lookup ?? null,
+      etag: known?.etag ?? null,
+      lastModified: known?.lastModified ?? null,
+      loading: true,
+    };
+    tripDetailLoads.set(feed.id, load);
+    const controller = new AbortController();
+    controllers.add(controller);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      TRANSIT_TRIP_DETAILS_TIMEOUT_MS,
+    );
+    (async () => {
+      const { response, finalUrl } = await fetchTransitFeed(
+        {
+          ...feed,
+          url: source.url,
+          format: 'gtfs-rt',
+          headers: { ...feed.headers, Accept: 'application/zip, */*;q=0.1' },
+        },
+        controller.signal,
+        fetchImpl,
+        load.lookup
+          ? { etag: load.etag, lastModified: load.lastModified }
+          : null,
+      );
+      if (!isAcceptableTransitUpstreamUrl(finalUrl))
+        throw new Error('upstream is not https');
+      if (response.status === 304 && load.lookup) {
+        await response.body?.cancel();
+      } else {
+        if (!response.ok) throw new Error(`upstream HTTP ${response.status}`);
+        const bytes = await readResponseBytesCapped(
+          response,
+          Math.min(
+            source.maxBytes || TRANSIT_TRIP_DETAILS_MAX_BYTES,
+            TRANSIT_TRIP_DETAILS_MAX_BYTES,
+          ),
+        );
+        const files = await readZipTextEntries(
+          bytes,
+          source.files,
+          Math.min(
+            source.maxEntryBytes || TRANSIT_TRIP_DETAILS_MAX_BYTES,
+            TRANSIT_TRIP_DETAILS_MAX_BYTES,
+          ),
+        );
+        const lookup = source.build(files);
+        if (!(lookup instanceof Map) || !lookup.size)
+          throw new Error('no trips in the schedule');
+        load.lookup = lookup;
+        load.etag = response.headers.get('etag');
+        load.lastModified = response.headers.get('last-modified');
+      }
+      load.at =
+        Date.now() + (source.refreshMs || TRANSIT_TRIP_DETAILS_REFRESH_MS);
+    })()
+      .catch((error) => {
+        if (!closed)
+          console.warn(
+            `[transit] ${feed.id} trip details unavailable:`,
+            error?.message || error,
+          );
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        controller.abort();
+        controllers.delete(controller);
+        load.loading = false;
+      });
+    return load.lookup;
+  }
+
   /**
    * The stretch each vehicle travelled just before its current position, from
    * the retained history (`recent: [[tMs, lat, lon], …]`, oldest first), so a
@@ -375,6 +475,7 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
           stopNames,
           stopPlaces,
           tripUpdates: tripIndex,
+          tripDetails: tripDetailsFor(feed, now),
         }),
       );
       if (closed) throw new Error('Transit provider closed');
