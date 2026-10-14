@@ -81,6 +81,7 @@ test('trip updates decode to trips with stop times, skipping cancelled and skipp
       routeId: null,
       vehicleId: '3357',
       vehicleLabel: '#3357',
+      delaySec: null,
       stops: [{ stopId: '100005', time: at(2) * 1000 }],
     },
   ]);

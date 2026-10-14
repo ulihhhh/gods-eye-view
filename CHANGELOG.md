@@ -114,6 +114,14 @@
   Mapillary only and hide while GOOGLE STREET VIEW is lit; its globe marker
   is a Google-blue view cone.
 
+- FGC train cards say where the train is going and where it came from,
+  whether it runs on time, its next stops with FGC's predicted times
+  (`Next: Muntaner 11:25 · La Bonanova 11:26 · …`), each car's load and the
+  unit series. The times come from FGC's GTFS-Realtime trip updates, which
+  the proxy fetches beside the positions through a new optional registry
+  hook (`tripUpdates: {url, minIntervalMs, stopKey}`); a feed row may also
+  name its `timeZone` for the card's clock times.
+
 - Rail network (Spain) draws track the national network shares with a
   Cercanías / Rodalies or FGC line once, in the operator's colour: the grey
   IGN line no longer shows beside it, and comes back where that operator's

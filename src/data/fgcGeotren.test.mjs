@@ -229,6 +229,9 @@ test('the proxy asks Geotren at most once a minute, whatever the browsers poll',
   const service = createTransitService({
     fetchImpl: async (url, init) => {
       calls.push({ url, accept: init.headers.Accept });
+      // The trip updates beside the positions: an empty FeedMessage.
+      if (url.includes('trip-updates'))
+        return new Response(new Uint8Array(0), { status: 200 });
       return new Response(answer(), { status: 200 });
     },
   });
@@ -250,9 +253,12 @@ test('the proxy asks Geotren at most once a minute, whatever the browsers poll',
     }
     t.mock.timers.tick(2_000);
     assert.equal((await get()).cache, 'MISS', 'after the minute');
-    assert.equal(calls.length, 2);
-    assert.equal(calls[0].accept, 'application/json');
-    assert.match(calls[0].url, /dataset=posicionament-dels-trens/);
+    const positions = calls.filter((c) => c.url.includes('posicionament'));
+    const tripUpdates = calls.filter((c) => c.url.includes('trip-updates'));
+    assert.equal(positions.length, 2);
+    assert.equal(positions[0].accept, 'application/json');
+    assert.equal(tripUpdates.length, 2, 'trip updates once a minute too');
+    assert.match(tripUpdates[0].accept, /protobuf/);
   } finally {
     service.close();
   }
