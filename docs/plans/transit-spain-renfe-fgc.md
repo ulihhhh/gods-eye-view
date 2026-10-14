@@ -8,10 +8,10 @@ investigación.
 
 ## Cómo retomar (estado al cierre del 2026-10-13)
 
-- **Hecho y en `mi-main`**: fases 1–5f, 6a y 6b. Todas las ramas `feat/transit-es-*` están
+- **Hecho y en `mi-main`**: fases 1–5f y 6a–6c. Siguiente: Fase 7 (paneles de
+  llegadas en las estaciones). Todas las ramas `feat/transit-es-*` están
   fusionadas; la siguiente fase sale de `mi-main` en una rama nueva.
-- **Orden acordado el 2026-10-14:** 5f ✅ → 6a ✅ → 6b ✅ → 6c (seguir al tren
-  seleccionado con la cámara).
+- **Orden acordado el 2026-10-14:** 5f ✅ → 6a ✅ → 6b ✅ → 6c ✅.
 - **Siguiente: Fase 6a — ficha de FGC** (ver Fase 6). Punto de partida:
   - `src/data/fgcGeotren.js` (`decodeFgcGeotren`): hoy solo lee `lin`, `id`, `ut`,
     `estacionat_a` y la primera de `properes_parades`. Añadir `desti`, `origen`, la lista
@@ -920,7 +920,7 @@ ocupación, y una de Renfe muestra tipo, destino, retraso y próximas paradas.
 - De paso: la fila de FGC en `DATA_SOURCES.md` no puede nombrar la licencia (test
   `transitQa`); la 6a la había nombrado.
 
-### Fase 6c — Seguir al tren seleccionado con la cámara — pendiente
+### Fase 6c — Seguir al tren seleccionado con la cámara — ✅ hecha 2026-10-14
 
 Anotado por el usuario el 2026-10-13: poder seguir con la cámara al tren seleccionado,
 como ya se hace con los aviones.
@@ -946,6 +946,30 @@ como ya se hace con los aviones.
 
 **Hecho cuando** al seleccionar un tren se puede pulsar "seguir", y la cámara lo
 acompaña por la vía sin tirones hasta que se suelta.
+
+**Resultado (rama `feat/transit-es-follow`):**
+
+- Módulo nuevo `src/layers/transit/follow.js`. Los marcadores de Transit son
+  billboards, no entidades, así que no sirve `viewer.trackedEntity`: se hace lo mismo
+  que la `EntityView` de Cesium a mano. Tras un vuelo de 1,2 s a una vista de
+  persecución (700 m, −35°, detrás del rumbo), cada `preUpdate` pone el marco de la
+  cámara en el ENU de la posición **dibujada** del tren y conserva la pose relativa
+  (lo que el usuario haya orbitado o acercado), girada con el rumbo de la vía
+  suavizado (constante de 2,5 s, a partir del movimiento dibujado).
+- **Activar/parar:** clic en la ficha (ahora `interactive`, con `hitTestWorldOverlay`)
+  o tecla **T** (la F ya abre el panel de capas). La ficha añade "Click this card or
+  press T to follow" / "Following · …".
+- **Termina** al cerrar la ficha (clic fuera, Escape), con T o la ficha, si otro toma
+  la cámara (un vuelo, seguimiento de aviones, cambio de marco, modo 2D) o si el tren
+  sale del feed: en ese caso deja 5 s una nota en el mapa ("Stopped following: no
+  longer in the feed"). Un marcador oculto un momento solo congela la vista. Al
+  terminar, la cámara vuelve al marco del mundo en la misma posición.
+- Enganches en archivos de upstream: `index.js` (crear), `selection.js` (línea de la
+  ficha, ficha clicable, clic, tecla T, parar al deseleccionar), `ingestion.js`
+  (`stop('gone')`) y `lifecycle.js` (`destroy` al desactivar).
+- **En vivo** (FGC S2 por Collserola): tras T, distancia cámara–tren 700 m estable a
+  los 0, 10 y 20 s, rumbo de la cámara de 9° a 350° siguiendo la vía; clic en la
+  ficha → marco del mundo y cámara quieta (0 m en 5 s). Sin errores de página.
 
 ### Fase 7 — Paneles de llegadas en las estaciones (Rail network)
 

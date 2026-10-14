@@ -218,6 +218,7 @@ export function createLifecycle({ state, services, parts }) {
       clearTimeout(state._cameraDebounceTimer);
       state._cameraDebounceTimer = null;
       parts.selection.clearSelection();
+      parts.follow?.destroy();
       state._overlayHost.setVisible(TRANSIT_SELECTED_OVERLAY_SOURCE_ID, false);
       parts.selection.removeClickHandler();
       unregisterPickOwner('transit');

@@ -196,7 +196,10 @@ export function createIngestion({ state, services, parts, source }) {
   function removeVehicle(key) {
     const entry = state._vehicles.get(key);
     if (!entry) return;
-    if (state._selectedKey === key) parts.selection.clearSelection();
+    if (state._selectedKey === key) {
+      parts.follow?.stop('gone');
+      parts.selection.clearSelection();
+    }
     if (entry.marker) entry.markerCollection?.remove(entry.marker);
     entry.marker = null;
     entry.detectContact = null;
