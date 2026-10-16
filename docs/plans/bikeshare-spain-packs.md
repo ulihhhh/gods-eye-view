@@ -196,6 +196,114 @@ huérfana).
   AUVASA (Valladolid); BiciCoruña; Dbizi (Donostia); Bilbao Bizi; BicinRivas", más una
   clave o texto para JCDecaux España ("Valenbisi, Sevici: JCDecaux, Licence Ouverte").
 
+## Pack 1 — Plan de implementación (2026-10-17)
+
+Una sola PR a upstream, `feat(bikeshare): add nine Spanish city bike systems`, con
+**tres commits que se leen por separado**. Es el mismo formato que #641, que añadió
+Toronto y en la misma PR arregló un fallo genérico que había destapado. Rama
+`feat/bikeshare-spain-cities` desde el `upstream/main` del momento, en un worktree aparte
+(`../gev-bikeshare-es`) para no tocar la copia de `mi-main` ni su Vite.
+
+### Paso 0 — Antes de escribir código
+
+1. **Bilbao Bizi de día:** confirmar que `is_renting: false` en las 67 estaciones era el
+   cierre nocturno. Si sigue así de día, investigar antes de incluirlo.
+2. **Volver a sondear los 9 feeds:** número de estaciones, estaciones más lejanas y
+   rarezas. Actualizar la lista de estaciones del test si han cambiado.
+3. **Licencias que faltan por leer:**
+   - términos de EMT MobilityLabs (BiciMAD);
+   - ficha `datos.coruna.gal/dataset/bicicletas-publicas-bicicoruna`;
+   - Bilbao Open Data, por si hay dataset de Bizi.
+
+   Si alguna prohíbe reutilizar el feed, ese sistema sale del pack.
+
+### Commit 1 — `fix(gbfs): read underscores in station names as spaces`
+
+- `src/sources/gbfsStations.js`: un `tidyStationName(text)` aplicado al nombre elegido
+  (después de `stationName()`, tanto para `name` como para el respaldo `short_name`):
+  - quita los `_` del principio y del final;
+  - cambia cada `_` interior por un espacio;
+  - junta los espacios dobles y recorta.
+
+  Lo usan la capa y `get_bike_share` (`src/tools/queries/mobility.js`), así que los dos
+  quedan arreglados a la vez.
+
+- Casos nuevos en `src/sources/gbfsStations.test.mjs`:
+  - `_GUILLEN_DE_CASTRO` → `GUILLEN DE CASTRO`;
+  - `_GLORIETA OLIMPICA` → `GLORIETA OLIMPICA`;
+  - `_CAMPAMENTO_81` → `CAMPAMENTO 81`;
+  - un nombre que solo es `_` cae al `short_name`, o a vacío si no hay;
+  - un nombre localizado de v3 con `_`;
+  - los nombres sin `_` no cambian.
+- **Prueba en la descripción de la PR:** antes de abrirla, pasar los 52 feeds de upstream
+  por el parser con y sin el cambio y comprobar que no cambia ningún nombre. El
+  2026-10-17 ninguno tenía `_`.
+
+### Commit 2 — `feat(bikeshare): add nine Spanish city bike systems`
+
+- **`src/layers/bikeshare/registry.js`:** las 9 filas de la tabla del pack 1, justo
+  después de `barcelona-ambici`, con `loadRadiusKm: 40`.
+  - Las de PBSC, escritas a mano como Bicing:
+    `https://<x>.publicbikesystem.net/customer/gbfs/v2/en/station_{information,status}.json`.
+  - Las de JCDecaux, como Lillestrøm:
+    `https://api.cyclocity.fr/contracts/<valence|seville>/gbfs/station_{information,status}.json`.
+- **`src/layers/bikeshare/spainCitiesSystems.test.mjs`**, calcado de
+  `barcelonaSystems.test.mjs` y `latamPbscCities.test.mjs`:
+  1. Los 9 están registrados, con su `provider` y `hosts`, y el proxy acepta el host y la
+     ruta de cada feed.
+  2. La cámara sobre cada estación más lejana activa su sistema.
+  3. El `loadRadiusKm` de cada sistema alcanza sus estaciones más lejanas.
+  4. Una cámara en el centro de Madrid activa BiciMAD y BicinRivas a la vez.
+  5. Por el camino real de la ingestión, como el test de depósitos de #1063: Sevici no
+     carga `_LAB MADRID` (399 km) ni `_TALLER SEVILLA` (0,0), y BiciCoruña no carga sus
+     estaciones en (0,0). Las estaciones válidas de esos mismos datos sí se cargan.
+  6. Los nombres de Sevici y Valenbisi llegan sin `_` a la capa.
+
+### Commit 3 — `docs: credit and document the Spanish bike systems`
+
+- **`src/data/dataCredits.js`:**
+  - clave `gbfs`: añadir "BiciMAD, EMT Madrid; Bizi Zaragoza; BIKI, AUVASA (Valladolid);
+    BiciCoruña; Dbizi (Donostia); Bilbao Bizi; BicinRivas", con el texto definitivo
+    según las licencias del paso 0;
+  - clave `jcdecaux-gbfs`: pasa a "City bikes (Lillestrøm, Valencia, Seville):
+    Bysykkel Lillestrøm, Valenbisi, Sevici, JCDecaux — Licence Ouverte".
+- **`DATA_SOURCES.md`:**
+  - una fila nueva para los PBSC españoles, como la de Bike Itaú: "no licence is
+    published, attribution to the operator", con la nota de BiciMAD si los términos de
+    EMT lo piden;
+  - ampliar la fila de JCDecaux Cyclocity con Valencia y Sevilla.
+- **`docs/CURRENT-STATE.md`:**
+  - la fila Bikeshare de la tabla de capas: "Bicing (Barcelona)" pasa a "Bicing and
+    seven other Spanish cities", y "JCDecaux NO" a "JCDecaux NO/ES";
+  - la sección "GBFS upstream bounds": una línea sobre los `_` de los nombres.
+
+### Después de abrir la PR
+
+- Con el número de la PR, un commit con el fragmento
+  `changelog.d/<n>-bikeshare-spain-cities.md`, que acredite a ulihhhh y a la PR (formato
+  en `changelog.d/README.md`).
+- **Validación**, la misma lista que #1176:
+  - `npm run format:check`, `npm run check:boundaries`, `npm run build`, `npm test`
+    (Node 24) y `npm run test:track`;
+  - comprobación en vivo a través del manejador `/api/gbfs`: 18 feeds con 200,
+    `station_information` con `max-age=300`, `station_status` con `no-store`, y cada
+    estación con su estado.
+- **Descripción de la PR**, con la estructura de #1176:
+  - Summary con una tabla de los 9 sistemas: área, plataforma y estaciones (1.843 en
+    total el 2026-10-17);
+  - Changes, con un apartado por commit;
+  - Notes:
+    - el `last_reported` de JCDecaux no indica frescura;
+    - las estaciones fantasma se dejan en gris como en Bicing;
+    - las bicis overflow de PBSC;
+    - el cierre nocturno de Bilbao, si se confirma;
+  - Testing.
+
+  Sin detalles del fork (Andorra, `mi-main`).
+
+- **Cuando se fusione:** sincronizar `mi-main` con el proceso normal. No llevar estas
+  filas al fork antes, porque al fusionar daría `Duplicate GBFS city id`.
+
 ## Pack 2 — nextbike (CC0)
 
 **Proxy:** sin cambios una vez mergeado #1176 (`gbfs.nextbike.net` como host exacto,
