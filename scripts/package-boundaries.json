@@ -158,6 +158,8 @@
     "modules": [
       "server/providers/gbfs.js",
       "server/providers/common/http.js",
+      "server/providers/common/rate-limit.js",
+      "src/sources/rateLimit.js",
       "src/data/gbfsSource.js",
       "src/sources/httpBody.js"
     ],
@@ -1152,7 +1154,6 @@
       "src/layers/bikeshare/policy.js",
       "src/layers/bikeshare/queries.js",
       "src/layers/bikeshare/registry.js",
-      "src/layers/bikeshare/registrySpain.js",
       "src/layers/bikeshare/rendering.js",
       "src/layers/bikeshare/selection.js",
       "src/layers/bikeshare/source.js",
@@ -1683,7 +1684,6 @@
       "src/layers/bikeshare/policy.js",
       "src/layers/bikeshare/queries.js",
       "src/layers/bikeshare/registry.js",
-      "src/layers/bikeshare/registrySpain.js",
       "src/layers/bikeshare/rendering.js",
       "src/layers/bikeshare/selection.js",
       "src/layers/bikeshare/source.js",
@@ -2483,7 +2483,6 @@
       "src/layers/bikeshare/policy.js",
       "src/layers/bikeshare/queries.js",
       "src/layers/bikeshare/registry.js",
-      "src/layers/bikeshare/registrySpain.js",
       "src/layers/bikeshare/rendering.js",
       "src/layers/bikeshare/selection.js",
       "src/layers/bikeshare/source.js",
@@ -3704,7 +3703,6 @@
     "modules": [
       "src/tools/services.js",
       "src/layers/bikeshare/registry.js",
-      "src/layers/bikeshare/registrySpain.js",
       "src/layers/bikeshare/source.js",
       "src/layers/cctv/source.js",
       "src/layers/cctv/sourcePolicy.js",

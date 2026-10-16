@@ -1,5 +1,11 @@
 # Changelog
 
+- Add Barcelona's bike share to the GBFS registry: Bicing (543 stations, the
+  city's PBSC system) and AMBici (237 e-bike stations across the metropolitan
+  area, run by nextbike). Both are keyless GBFS 2.3 feeds listed in
+  MobilityData's systems catalogue; AMBici's is CC0. `gbfs.nextbike.net` joins
+  the proxy allowlist. These are the layer's first stations in Spain.
+
 - Add nine Ontario transit feeds: TTC, MiWay, Hamilton HSR, Durham Region,
   YRT/Viva, Guelph, Burlington, Barrie and Kingston, each carrying its own
   licence quote and attribution. A feed can now name its own modes, so Toronto's
@@ -159,6 +165,9 @@
 - Tool string length validation counts Unicode characters correctly, including characters outside the basic multilingual plane.
 
 - Director timeline seeks cross the dateline along the short longitude arc.
+
+- Keep unknown GBFS availability counts neutral instead of turning null or empty
+  values into zero bikes.
 
 - Recent Imagery continues past malformed records in full catalog pages, respects the requested record limit, and reports results as truncated when that limit drops valid records.
 
@@ -504,10 +513,6 @@ late`, `1 min early`) and its next stop with Renfe's predicted time. The
   draws every AMB stop and says the metro and TMB buses need the key. The
   server reads AMB's schedule once a day and its trip updates at most every
   30 s, whatever the number of stops asked about.
-
-- Add Bicing (Barcelona) and AMBici (Barcelona metropolitan area e-bikes) to
-  the Bike Share layer, from the operators' keyless GBFS feeds listed in
-  MobilityData's systems catalogue; AMBici's feed is CC0.
 
 - Add a TMB Arrivals layer for Barcelona: metro stations (from city scale)
   and TMB bus stops (at street scale) as points; clicking one shows the next

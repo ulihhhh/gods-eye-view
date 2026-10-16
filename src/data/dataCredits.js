@@ -217,18 +217,6 @@ export const DATA_CREDITS = [
       '<a href="https://dadesobertes.fgc.cat" target="_blank" rel="noopener">dadesobertes.fgc.cat</a>), CC BY 4.0',
   },
   {
-    key: 'bicing',
-    html:
-      'Bicing stations: Barcelona City Council (B:SM) — ' +
-      '<a href="https://www.bicing.barcelona/" target="_blank" rel="noopener">bicing.barcelona</a> GBFS',
-  },
-  {
-    key: 'ambici',
-    html:
-      'AMBici stations: Àrea Metropolitana de Barcelona, operated by nextbike — ' +
-      '<a href="https://www.ambici.cat/" target="_blank" rel="noopener">ambici.cat</a> GBFS (CC0)',
-  },
-  {
     key: 'google-news-rss',
     html:
       'Cockpit regional headlines: ' +
@@ -341,7 +329,8 @@ export const DATA_CREDITS = [
     key: 'gbfs',
     html:
       'Bikeshare availability: GBFS operator feeds ' +
-      '(e.g. Austin BCycle; Bike Share Toronto, operated by the Toronto Parking Authority; Bike Itaú, operated by Tembici)',
+      '(e.g. Austin BCycle; Bike Share Toronto, operated by the Toronto Parking Authority; Bike Itaú, operated by Tembici; ' +
+      'Bicing, Barcelona City Council (B:SM); AMBici, Àrea Metropolitana de Barcelona, operated by nextbike)',
   },
   {
     key: 'urbansharing-gbfs',

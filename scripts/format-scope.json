@@ -802,8 +802,6 @@
   "src/data/tmbArrivals.test.mjs",
   "src/data/tmbArrivalsLayer.js",
   "src/data/tmbArrivalsLayer.test.mjs",
-  "src/layers/bikeshare/registrySpain.js",
-  "src/layers/bikeshare/registrySpain.test.mjs",
   "server/providers/amb.js",
   "src/data/ambArrivals.js",
   "src/data/ambArrivals.test.mjs",
@@ -1103,5 +1101,6 @@
   "scripts/generate-icons.mjs",
   "src/tooling/webAppIcons.test.mjs",
   "src/ui/flyToDataSource.js",
-  "src/ui/flyToDataSource.test.mjs"
+  "src/ui/flyToDataSource.test.mjs",
+  "src/data/gbfsProxyRateLimit.test.mjs"
 ]
