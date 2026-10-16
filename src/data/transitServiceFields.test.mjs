@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PbfWriter } from 'pbf';
 import { decodeTripUpdates } from './gtfsTripUpdates.js';
+import { encodeTripUpdates } from './tripUpdatesFixtures.mjs';
 import {
   TRANSIT_MAX_NEXT_STOPS,
   applyServiceFields,
@@ -17,56 +17,8 @@ import { transitClock } from '../layers/transit/serviceCopy.js';
 const NOW = Date.parse('2026-10-14T09:12:00Z'); // 11:12 in Barcelona
 const min = (m) => NOW + m * 60_000;
 
-/**
- * Hand-made TripUpdates: trips with an optional trip delay, and stops with
- * a time and an optional (signed) delay. Not operator data.
- */
-function encode(trips) {
-  const pbf = new PbfWriter();
-  pbf.writeMessage(
-    1,
-    (_, out) => {
-      out.writeStringField(1, '2.0');
-      out.writeVarintField(3, Math.round(NOW / 1000));
-    },
-    null,
-  );
-  for (const trip of trips)
-    pbf.writeMessage(
-      2,
-      (t, out) => {
-        out.writeStringField(1, t.tripId);
-        out.writeMessage(
-          3,
-          (u, w) => {
-            w.writeMessage(1, (d, x) => x.writeStringField(1, d.tripId), u);
-            for (const stop of u.stops)
-              w.writeMessage(
-                2,
-                (s, x) => {
-                  x.writeMessage(
-                    2,
-                    (e, y) => {
-                      if (Number.isFinite(e.delay))
-                        y.writeVarintField(1, e.delay);
-                      if (Number.isFinite(e.time))
-                        y.writeVarintField(2, Math.round(e.time / 1000));
-                    },
-                    s,
-                  );
-                  x.writeStringField(4, s.stopId);
-                },
-                stop,
-              );
-            if (Number.isFinite(u.delay)) w.writeVarintField(5, u.delay);
-          },
-          t,
-        );
-      },
-      trip,
-    );
-  return pbf.finish();
-}
+/** Hand-made TripUpdates stamped NOW (see tripUpdatesFixtures.mjs). */
+const encode = (trips) => encodeTripUpdates(trips, NOW);
 
 test('trip updates carry the trip delay, else the first stop delay, signed', () => {
   const { trips } = decodeTripUpdates(

@@ -6,23 +6,20 @@ Todo lo técnico se ha comprobado contra los feeds en vivo (incluida una observa
 10 min) y contra el código de `upstream/main` (591f299). No quedan pendientes de
 investigación.
 
-## Cómo retomar (estado al cierre del 2026-10-13)
+## Cómo retomar (estado al 2026-10-16)
 
-- **Hecho y en `mi-main`**: fases 1–5f y 6a–6c. Siguiente: Fase 7 (paneles de
-  llegadas en las estaciones). Todas las ramas `feat/transit-es-*` están
-  fusionadas; la siguiente fase sale de `mi-main` en una rama nueva.
-- **Orden acordado el 2026-10-14:** 5f ✅ → 6a ✅ → 6b ✅ → 6c ✅.
-- **Siguiente: Fase 6a — ficha de FGC** (ver Fase 6). Punto de partida:
-  - `src/data/fgcGeotren.js` (`decodeFgcGeotren`): hoy solo lee `lin`, `id`, `ut`,
-    `estacionat_a` y la primera de `properes_parades`. Añadir `desti`, `origen`, la lista
-    completa de paradas, `en_hora`, `ocupacio_*_percent`, `tipus_unitat` y
-    `estacionat_a` como campos genéricos opcionales del registro.
-  - Nombres de parada: el diccionario `stopNames` de FGC (`spainTransitStations.js`).
-  - Ficha: `buildTransitSelectionCopy` en `src/layers/transit/policy.js`.
-  - Horas por parada: el TU de FGC está en
-    `https://dadesobertes.fgc.cat/api/explore/v2.1/catalog/datasets/trip-updates-gtfs_realtime/files/735985017f62fd33b2fe46e31ce53829`
-    (comprobar que el id del fichero no cambia; si cambia, leerlo del endpoint
-    `.../records`).
+- **Hecho y en `mi-main`**: fases 1–5f y 6a–6c. **7a** (paneles de FGC) en la rama
+  `feat/transit-es-arrivals`. Siguiente: **7b** (paneles de Renfe Cercanías a partir
+  del horario estático; ver Fase 7).
+- Punto de partida de la 7b:
+  - Ruta y panel genéricos ya hechos: `src/data/transitArrivals.js`
+    (`buildTransitArrivals`), `arrivals()` en `src/sources/transitService.js` y la
+    ficha en `src/data/spainRailNetworkLayer.js` (`SPAIN_RAIL_ARRIVAL_FEEDS`,
+    `spainRailArrivalLines`). Para Renfe basta con que el índice por estación tenga
+    horas: añadir `renfe-cercanias` a `SPAIN_RAIL_ARRIVAL_FEEDS` cuando las tenga.
+  - El TU de Renfe da **una sola parada por tren** (medido el 2026-10-16): las horas
+    por estación tienen que venir de `stop_times.txt` (≈247 MB descomprimido) más el
+    retraso del TU.
 - **Entorno:**
   - Tests con Node 24 de nvm (`source ~/.nvm/nvm.sh && nvm use 24`); el Node 21 del
     sistema cuelga un test.
@@ -983,6 +980,48 @@ la ficha de TMB: "C4 → Parla · 19:04 (+2) · andén 3".
 - Ruta `/api/transit/arrivals/<feed>/<stopId>` (sin llamadas nuevas al operador).
 
 **Hecho cuando** Sants, Pl. Catalunya y Atocha muestran sus próximos trenes con retraso.
+
+**Datos medidos el 2026-10-16 (11:37).** El supuesto de "hasta 13 paradas" no se
+cumple hoy:
+
+| Feed                              | Trenes | Paradas con hora por tren |
+| --------------------------------- | ------ | ------------------------- |
+| Renfe Cercanías `trip_updates.pb` | 274    | 1 (272), 0 (4), más (2)   |
+| Renfe LD `trip_updates_LD.pb`     | 204    | 1 (188), 0 (16)           |
+| FGC TU                            | 53     | 1–28, muchos > 10         |
+
+Así que la fase se parte en tres:
+
+- **7a — FGC** directo del TU. ✅ hecha 2026-10-16 (rama `feat/transit-es-arrivals`).
+- **7b — Renfe Cercanías**: horario estático diario (`stop_times.txt` en streaming,
+  solo los viajes de hoy) más el retraso del TU; la hora se marca "programada +
+  retraso" cuando el tren no informa esa parada.
+- **7c — AV/LD**: igual si su `stop_times` es razonable; si no, el panel dice que solo
+  lista los trenes que informan la parada.
+
+**Resultado 7a:**
+
+- Ruta genérica `/api/transit/arrivals/<feedId>/<stationId>` (`resolveTransitRoute`,
+  solo para feeds con `tripUpdates`; 404 para una estación que no está en `stopNames`,
+  503 sin TU). `arrivals()` en `transitService.js` lee el snapshot de posiciones a
+  través del propio `handle` (misma caché, límites y backoff) y el índice de TU en
+  caché: **ninguna llamada nueva al operador**. Limitador propio (60/min por feed).
+- `src/data/transitArrivals.js` (puro): para cada viaje del TU con una parada de la
+  estación aún por llegar (30 s de gracia, 3 h de horizonte), une el vehículo por
+  `tripId` → línea, destino, origen, `onTime`; sin vehículo, destino = nombre de la
+  última parada. `terminates` cuando la parada es la última del viaje.
+- Enganche nuevo del registro: `tripUpdates.stopPlatform` (FGC: el dígito final del
+  código, "PC1" → vía 1; en Gràcia salen las vías 1–4, así que es la vía).
+- Ficha: `S1 → Terrassa Nacions Unides · 11:43 (3 min) · platform 2`, llegadas
+  `L7 from Av. Tibidabo · arr. 11:45`, retraso `+3 min` o `late`; hasta 6 trenes,
+  repinta cada 5 s y pregunta cada 20 s mientras está abierta.
+- Límite de los datos: en las terminales (Pl. Catalunya, Pl. Espanya) casi todo son
+  llegadas; un tren sale en el TU solo cuando ya circula, así que las salidas desde la
+  terminal aparecen al arrancar.
+- Tests: `src/data/transitArrivals.test.mjs` (constructor, ruta, servicio de punta a
+  punta sin llamadas extra) y la ficha en `spainRailNetworkLayer.test.mjs`. El
+  codificador de TU a mano pasa a `src/data/tripUpdatesFixtures.mjs` (lo usa también
+  `transitServiceFields.test.mjs`).
 
 ### Fase 8 — Incidencias
 

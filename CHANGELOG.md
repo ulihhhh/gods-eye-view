@@ -363,6 +363,16 @@
   Mapillary only and hide while GOOGLE STREET VIEW is lit; its globe marker
   is a Google-blue view cone.
 
+- Clicking an FGC station in Rail network (Spain) lists its next trains:
+  line, destination and FGC's predicted time with a countdown, the platform
+  (`S1 → Terrassa Nacions Unides · 11:43 (3 min) · platform 2`), trains
+  ending there as arrivals (`L7 from Av. Tibidabo · arr. 11:45`), and late
+  running. The card asks every 20 s while open. The board comes from a new
+  route, `/api/transit/arrivals/<feedId>/<stationId>`, for any feed with a
+  `tripUpdates` hook: it joins the cached trip updates to the cached
+  positions and never asks the operator itself. A row's `tripUpdates` may
+  name `stopPlatform` (FGC's track digit).
+
 - A selected transit vehicle can be followed with the camera: click its
   card or press T. The camera flies to a chase view behind it, then moves
   with the drawn vehicle and turns, smoothed, with its course along the

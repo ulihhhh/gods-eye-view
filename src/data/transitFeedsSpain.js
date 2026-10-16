@@ -172,6 +172,11 @@ export function fgcTripStopKey(stopId) {
   return /^[A-Z0-9]{2,6}$/.test(stopId) ? stopId.slice(0, -1) : stopId;
 }
 
+/** …and that digit is the track the train uses ("PC1" → platform 1). */
+export function fgcTripStopPlatform(stopId) {
+  return /^[A-Z0-9]{1,5}[0-9]$/.test(stopId) ? stopId.slice(-1) : null;
+}
+
 /** Spanish registry rows, in presentation order. */
 export const SPAIN_TRANSIT_FEEDS = Object.freeze([
   Object.freeze({
@@ -271,6 +276,7 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
       url: FGC_TRIP_UPDATES_URL,
       minIntervalMs: 60_000,
       stopKey: fgcTripStopKey,
+      stopPlatform: fgcTripStopPlatform,
     }),
     stopNames: () => spainStationNames('fgc'),
     stopPlaces: () => spainStationPlaces('fgc'),

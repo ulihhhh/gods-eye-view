@@ -91,6 +91,71 @@ const DEFAULT_OVERLAY_HOST = Object.freeze({
   clearSource: clearOverlaySource,
 });
 
+/**
+ * Station networks whose card lists the next trains, and the Transit feed
+ * that has them (`/api/transit/arrivals/<feed>/<code>`, built from the
+ * feed's trip updates).
+ */
+export const SPAIN_RAIL_ARRIVAL_FEEDS = Object.freeze({ fgc: 'fgc-geotren' });
+/** Card repaint (countdown) and the age at which it asks again. */
+export const SPAIN_RAIL_CARD_TICK_MS = 5_000;
+export const SPAIN_RAIL_CARD_REFRESH_MS = 20_000;
+/** Trains listed on a station card. */
+export const SPAIN_RAIL_CARD_MAX_TRAINS = 6;
+
+const madridClock = new Intl.DateTimeFormat('en-GB', {
+  hour: '2-digit',
+  minute: '2-digit',
+  timeZone: 'Europe/Madrid',
+});
+
+function trainRow(train, now) {
+  const minutes = Math.round((train.at - now) / 60_000);
+  const when = `${madridClock.format(train.at)} (${minutes <= 0 ? 'now' : `${minutes} min`})`;
+  const line = train.line || 'FGC';
+  const route = train.terminates
+    ? `${line}${train.origin ? ` from ${train.origin}` : ''} · arr. ${when}`
+    : `${line} → ${train.destination || '?'} · ${when}`;
+  const late =
+    Number.isFinite(train.delaySec) && train.delaySec >= 60
+      ? ` · +${Math.round(train.delaySec / 60)} min`
+      : train.onTime === false
+        ? ' · late'
+        : '';
+  return `${route}${train.platform ? ` · platform ${train.platform}` : ''}${late}`;
+}
+
+/**
+ * Card lines for a station's next trains.
+ * @param {{status: 'loading'|'ready'|'error', error?: string|null,
+ *   data?: {arrivals: object[], fetchedAt: number|null}|null}} board
+ * @param {number} now
+ * @returns {string[]}
+ */
+export function spainRailArrivalLines(board, now) {
+  if (!board) return [];
+  const trains = (board.data?.arrivals || []).filter(
+    (train) => Number.isFinite(train?.at) && train.at >= now - 30_000,
+  );
+  if (!board.data) {
+    return [
+      board.status === 'error'
+        ? board.error || 'Next trains unavailable'
+        : 'Asking for the next trains…',
+    ];
+  }
+  const lines = trains.length
+    ? trains
+        .slice(0, SPAIN_RAIL_CARD_MAX_TRAINS)
+        .map((train) => trainRow(train, now))
+    : ['No trains reported right now'];
+  if (trains.length > SPAIN_RAIL_CARD_MAX_TRAINS)
+    lines.push(`+${trains.length - SPAIN_RAIL_CARD_MAX_TRAINS} more`);
+  if (board.status === 'error' && board.error)
+    lines.push(`${board.error} · showing last answer`);
+  return lines;
+}
+
 function hexToRgb(hex) {
   if (!/^[0-9A-Fa-f]{6}$/.test(String(hex || ''))) return null;
   const value = Number.parseInt(hex, 16);
@@ -310,8 +375,11 @@ export function parseSpainRailPickId(pickedId) {
   return match ? { kind: match[1], key: match[2] } : null;
 }
 
-/** Card copy for a line, a national-network track or a station. */
-export function buildSpainRailCopy(kind, item) {
+/**
+ * Card copy for a line, a national-network track or a station; a station
+ * with a `board` lists its next trains.
+ */
+export function buildSpainRailCopy(kind, item, board = null, now = Date.now()) {
   if (kind === 'ign') {
     return {
       title: '🛤 Railway',
@@ -342,7 +410,11 @@ export function buildSpainRailCopy(kind, item) {
     details: [
       `${kindLabel} · ${item.code}`,
       ...(lines ? [`Lines: ${lines}`] : []),
-      `Source: ${fgc ? 'FGC' : 'Renfe Operadora'} open data`,
+      ...spainRailArrivalLines(board, now),
+      `Source: ${fgc ? 'FGC' : 'Renfe Operadora'} open data` +
+        (Number.isFinite(board?.data?.fetchedAt)
+          ? ` · ${madridClock.format(board.data.fetchedAt)}`
+          : ''),
     ],
   };
 }
@@ -350,6 +422,10 @@ export function buildSpainRailCopy(kind, item) {
 export function createSpainRailNetworkLayer({
   overlayHost = DEFAULT_OVERLAY_HOST,
   loadJson = loadBundledJson,
+  fetchImpl = (...args) => globalThis.fetch(...args),
+  now = Date.now,
+  setIntervalImpl = (...args) => globalThis.setInterval(...args),
+  clearIntervalImpl = (...args) => globalThis.clearInterval(...args),
 } = {}) {
   let _viewer = null;
   let _dataSource = null;
@@ -382,6 +458,16 @@ export function createSpainRailNetworkLayer({
   let _lastError = null;
   let _enabled = false;
   let _selectedKey = null;
+  /**
+   * The open station card's next trains: what the server last said, and
+   * whether a request is out. `generation` drops answers for a closed card.
+   * @type {{station: object, feedId: string, data: object|null,
+   *   status: 'loading'|'ready'|'error', error: string|null, askedAt: number,
+   *   inFlight: boolean, generation: number, position: Cesium.Cartesian3}|null}
+   */
+  let _board = null;
+  let _generation = 0;
+  let _tick = null;
   /** @type {Cesium.ScreenSpaceEventHandler|null} */
   let _clickHandler = null;
 
@@ -395,13 +481,87 @@ export function createSpainRailNetworkLayer({
 
   function _clearSelection() {
     _selectedKey = null;
+    if (_tick !== null) clearIntervalImpl(_tick);
+    _tick = null;
+    _board = null;
     overlayHost.clearSource(SPAIN_RAIL_SELECTED_OVERLAY_SOURCE_ID);
+  }
+
+  async function _askArrivals() {
+    const board = _board;
+    if (!board || board.inFlight) return;
+    board.inFlight = true;
+    board.askedAt = now();
+    const { generation, feedId, station } = board;
+    let data = null;
+    let error = null;
+    try {
+      const response = await fetchImpl(
+        `/api/transit/arrivals/${encodeURIComponent(feedId)}/${encodeURIComponent(station.code)}`,
+      );
+      if (response.ok) {
+        data = await response.json();
+        if (!Array.isArray(data?.arrivals)) {
+          data = null;
+          error = 'Malformed arrivals answer';
+        }
+      } else {
+        error =
+          response.status === 404
+            ? 'No train times for this station'
+            : 'Next trains unavailable';
+      }
+    } catch {
+      error = 'Network error';
+    }
+    if (_board?.generation !== generation) return;
+    board.inFlight = false;
+    if (data) {
+      board.data = data;
+      board.status = 'ready';
+      board.error = null;
+    } else {
+      board.status = 'error';
+      board.error = error;
+    }
+    _showCard(_selectedKey, 'station', station, board.position);
+  }
+
+  function _onTick() {
+    if (!_board) return;
+    if (now() - _board.askedAt >= SPAIN_RAIL_CARD_REFRESH_MS)
+      void _askArrivals();
+    _showCard(_selectedKey, 'station', _board.station, _board.position);
+  }
+
+  function _openBoard(station, position) {
+    const feedId = SPAIN_RAIL_ARRIVAL_FEEDS[station.network];
+    if (!feedId) return;
+    _generation += 1;
+    _board = {
+      station,
+      feedId,
+      data: null,
+      status: 'loading',
+      error: null,
+      askedAt: 0,
+      inFlight: false,
+      generation: _generation,
+      position,
+    };
+    void _askArrivals();
+    _tick = setIntervalImpl(_onTick, SPAIN_RAIL_CARD_TICK_MS);
   }
 
   function _showCard(key, kind, item, position) {
     if (!position) return;
     _selectedKey = key;
-    const { title, details } = buildSpainRailCopy(kind, item);
+    const { title, details } = buildSpainRailCopy(
+      kind,
+      item,
+      kind === 'station' ? _board : null,
+      now(),
+    );
     const rgb =
       kind === 'line'
         ? spainRailLineRgb(item)
@@ -440,6 +600,8 @@ export function createSpainRailNetworkLayer({
   function _select(pickedId, clickPosition) {
     const parsed = parseSpainRailPickId(pickedId);
     if (!parsed) return false;
+    // A new card replaces the open one, and with it any station board.
+    _clearSelection();
     if (parsed.kind === 'ign') {
       const track = _ignPaths[Number(parsed.key)];
       if (!track || !clickPosition) return false;
@@ -449,7 +611,9 @@ export function createSpainRailNetworkLayer({
     if (parsed.kind === 'station') {
       const station = _stations.get(parsed.key);
       if (!station) return false;
-      _showCard(pickedId, 'station', station, _stationPosition(station));
+      const position = _stationPosition(station);
+      _openBoard(station, position);
+      _showCard(pickedId, 'station', station, position);
       return true;
     }
     const line = _lines[Number(parsed.key)];
