@@ -1,26 +1,30 @@
-# Plan — Trenes de Suiza "estimados" en la capa Transit (`solo fork`)
+# Plan — Datos abiertos de Suiza (SBB y otras plataformas)
 
-Estado: **planificado, sin empezar**. Escrito el 2026-10-16 con datos medidos ese día.
-Va **después** de terminar la hoja de ruta de España
-(`docs/plans/transit-spain-renfe-fgc.md`, fases 7b en adelante). Es solo para el fork,
-como TMB: Suiza no publica posiciones reales y el tiempo real pide clave, así que no
-cumple las reglas de admisión de upstream (sin clave y con coordenadas reales). Más
-adelante se verá si upstream acepta vehículos estimados.
+Estado: **planificado, sin empezar**. Escrito el 2026-10-16 con datos medidos ese día;
+reorganizado el 2026-10-17 (antes `transit-switzerland-estimated.md`).
+
+- **Trenes (secciones 1–6):** trenes suizos "estimados" en la capa Transit, `solo fork`
+  como TMB. Suiza no publica posiciones reales y el tiempo real pide clave, así que no
+  cumple las reglas de admisión de upstream (sin clave y con coordenadas reales). Más
+  adelante se verá si upstream acepta vehículos estimados. El motor que los coloca es
+  común con el metro TMB y está en `docs/plans/transit-estimated-positions.md`.
+- **Otras plataformas (sección 7):** fuentes suizas por investigar, sin comprobar
+  todavía.
 
 ## Cómo retomar
 
 - **Antes de empezar:**
-  1. Que la hoja de ruta de España esté cerrada, o al menos sus fases 7–8.
+  1. ~~Que la hoja de ruta de España esté cerrada~~: cerrada el 2026-10-16 (fases 1–8).
   2. Que el usuario tenga su clave de opentransportdata.swiss. Se saca en
      `api-manager.opentransportdata.swiss`: registro con email, crear una aplicación y
      suscribirla a "GTFS-RT". El registro lo hace el usuario; Claude no crea cuentas.
-- **Relación con la Fase 9 de España** (metro TMB "estimado"): es la misma idea, un
-  vehículo interpolado entre paradas a partir de horas previstas. El motor de
-  interpolación se diseña **genérico** en la primera de las dos que se haga, y la otra
-  lo reutiliza.
+- **Relación con el metro TMB "estimado":** es la misma idea, un vehículo interpolado
+  entre paradas a partir de horas previstas. El motor, las reglas de etiquetado y el
+  orden entre los dos están en `docs/plans/transit-estimated-positions.md`.
 - **Entorno:** el de siempre. Node 24 de nvm; gates `npm test`, `npm run format:check`
   y `npm run check:boundaries`; los módulos nuevos van en
-  `scripts/package-boundaries.json` y `scripts/format-scope.json`.
+  `scripts/package-boundaries.json` y `scripts/format-scope.json`. Los textos de capas
+  del fork se quedan en inglés vía `scripts/i18n-fork-untranslated.json`.
 
 ## 1. Qué publica Suiza (comprobado el 2026-10-16)
 
@@ -193,11 +197,9 @@ adelante se verá si upstream acepta vehículos estimados.
   "según horario", sin retrasos. **Decisión pendiente para el usuario:**
   - (a) **recomendada:** sin clave, la fila no se ofrece, igual que TMB;
   - (b) mostrarlos "según horario" con otro aviso en la ficha.
-- **Siempre etiquetado como estimado:**
-  - icono o estilo propio (por ejemplo, contorno en vez de relleno);
-  - la ficha dice "posición estimada (horario + retraso)";
-  - las estadísticas lo cuentan aparte;
-  - se puede desactivar.
+- **Siempre etiquetado como estimado**, con las reglas comunes de
+  `docs/plans/transit-estimated-positions.md` (sección 1); la ficha dice "posición
+  estimada (horario + retraso)".
 - **Primera versión solo con tren** (`route_type` 101–117). Tranvías, barcos,
   funiculares y teleféricos van en una fase opcional.
 - **Trenes internacionales:** se recortan al territorio suizo, o se dibujan solo
@@ -223,29 +225,15 @@ adelante se verá si upstream acepta vehículos estimados.
      290 MB en cada reinicio.
 2. **Tiempo real:** el TU cada 35–60 s se convierte en un mapa `tripId` → retraso por
    parada. Las cancelaciones (`schedule_relationship`) quitan el tren.
-3. **Motor de posición** (genérico, compartido con la Fase 9 de TMB):
-   - En el instante `t`, cada viaje activo está parado en una estación (entre llegada y
-     salida previstas más el retraso) o entre dos paradas.
-   - Entre paradas se interpola a lo largo de la geometría del tramo: línea recta en
-     CH-1 y el trazado de SBB en CH-3.
-   - El rumbo sale del tramo.
-   - Se genera el registro normalizado de la capa (`{id, lat, lon, bearing, routeId,
-tripId, label, stopId, status}`) con una marca `estimated: true`.
-   - Se recalcula en cada consulta del navegador (caché de 15 s), y `movement` lo
-     suaviza como con cualquier otro feed.
-4. **Enganche en el registro:** el feed no tiene URL de posiciones.
-   - **Opción A:** un `format` nuevo (`'ch-estimated'`) cuya `url` es el TU. Pero el
-     decodificador de hoy es una función pura del cuerpo y aquí necesita el índice y la
-     hora.
-   - **Opción B, más limpia:** un enganche `estimate` en el registro, para que
-     `transitService` llame a un generador en vez de hacer fetch y decodificar.
-   - Decidirlo al empezar, viendo `transitService.js` / `transitProxy.js`.
-5. **Ficha y paneles:**
+3. **Motor de posición y enganche en el registro:** comunes con el metro TMB, en
+   `docs/plans/transit-estimated-positions.md` (secciones 2 y 6). Lo propio de Suiza
+   es la entrada: el índice del punto 1 y los retrasos del punto 2.
+4. **Ficha y paneles:**
    - La ficha dice, por ejemplo, `IC 1 12812 → St. Gallen · +3 min · posición
 estimada`, con las próximas paradas sacadas del índice.
    - Los paneles de estación de la Fase 7 (`/api/transit/arrivals/<feed>/<stop>`) salen
      casi gratis del mismo índice.
-6. **Créditos:**
+5. **Créditos:**
    - "opentransportdata.swiss" (obligatorio), más "SBB" si se usa su geometría.
    - Fila en `DATA_SOURCES.md` marcada como solo fork, que explique que las posiciones
      son estimadas.
@@ -259,7 +247,7 @@ estimada`, con las próximas paradas sacadas del índice.
     retraso trae;
   - comprobar que el servicio puede seguir la redirección del gestor de APIs.
 - **CH-1 — Índice estático y trenes según horario** (línea recta entre paradas),
-  detrás de la clave.
+  detrás de la clave. Usa el motor común (fase E-3 del plan de posiciones estimadas).
   - **Hecho cuando** sobre Zúrich HB se ven los S-Bahn moviéndose de acuerdo con el
     horario, y la ficha dice que son estimados.
 - **CH-2 — Retrasos y cancelaciones del TU**, respetando el límite de 2 por minuto.
@@ -294,3 +282,18 @@ estimada`, con las próximas paradas sacadas del índice.
   2. lee `calendar` y `calendar_dates` para los servicios del día;
   3. lee `trips` para los viajes de tren de hoy;
   4. recorre `stop_times` contando filas y la primera y última hora de cada viaje.
+
+## 7. Otras plataformas suizas (por investigar)
+
+Candidatas a revisar, **sin comprobar** (ni URLs, ni licencias, ni si encajan en
+upstream). Antes de planificar ninguna, medirla en vivo como se hizo con el GTFS:
+
+- **sharedmobility.ch** (Oficina Federal de Energía): bicis, patinetes y coches
+  compartidos de toda Suiza. Si publica GBFS abierto, sería una fila más de la capa Bike
+  Share de upstream, con el patrón de `docs/plans/bikeshare-spain-packs.md`.
+- **MeteoSwiss (datos abiertos):** estaciones de medición y avisos; patrón de las capas
+  AEMET (`docs/plans/weather-data-integrations.md`).
+- **swisstopo / geo.admin.ch:** capas de mapa y geometría (por ejemplo, la red
+  ferroviaria si `linie-mit-polygon` no cubre RhB, MGB, BLS o zb; ver CH-3).
+- **Otros datasets de data.sbb.ch:** puntos de explotación ("Dienststellen"), que CH-3
+  necesita para casar paradas con tramos.

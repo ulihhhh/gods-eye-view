@@ -5,12 +5,10 @@ probado en vivo ese día (rutas v2, nº de estaciones, licencia y frescura < 1 m
 
 ## Cómo retomar
 
-- **Condición para empezar:** que se mergee upstream el PR de Bicing + AMBici
-  (bilawalsidhu/gods-eye-view#1176, rama `feat/bikeshare-barcelona`, commit 194595e1).
-  Ese PR añade `gbfs.nextbike.net` a la lista de hosts permitidos, que el pack 2
-  necesita, y fija el patrón que copian los dos packs.
-- **Comprobar el estado:**
-  `gh pr view 1176 --repo bilawalsidhu/gods-eye-view --json state,mergeable`
+- **Condición para empezar: cumplida.** El PR de Bicing + AMBici
+  (bilawalsidhu/gods-eye-view#1176) se fusionó en upstream el 2026-10-16. Añadió
+  `gbfs.nextbike.net` a la lista de hosts permitidos, que el pack 2 necesita, y fijó el
+  patrón que copian los dos packs.
 - **Orden:** pack 1 primero y pack 2 después, cada uno en su rama y su PR, ambos desde
   `upstream/main` ya con #1176 dentro:
   - `feat/bikeshare-spain-cities` (pack 1)
@@ -89,6 +87,20 @@ deja Mislata y Torrent dentro de los 100 km.
 - BicinRivas: `Polideportivo Parque Sureste` (40.3236695, -3.5127191)
 
 ### Problemas de datos que el pack 1 tiene que resolver
+
+> **Actualización 2026-10-17:** upstream ya filtra las estaciones de la **capa** por
+> distancia (commit 7a38727b, "drop stations outside a city's load radius", del PR de
+> Bogotá y Santiago). La ingestión (`src/layers/bikeshare/ingestion.js`) pasa ahora por
+> `stationsWithinCity(city, …)` con el `loadRadiusKm` de cada sistema: es la opción (a) de abajo, y también quita las
+> estaciones en (0,0) de la capa. Queda por mirar al empezar:
+>
+> - `src/tools/queries/mobility.js` (voz y MCP) sigue usando `parseStationInformation`
+>   sin ese filtro, aunque recorta por el área de la consulta (`areaContains`), así que
+>   (0,0) no sale; `_LAB MADRID` solo saldría si una consulta sobre Madrid alcanzara a
+>   Sevici.
+> - Si aun así conviene descartar (0,0) en el parser, como arreglo genérico aparte.
+> - Que el `loadRadiusKm` de cada fila nueva alcance sus estaciones más lejanas (el
+>   test de Barcelona de #1176 ya lo comprueba para sus dos sistemas; copiarlo).
 
 1. **Estaciones en (0,0).** `parseStationInformation` (`src/sources/gbfsStations.js`)
    solo descarta coordenadas no finitas, así que `lat: 0, lon: 0` pasa y se pinta en el

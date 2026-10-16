@@ -1,16 +1,19 @@
 # Hoja de ruta — Transporte en España (Renfe, FGC, TMB) en el fork
 
 Estado: plan de trabajo **solo para el fork** (`mi-main`), reescrito el 2026-10-12 y
-reordenado el 2026-10-13 (fases 6–10, tras el reanálisis de datos).
+reordenado el 2026-10-13 (fases 6–8, tras el reanálisis de datos). El 2026-10-17 la
+antigua Fase 9 (metro TMB estimado) pasó a `docs/plans/transit-estimated-positions.md`
+y la Fase 10 (PR conjunto a upstream) se eliminó.
 Todo lo técnico se ha comprobado contra los feeds en vivo (incluida una observación de
 10 min) y contra el código de `upstream/main` (591f299). No quedan pendientes de
 investigación.
 
-## Cómo retomar (estado al 2026-10-16)
+## Cómo retomar (estado al 2026-10-17)
 
-- **Hecho y en `mi-main`**: fases 1–5f, 6a–6c y 7a–7c. **Fase 8** (incidencias) en la
-  rama `feat/transit-es-alerts`. Siguiente: **Fase 9** (opcional, metro TMB estimado)
-  o la **Fase 10** (PR conjunto a upstream).
+- **Hoja de ruta cerrada:** fases 1–8 hechas y en `mi-main` (la 8, incidencias y la
+  pastilla ALERTS, fusionada el 2026-10-16). Lo siguiente en transporte está en otros
+  planes: `docs/plans/transit-estimated-positions.md` (metro TMB y trenes suizos
+  estimados) y `docs/plans/switzerland-open-data.md`.
 - Avisos: decodificador `src/data/gtfsAlerts.js`, enganche `alerts` del registro
   (`companionFor` en `src/sources/transitService.js`), ruta
   `/api/transit/alerts/<feed>`, texto de ficha en `src/data/transitAlertText.js`;
@@ -36,9 +39,8 @@ false`; el patrón está en `scripts/qa-transit.mjs`).
 - **Fases en orden**, cada una en su rama `feat/transit-es-<fase>`. Una fase se fusiona en
   `mi-main` cuando cumple su "hecho cuando", con commit y push.
 - **Calidad de PR desde el primer día.** Cada fase sigue la guía de contribución de
-  upstream: tests, docs y gates. Así, si en el futuro hay suficientes integraciones de
-  datos de España, el PR conjunto a upstream (Fase 10) es una tarea de **montaje**, no de
-  reescritura.
+  upstream: tests, docs y gates, para que cualquier parte se pueda proponer a upstream
+  sin reescribirla.
 - **Lo que no puede ir nunca a upstream va marcado como `solo fork`.** Ejemplo: TMB, por
   su licencia ligada a la aplicación.
 
@@ -537,8 +539,8 @@ y FGC con sus colores, y regenerar los datos es ejecutar un solo comando.
 - **5c —** red de larga distancia del IGN.
 - **5d —** geometría de TMB y AMB, servida por el servidor (TMB, por clave y licencia;
   AMB, porque su licencia no permite alterar el contenido) — ✅ hecho 2026-10-13
-  (rama `feat/transit-es-bus-geometry`). Los tramos de metro (`trams`) pasan a la
-  Fase 9.
+  (rama `feat/transit-es-bus-geometry`). Los tramos de metro (`trams`) pasan a
+  `docs/plans/transit-estimated-positions.md`.
 
 **Resultado 5a:**
 
@@ -1072,7 +1074,7 @@ Así que la fase se parte en tres:
   trenes. En las cabeceras casi todo sale `scheduled`: el TU de LD solo trae los
   trenes que ya circulan.
 
-### Fase 8 — Incidencias
+### Fase 8 — Incidencias — ✅ hecha 2026-10-16
 
 **Objetivo.** Avisos de servicio donde se consultan:
 
@@ -1121,37 +1123,6 @@ Así que la fase se parte en tres:
   grupos de estación, paradas, líneas con aviso de línea entera) y `/api/amb/alerts`
   (paradas; una parada de AMB que también es de TMB se marca como la de TMB). Las
   líneas de bus no llevan halo: los avisos de bus ya nombran sus paradas.
-
-### Fase 9 — (Opcional) Experimento: metro TMB "estimado" — `solo fork`
-
-Necesita la Fase 4 (iMetro) y la geometría de tramos (`linies/metro/{l}/trams`, que la
-5d dejó para aquí). Se interpola cada `codi_servei` entre estaciones a partir de sus
-llegadas, sobre esos tramos.
-Siempre etiquetado como _posición estimada a partir de predicciones_, con estilo propio,
-y desactivable. Riesgos: saltos cuando cambia la predicción, ambigüedad del
-`codi_servei` entre líneas, y lagunas en las terminales.
-
-### Fase 10 — (Futuro) PR conjunto a upstream con las integraciones de España
-
-Se abre solo cuando haya suficientes integraciones de datos de España terminadas en el fork.
-
-**Candidatos:**
-
-| Integración                                                                                             | ¿Apta para upstream?                                                                                              |
-| ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Fases 1–3 y 5–8 (Renfe, enganches, FGC, red y estaciones sin TMB, pills, ficha, llegadas e incidencias) | ✅ sin clave, CC BY 4.0, con coordenadas reales                                                                   |
-| Capas AEMET (`docs/plans/weather-data-integrations.md`)                                                 | ✅ probablemente: piden clave gratuita, como otras capas de upstream (TomTom, Mapillary). Revisar sus tokens `z*` |
-| CCTV Bilbao y extras del pack de Cataluña                                                               | Revisar uno a uno (Andorra da 404)                                                                                |
-| Fases 4 y 9 (TMB)                                                                                       | ❌ licencia ligada a la aplicación: se queda en el fork                                                           |
-
-**Cómo montarlo:**
-
-1. Rama nueva desde `upstream/main` de ese momento.
-2. Traer el código de cada integración apta: cherry-pick de los commits de fase, o copia
-   de ficheros si los syncs lo han mezclado demasiado. Ordenarlo en **commits revisables
-   por integración**.
-3. Comprobar qué ha pasado con #944, #634 y #733 y adaptarse.
-4. Gates completos, y descripción con validación y hosts salientes por integración.
 
 ---
 
@@ -1240,8 +1211,7 @@ comprobado en vivo:
 
 - **Licencia** de los feeds de bus: "Autorització segons Llei 37/2007" (condiciones de uso
   de amb.cat): reutilización libre citando a AMB y la fecha de la última actualización, sin
-  alterar ni desvirtuar el contenido. No es CC BY: para la Fase 10, revisar si upstream la
-  admite. Los servicios SOAP de AMB (`OpenData.aspx`, incidencias por parada) piden
+  alterar ni desvirtuar el contenido. No es CC BY. Los servicios SOAP de AMB (`OpenData.aspx`, incidencias por parada) piden
   formulario: no los usamos.
 - **Qué no hay:** posiciones de bus. Ni AMB ni TMB las publican.
 - **iBus de TMB ya incluye líneas AMB** en las paradas de TMB (p. ej. L70/X70 en la 108),
@@ -1251,12 +1221,12 @@ comprobado en vivo:
     en el panel de la 4b.
   - **5:** paradas, trazados y colores de las 140 líneas AMB, con el mismo script.
   - **8:** las alertas AMB entran por el mismo camino que las de Renfe y FGC.
-  - **9:** buses AMB "estimados" sobre `shapes.txt`, a partir del tramo entre la última
-    parada y la próxima. Es mejor candidato que el metro de TMB: licencia abierta, sin
-    clave, con id de vehículo real y todas las líneas.
-  - **Bicis (4c):** AMBici (CC0) y, si se confirma la licencia, Bicing, como filas de la
-    capa Bike Share de upstream (hoy solo tiene sistemas de EE. UU.). Candidato claro a la
-    Fase 10.
+  - **Buses AMB "estimados"** sobre `shapes.txt`, a partir del tramo entre la última
+    parada y la próxima: candidato en `docs/plans/transit-estimated-positions.md`. Es
+    mejor fuente que el metro de TMB: licencia abierta, sin clave, con id de vehículo
+    real y todas las líneas.
+  - **Bicis:** AMBici y Bicing ya están en upstream (PR #1176, fusionado el 2026-10-16).
+    El resto de España sigue en `docs/plans/bikeshare-spain-packs.md`.
 
 ---
 
