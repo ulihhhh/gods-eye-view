@@ -17,6 +17,7 @@ import { buildTemperatureGradientImages } from './temperatureGradientRaster.js';
 import { getCcaaFeatures } from './spainBoundaries.js';
 import { SPAIN_PROVINCIAL_CAPITALS } from './spainCapitals.js';
 import { buildCapitalTemperatureRecords } from './capitalTemperatures.js';
+import { msg, t } from '../i18n/index.js';
 
 export {
   TEMPERATURE_COLOR_STOPS,
@@ -138,31 +139,31 @@ function atDeg(direction) {
 export function buildAemetStationDescription(station) {
   const observed = Number.isFinite(station?.observedAtMs)
     ? new Date(station.observedAtMs).toLocaleString()
-    : 'unknown';
+    : t('unknown');
   const hasRange =
     Number.isFinite(station?.temperatureMinC) &&
     Number.isFinite(station?.temperatureMaxC);
   return (
     `<table class="cesium-infoBox-defaultTable">` +
     `<tbody>` +
-    `<tr><th>Station</th><td>${station?.id ?? '—'}</td></tr>` +
-    `<tr><th>Temperature</th><td>${fmt(station?.temperatureC, '°C', 1)}` +
+    `<tr><th>${t('Station')}</th><td>${station?.id ?? '—'}</td></tr>` +
+    `<tr><th>${t('Temperature')}</th><td>${fmt(station?.temperatureC, '°C', 1)}` +
     `${hasRange ? ` (${station.temperatureMinC.toFixed(1)}–${station.temperatureMaxC.toFixed(1)}°C)` : ''}</td></tr>` +
-    `<tr><th>Dew point</th><td>${fmt(station?.dewPointC, '°C', 1)}</td></tr>` +
-    `<tr><th>Humidity</th><td>${fmt(station?.humidityPct, '%')}</td></tr>` +
-    `<tr><th>Pressure</th><td>${fmt(station?.pressureHpa, ' hPa', 1)}</td></tr>` +
-    `<tr><th>Sea-level pressure</th><td>${fmt(station?.pressureSeaLevelHpa, ' hPa', 1)}</td></tr>` +
-    `<tr><th>Wind</th><td>${fmt(station?.windSpeedMs, ' m/s', 1)}${atDeg(station?.windDirectionDeg)}` +
+    `<tr><th>${t('Dew point')}</th><td>${fmt(station?.dewPointC, '°C', 1)}</td></tr>` +
+    `<tr><th>${t('Humidity')}</th><td>${fmt(station?.humidityPct, '%')}</td></tr>` +
+    `<tr><th>${t('Pressure')}</th><td>${fmt(station?.pressureHpa, ' hPa', 1)}</td></tr>` +
+    `<tr><th>${t('Sea-level pressure')}</th><td>${fmt(station?.pressureSeaLevelHpa, ' hPa', 1)}</td></tr>` +
+    `<tr><th>${t('Wind')}</th><td>${fmt(station?.windSpeedMs, ' m/s', 1)}${atDeg(station?.windDirectionDeg)}` +
     `${
       Number.isFinite(station?.windSpeedStdDevMs) ||
       Number.isFinite(station?.windDirectionStdDevDeg)
         ? ` (σ ${fmt(station?.windSpeedStdDevMs, ' m/s', 1)}${atDeg(station?.windDirectionStdDevDeg)})`
         : ''
     }</td></tr>` +
-    `<tr><th>Gust</th><td>${fmt(station?.windGustMs, ' m/s', 1)}${atDeg(station?.windGustDirectionDeg)}</td></tr>` +
-    `<tr><th>Precipitation</th><td>${fmt(station?.precipitationMm, ' mm', 1)}</td></tr>` +
-    `<tr><th>Altitude</th><td>${fmt(station?.altitudeM, ' m')}</td></tr>` +
-    `<tr><th>Observed</th><td>${observed}</td></tr>` +
+    `<tr><th>${t('Gust')}</th><td>${fmt(station?.windGustMs, ' m/s', 1)}${atDeg(station?.windGustDirectionDeg)}</td></tr>` +
+    `<tr><th>${t('Precipitation')}</th><td>${fmt(station?.precipitationMm, ' mm', 1)}</td></tr>` +
+    `<tr><th>${t('Altitude')}</th><td>${fmt(station?.altitudeM, ' m')}</td></tr>` +
+    `<tr><th>${t('Observed')}</th><td>${observed}</td></tr>` +
     `</tbody></table>`
   );
 }
@@ -179,16 +180,18 @@ export function buildAemetStationDescription(station) {
  * @returns {{title: string, details: string[]}}
  */
 export function buildAemetStationSelectionCopy(station) {
-  const title = station?.name || station?.id || 'Station';
+  const title = station?.name || station?.id || t('Station');
   const hasRange =
     Number.isFinite(station?.temperatureMinC) &&
     Number.isFinite(station?.temperatureMaxC);
   const details = [
     `${fmt(station?.temperatureC, '°C', 1)}` +
       `${hasRange ? ` (${station.temperatureMinC.toFixed(1)}–${station.temperatureMaxC.toFixed(1)})` : ''}` +
-      `${Number.isFinite(station?.dewPointC) ? ` · dew ${station.dewPointC.toFixed(1)}°C` : ''}` +
-      ` · ${fmt(station?.humidityPct, '% RH')}`,
-    `Wind ${fmt(station?.windSpeedMs, ' m/s', 1)}${atDeg(station?.windDirectionDeg)}` +
+      `${Number.isFinite(station?.dewPointC) ? ` · ${t('dew {value}', { value: `${station.dewPointC.toFixed(1)}°C` })}` : ''}` +
+      ` · ${t('{value} RH', { value: fmt(station?.humidityPct, '%') })}`,
+    t('Wind {value}', {
+      value: `${fmt(station?.windSpeedMs, ' m/s', 1)}${atDeg(station?.windDirectionDeg)}`,
+    }) +
       `${
         Number.isFinite(station?.windSpeedStdDevMs) ||
         Number.isFinite(station?.windDirectionStdDevDeg)
@@ -197,13 +200,13 @@ export function buildAemetStationSelectionCopy(station) {
       }` +
       `${
         Number.isFinite(station?.windGustMs)
-          ? ` · gust ${station.windGustMs.toFixed(1)} m/s${atDeg(station?.windGustDirectionDeg)}`
+          ? ` · ${t('gust {value}', { value: `${station.windGustMs.toFixed(1)} m/s${atDeg(station?.windGustDirectionDeg)}` })}`
           : ''
       }`,
     `${fmt(station?.pressureHpa, ' hPa', 1)}` +
-      `${Number.isFinite(station?.pressureSeaLevelHpa) ? ` · MSL ${station.pressureSeaLevelHpa.toFixed(1)} hPa` : ''}`,
-    `${fmt(station?.precipitationMm, ' mm', 1)} precip` +
-      `${Number.isFinite(station?.altitudeM) ? ` · ${station.altitudeM.toFixed(0)} m altitude` : ''}`,
+      `${Number.isFinite(station?.pressureSeaLevelHpa) ? ` · ${t('MSL {value}', { value: `${station.pressureSeaLevelHpa.toFixed(1)} hPa` })}` : ''}`,
+    t('{value} precip', { value: fmt(station?.precipitationMm, ' mm', 1) }) +
+      `${Number.isFinite(station?.altitudeM) ? ` · ${t('{value} altitude', { value: `${station.altitudeM.toFixed(0)} m` })}` : ''}`,
   ];
   return { title, details };
 }
@@ -228,7 +231,7 @@ export function buildAemetForecastSummaryLine(hours, take = 4) {
         `${String(h.hour).padStart(2, '0')}:00 ${fmt(h.temperatureC, '°C', 0)}`,
     );
   if (!parts.length) return null;
-  return `Next hours: ${parts.join(' · ')}`;
+  return t('Next hours: {hours}', { hours: parts.join(' · ') });
 }
 
 /**
@@ -495,7 +498,7 @@ export function createAemetStationsLayer({
       results = await buildTemperatureGradientImages(stations);
     } catch (e) {
       if (token !== _gradientToken) return;
-      _gradientError = 'Gradient build error';
+      _gradientError = msg('Gradient build error');
       console.warn('[Data:AemetStations] Gradient build error:', e);
       return;
     }
@@ -507,7 +510,7 @@ export function createAemetStationsLayer({
     )
       return;
     if (!results?.length) {
-      _gradientError = 'No station data for gradient';
+      _gradientError = msg('No station data for gradient');
       return;
     }
     try {
@@ -533,7 +536,7 @@ export function createAemetStationsLayer({
       _gradientError = null;
     } catch (e) {
       if (token !== _gradientToken) return;
-      _gradientError = 'Gradient imagery error';
+      _gradientError = msg('Gradient imagery error');
       console.warn('[Data:AemetStations] Gradient imagery error:', e);
     }
   }
@@ -789,20 +792,22 @@ export function createAemetStationsLayer({
         chips: [
           {
             id: 'points',
-            label: 'PUNTOS',
+            label: t('POINTS'),
             active: isPoints,
             state: isPoints ? 'active' : 'idle',
-            title: 'Un punto coloreado por estación',
+            title: t('One coloured point per station'),
             params: { viewMode: 'points' },
           },
           {
             id: 'gradient',
-            label: 'GRADIENTE',
+            label: t('GRADIENT'),
             active: !isPoints,
             state: !isPoints ? (_gradientError ? 'error' : 'active') : 'idle',
-            title:
-              _gradientError ||
-              'Superficie interpolada (IDW) recortada a España, con fronteras de CCAA y temperaturas de capitales de provincia',
+            title: _gradientError
+              ? t(_gradientError)
+              : t(
+                  'Interpolated surface (IDW) clipped to Spain, with region borders and provincial capital temperatures',
+                ),
             params: { viewMode: 'gradient' },
           },
         ],
@@ -820,10 +825,11 @@ export function createAemetStationsLayer({
       try {
         const response = await fetch(API_URL);
         if (response.status === 503) {
-          _lastError = 'AEMET_API_KEY not configured';
+          _lastError = msg('AEMET_API_KEY not configured');
           return false;
         }
         if (!response.ok) {
+          // i18n-ignore: HTTP status code
           _lastError = `AEMET HTTP ${response.status}`;
           console.warn(`[Data:AemetStations] API returned ${response.status}`);
           return false;
@@ -832,7 +838,7 @@ export function createAemetStationsLayer({
         const payload = await response.json();
         const stations = normalizeAemetStationsPayload(payload);
         if (!stations) {
-          _lastError = 'Malformed AEMET response';
+          _lastError = msg('Malformed AEMET response');
           return false;
         }
 
@@ -891,13 +897,13 @@ export function createAemetStationsLayer({
         _count = stations.length;
         _lastUpdate = Date.now();
         _lastError = payload.stale
-          ? 'Serving stale AEMET data (upstream unavailable)'
+          ? msg('Serving stale AEMET data (upstream unavailable)')
           : null;
         console.log(`[Data:AemetStations] Updated: ${_count} stations`);
         return true;
       } catch (e) {
         console.warn('[Data:AemetStations] Fetch error:', e);
-        _lastError = 'AEMET network error';
+        _lastError = msg('AEMET network error');
         return false;
       }
     },

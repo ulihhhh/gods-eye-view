@@ -7,6 +7,7 @@
  * UI asset, not data) — `glyphForIcon` maps their icon *names* to plain emoji
  * stand-ins instead.
  */
+import { msg, t } from '../i18n/index.js';
 
 /** Deterministic 0–359 hue from a string. */
 function hash360(str) {
@@ -34,12 +35,12 @@ export function sideColorCss(sideId, region) {
 
 /** Liveuamap status_id -> a short badge tag, color, and label (site's own copy, trimmed). */
 export const STATUS_BADGE = Object.freeze({
-  verified: { color: '#2ecc71', label: 'VERIFIED' },
-  rumor: { color: '#f1c40f', label: 'RUMOR' },
-  fake: { color: '#e74c3c', label: 'FAKE' },
-  outdated: { color: '#8a8f98', label: 'OUTDATED' },
-  'location-unknown': { color: '#9b59b6', label: 'LOC. UNKNOWN' },
-  ad: { color: '#8e44ad', label: 'SPONSORED' },
+  verified: { color: '#2ecc71', label: msg('VERIFIED') },
+  rumor: { color: '#f1c40f', label: msg('RUMOR') },
+  fake: { color: '#e74c3c', label: msg('FAKE') },
+  outdated: { color: '#8a8f98', label: msg('OUTDATED') },
+  'location-unknown': { color: '#9b59b6', label: msg('LOC. UNKNOWN') },
+  ad: { color: '#8e44ad', label: msg('SPONSORED') },
 });
 
 /** @param {string|null|undefined} statusTag From liveuamapNormalize's `status.tag`. */
@@ -143,11 +144,11 @@ export function fieldShapeKind(typeId) {
 export function relativeTime(timestampSec, nowMs = Date.now()) {
   if (!Number.isFinite(timestampSec)) return null;
   const diffS = Math.max(0, Math.round(nowMs / 1000 - timestampSec));
-  if (diffS < 60) return 'just now';
+  if (diffS < 60) return t('just now');
   const diffM = Math.round(diffS / 60);
-  if (diffM < 60) return `${diffM}m ago`;
+  if (diffM < 60) return t('{count}m ago', { count: diffM });
   const diffH = Math.round(diffM / 60);
-  if (diffH < 24) return `${diffH}h ago`;
+  if (diffH < 24) return t('{count}h ago', { count: diffH });
   const diffD = Math.round(diffH / 24);
-  return `${diffD}d ago`;
+  return t('{count}d ago', { count: diffD });
 }

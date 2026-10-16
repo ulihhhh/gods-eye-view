@@ -9,6 +9,7 @@ import {
   setOverlayEntries,
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
+import { getLocale, msg, t, tn, translateKnown } from '../i18n/index.js';
 import { loadBundledJson } from './bundledJson.js';
 import { transitAlertText } from './transitAlertText.js';
 
@@ -211,13 +212,14 @@ export function spainRailAlertsFor(kind, item, alerts) {
  */
 export function spainRailAlertLines(alerts) {
   const texts = (alerts || [])
-    .map((alert) => transitAlertText(alert.header))
+    .map((alert) => transitAlertText(alert.header, undefined, getLocale()))
     .filter(Boolean);
   const lines = texts
     .slice(0, SPAIN_RAIL_CARD_ALERTS)
     .map((text) => `⚠ ${text}`);
   const more = texts.length - lines.length;
-  if (more > 0) lines.push(`+${more} more alert${more === 1 ? '' : 's'}`);
+  if (more > 0)
+    lines.push(tn(more, '+{count} more alert', '+{count} more alerts'));
   return lines;
 }
 /** Card repaint (countdown) and the age at which it asks again. */
@@ -234,20 +236,20 @@ const madridClock = new Intl.DateTimeFormat('en-GB', {
 
 function trainRow(train, now, operator) {
   const minutes = Math.round((train.at - now) / 60_000);
-  const when = `${madridClock.format(train.at)} (${minutes <= 0 ? 'now' : `${minutes} min`})`;
+  const when = `${madridClock.format(train.at)} (${minutes <= 0 ? t('now', { context: 'arrival' }) : t('{minutes} min', { minutes })})`;
   const line = train.line || operator;
   const route = train.terminates
-    ? `${line}${train.origin ? ` from ${train.origin}` : ''} · arr. ${when}`
+    ? `${train.origin ? t('{line} from {origin}', { line, origin: train.origin }) : line} · ${t('arr. {time}', { time: when })}`
     : `${line} → ${train.destination || '?'} · ${when}`;
   const late =
     Number.isFinite(train.delaySec) && train.delaySec >= 60
-      ? ` · +${Math.round(train.delaySec / 60)} min`
+      ? ` · +${t('{minutes} min', { minutes: Math.round(train.delaySec / 60) })}`
       : train.onTime === false
-        ? ' · late'
+        ? ` · ${t('late', { context: 'train' })}`
         : train.realtime === false
-          ? ' · scheduled'
+          ? ` · ${t('scheduled', { context: 'train' })}`
           : '';
-  return `${route}${train.platform ? ` · platform ${train.platform}` : ''}${late}`;
+  return `${route}${train.platform ? ` · ${t('platform {platform}', { platform: train.platform })}` : ''}${late}`;
 }
 
 /**
@@ -267,19 +269,23 @@ export function spainRailArrivalLines(board, now, operator = 'FGC') {
   if (!board.data) {
     return [
       board.status === 'error'
-        ? board.error || 'Next trains unavailable'
-        : 'Asking for the next trains…',
+        ? t(board.error || 'Next trains unavailable')
+        : t('Asking for the next trains…'),
     ];
   }
   const lines = trains.length
     ? trains
         .slice(0, SPAIN_RAIL_CARD_MAX_TRAINS)
         .map((train) => trainRow(train, now, operator))
-    : ['No trains reported right now'];
+    : [t('No trains reported right now')];
   if (trains.length > SPAIN_RAIL_CARD_MAX_TRAINS)
-    lines.push(`+${trains.length - SPAIN_RAIL_CARD_MAX_TRAINS} more`);
+    lines.push(
+      t('+{count} more', {
+        count: trains.length - SPAIN_RAIL_CARD_MAX_TRAINS,
+      }),
+    );
   if (board.status === 'error' && board.error)
-    lines.push(`${board.error} · showing last answer`);
+    lines.push(`${t(board.error)} · ${t('showing last answer')}`);
   return lines;
 }
 
@@ -453,28 +459,28 @@ export const SPAIN_RAIL_DEFAULT_PARAMS = Object.freeze({
 const SPAIN_RAIL_CHIPS = Object.freeze([
   Object.freeze({
     key: 'cercanias',
-    label: 'CERCANÍAS',
-    title: 'Renfe Cercanías / Rodalies lines and stations',
+    label: msg('CERCANÍAS'),
+    title: msg('Renfe Cercanías / Rodalies lines and stations'),
   }),
   Object.freeze({
     key: 'fgc',
-    label: 'FGC',
-    title: 'FGC lines and stations',
+    label: 'FGC', // i18n-ignore: operator name
+    title: msg('FGC lines and stations'),
   }),
   Object.freeze({
     key: 'national',
-    label: 'AV/LD',
-    title: 'National rail network (IGN) and AV/LD/MD stations',
+    label: 'AV/LD', // i18n-ignore: service codes
+    title: msg('National rail network (IGN) and AV/LD/MD stations'),
   }),
   Object.freeze({
     key: 'stations',
-    label: 'STATIONS',
-    title: 'Station points',
+    label: msg('STATIONS'),
+    title: msg('Station points'),
   }),
   Object.freeze({
     key: 'alerts',
-    label: 'ALERTS',
-    title: 'Mark Cercanías lines and stations with service alerts',
+    label: msg('ALERTS'),
+    title: msg('Mark Cercanías lines and stations with service alerts'),
   }),
 ]);
 
@@ -526,10 +532,11 @@ export function spainRailRowControls(params) {
   return {
     chips: SPAIN_RAIL_CHIPS.map(({ key, label, title }) => ({
       id: key,
-      label,
+      // FGC and AV/LD are names: translateKnown leaves them as they are.
+      label: translateKnown(label),
       active: params[key],
       state: params[key] ? 'active' : 'idle',
-      title,
+      title: t(title),
       params: { [key]: !params[key] },
     })),
     legend: [],
@@ -559,10 +566,12 @@ export function buildSpainRailCopy(
 ) {
   if (kind === 'ign') {
     return {
-      title: '🛤 Railway',
+      title: `🛤 ${t('Railway')}`,
       details: [
-        'Spanish rail network (mainline track)',
-        'Source: © Instituto Geográfico Nacional — SCNE',
+        t('Spanish rail network (mainline track)'),
+        t('Source: {source}', {
+          source: '© Instituto Geográfico Nacional — SCNE',
+        }),
       ],
     };
   }
@@ -570,27 +579,31 @@ export function buildSpainRailCopy(
     return {
       title: `🛤 ${item.line}`,
       details: [
-        `${spainRailNetworkLabel(item)} · line`,
+        `${spainRailNetworkLabel(item)} · ${t('line', { context: 'rail' })}`,
         ...spainRailAlertLines(alerts),
-        `Source: ${item.network === 'fgc' ? 'FGC' : 'Renfe Operadora'} open data`,
+        t('Source: {operator} open data', {
+          operator: item.network === 'fgc' ? 'FGC' : 'Renfe Operadora',
+        }),
       ],
     };
   }
   const fgc = item.network === 'fgc';
   const lines = (item.lines || []).map((line) => line.name).join(' ');
   const kindLabel = fgc
-    ? 'FGC station'
+    ? t('FGC station')
     : item.network === 'renfe-ld'
-      ? 'Renfe AV/LD/MD station'
-      : 'Renfe Cercanías station';
+      ? t('Renfe AV/LD/MD station')
+      : t('Renfe Cercanías station');
   return {
     title: `🚉 ${item.name}`,
     details: [
       `${kindLabel} · ${item.code}`,
-      ...(lines ? [`Lines: ${lines}`] : []),
+      ...(lines ? [t('Lines: {lines}', { lines })] : []),
       ...spainRailAlertLines(alerts),
       ...spainRailArrivalLines(board, now, fgc ? 'FGC' : 'Renfe'),
-      `Source: ${fgc ? 'FGC' : 'Renfe Operadora'} open data` +
+      t('Source: {operator} open data', {
+        operator: fgc ? 'FGC' : 'Renfe Operadora',
+      }) +
         (Number.isFinite(board?.data?.fetchedAt)
           ? ` · ${madridClock.format(board.data.fetchedAt)}`
           : ''),
@@ -816,9 +829,9 @@ export function createSpainRailNetworkLayer({
           const data = await response.json();
           return Array.isArray(data?.arrivals)
             ? { data }
-            : { error: 'Malformed arrivals answer' };
+            : { error: msg('Malformed arrivals answer') };
         } catch {
-          return { error: 'Network error' };
+          return { error: msg('Network error') };
         }
       }),
     );
@@ -837,10 +850,10 @@ export function createSpainRailNetworkLayer({
       board.error =
         first?.error ??
         (first?.status === 404
-          ? 'No train times for this station'
+          ? msg('No train times for this station')
           : first?.status === 503 && station.network !== 'fgc'
-            ? 'Loading the Renfe timetable…'
-            : 'Next trains unavailable');
+            ? msg('Loading the Renfe timetable…')
+            : msg('Next trains unavailable'));
     }
     _showCard(_selectedKey, 'station', station, board.position);
   }
@@ -1061,7 +1074,7 @@ export function createSpainRailNetworkLayer({
     }
     _groundSupported = supported;
     if (!supported) {
-      _lastError = 'Ground polylines unsupported here — stations only';
+      _lastError = msg('Ground polylines unsupported here — stations only');
       return;
     }
     // The national network first, so the operators' coloured lines draw on
@@ -1200,7 +1213,7 @@ export function createSpainRailNetworkLayer({
         ]);
         const lines = normalizeSpainRailLines(linesPack);
         if (!lines) {
-          _lastError = 'Malformed rail lines pack';
+          _lastError = msg('Malformed rail lines pack');
           return false;
         }
         const stations = spainRailStationsFromPack(stationsPack, linesPack);
@@ -1224,7 +1237,7 @@ export function createSpainRailNetworkLayer({
         return true;
       } catch (error) {
         console.warn('[Data:SpainRail] Pack load error:', error);
-        _lastError = 'Rail network pack unavailable';
+        _lastError = msg('Rail network pack unavailable');
         return false;
       }
     },

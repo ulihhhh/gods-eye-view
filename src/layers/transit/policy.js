@@ -424,7 +424,7 @@ export function buildTransitSelectionCopy(
   t = englishText,
 ) {
   const icon = TRANSIT_MODE_ICON[mode] || TRANSIT_MODE_ICON.unknown;
-  const service = transitServiceCopy(feed, record);
+  const service = transitServiceCopy(feed, record, t);
   const routeLabel = service.routeLabel
     ? service.routeLabel
     : record.routeId
@@ -467,16 +467,15 @@ export function buildTransitSelectionCopy(
   // What the stop IS to the vehicle depends on the feed: Renfe's Cercanías
   // name the station a train left where GTFS-Realtime means the next one.
   const named = record.stopName;
-  const stop = named || (record.stopId && `stop ${record.stopId}`);
   const relation = transitStopRelation(record);
   if (relation === 'at' && named)
-    state.push(`Last report: stopped at ${named}`);
+    state.push(t('Last report: stopped at {stop}', { stop: named }));
   else if (relation === 'at' && record.stopId)
     state.push(
       t('Last report: stopped at stop {stop}', { stop: record.stopId }),
     );
   else if (relation === 'arriving' && named)
-    state.push(`Last report: arriving at ${named}`);
+    state.push(t('Last report: arriving at {stop}', { stop: named }));
   else if (relation === 'arriving' && record.stopId)
     state.push(
       t('Last report: arriving at stop {stop}', { stop: record.stopId }),
@@ -485,11 +484,17 @@ export function buildTransitSelectionCopy(
     state.push(
       t('Last report: next stop {stop}', { stop: named || record.stopId }),
     );
-  else if (relation === 'left' && stop) state.push(`Last report: left ${stop}`);
-  else if (relation === 'last' && stop)
-    state.push(`Last report: last stop ${stop}`);
+  else if (relation === 'left' && named)
+    state.push(t('Last report: left {stop}', { stop: named }));
+  else if (relation === 'left' && record.stopId)
+    state.push(t('Last report: left stop {stop}', { stop: record.stopId }));
+  else if (relation === 'last' && (named || record.stopId))
+    state.push(
+      t('Last report: last stop {stop}', { stop: named || record.stopId }),
+    );
   // A platform is the operator's own statement, like the stop it belongs to.
-  if (record.platform) state.push(`platform ${record.platform}`);
+  if (record.platform)
+    state.push(t('platform {platform}', { platform: record.platform }));
   if (record.occupancy && record.occupancy !== 'NO_DATA_AVAILABLE') {
     state.push(occupancyText(record.occupancy, t));
   }
@@ -502,7 +507,7 @@ export function buildTransitSelectionCopy(
     details.push(t('Shown at street level · depth not in the feed'));
   }
   details.push(
-    `${t('Vehicle {vehicle}', { vehicle: record.id })}${record.label && record.label !== record.id ? ` · ${record.label}` : ''}${service.vehicleType ? ` · series ${service.vehicleType}` : ''}`,
+    `${t('Vehicle {vehicle}', { vehicle: record.id })}${record.label && record.label !== record.id ? ` · ${record.label}` : ''}${service.vehicleType ? ` · ${t('series {series}', { series: service.vehicleType })}` : ''}`,
   );
   const ageS = Math.round(
     (Number.isFinite(entry?.sample?.latestReportAgeMs)

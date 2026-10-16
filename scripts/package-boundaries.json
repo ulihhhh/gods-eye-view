@@ -418,7 +418,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": []
   },
@@ -443,7 +445,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium"]
   },
@@ -459,13 +463,16 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": []
   },
   "layer-panel": {
     "exports": ["./ui/layers", "./ui/layers/feedback"],
     "modules": [
+      "src/ui/forkLayerNames.js",
       "src/i18n/marker.js",
       "src/ui/layers.js",
       "src/ui/layerPanel.js",
@@ -487,6 +494,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js",
       "src/ui/keyGuidance.js",
       "src/ui/statusText.js"
@@ -505,7 +514,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": []
   },
@@ -520,7 +531,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": []
   },
@@ -538,6 +551,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js"
     ],
     "external": []
@@ -545,6 +560,7 @@
   "context-controls": {
     "exports": ["./ui/context", "./ui/context/policy"],
     "modules": [
+      "src/ui/forkLayerNames.js",
       "src/i18n/marker.js",
       "src/ui/context.js",
       "src/ui/contextActions.js",
@@ -562,6 +578,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/layerNames.js"
     ],
     "external": []
@@ -595,6 +613,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js"
     ],
     "external": ["cesium"]
@@ -609,6 +629,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js"
     ],
     "external": []
@@ -616,6 +638,7 @@
   "ui-shell": {
     "exports": ["./ui/shell"],
     "modules": [
+      "src/ui/forkLayerNames.js",
       "src/i18n/marker.js",
       "src/ui/placeNames.js",
       "src/hudLayouts.js",
@@ -757,6 +780,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js",
       "src/ui/keyGuidance.js",
       "src/ui/layerNames.js",
@@ -874,6 +899,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js"
     ],
     "external": ["cesium"]
@@ -937,6 +964,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js"
     ],
     "external": ["cesium"]
@@ -982,7 +1011,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium"]
   },
@@ -1040,7 +1071,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium"]
   },
@@ -1069,6 +1102,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js",
       "src/layers/recentImagery/display.js"
     ],
@@ -1097,7 +1132,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium"]
   },
@@ -1128,6 +1165,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js"
     ],
     "external": ["cesium", "satellite.js"]
@@ -1159,7 +1198,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium"]
   },
@@ -1201,6 +1242,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/layers/installations/classLabel.js"
     ],
     "external": ["cesium", "@mapbox/vector-tile", "pbf"]
@@ -1235,6 +1278,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js"
     ],
     "external": ["cesium"]
@@ -1282,7 +1327,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium", "pbf", "@mapbox/vector-tile"]
   },
@@ -1309,7 +1356,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium"]
   },
@@ -1355,7 +1404,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["hls.js", "cesium"]
   },
@@ -1420,7 +1471,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium", "pbf", "@mapbox/vector-tile", "mapillary-js"]
   },
@@ -1447,7 +1500,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium", "@mapbox/vector-tile", "pbf"]
   },
@@ -1486,7 +1541,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium"]
   },
@@ -1507,7 +1564,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium"]
   },
@@ -1561,7 +1620,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium"]
   },
@@ -1575,6 +1636,8 @@
       "./voice/realtime-session"
     ],
     "modules": [
+      "src/ui/forkLayerNames.js",
+      "src/i18n/marker.js",
       "src/voice/realtimeController.js",
       "src/voice/realtimeBackend.js",
       "src/voice/cloudVoiceAuth.js",
@@ -1617,6 +1680,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/statusText.js"
     ],
     "external": []
@@ -1641,6 +1706,8 @@
       "./standalone/catalog"
     ],
     "modules": [
+      "src/data/englishText.js",
+      "src/ui/forkLayerNames.js",
       "src/ui/placeNames.js",
       "src/cyberSonarScene.js",
       "src/cyberSonar.js",
@@ -2503,6 +2570,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js",
       "src/layers/recentImagery/display.js",
       "src/ui/keyGuidance.js",
@@ -2536,6 +2605,8 @@
   "application-layer-construction": {
     "exports": ["./application/layers"],
     "modules": [
+      "src/ui/forkLayerNames.js",
+      "src/data/englishText.js",
       "src/cyberSonar.js",
       "src/data/bhoteKoshiEvent.js",
       "src/ui/imagerySplit.js",
@@ -3115,6 +3186,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js",
       "src/layers/recentImagery/display.js",
       "src/layers/installations/classLabel.js",
@@ -3218,6 +3291,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/i18n/index.js"
     ],
     "external": ["cesium"]
@@ -3238,7 +3313,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": []
   },
@@ -3270,7 +3347,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium"]
   },
@@ -3294,7 +3373,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": []
   },
@@ -3383,6 +3464,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/unitLabels.js"
     ],
     "external": ["cesium"]
@@ -3419,6 +3502,8 @@
   "voice-session-controls": {
     "exports": ["./voice/session-controls"],
     "modules": [
+      "src/ui/forkLayerNames.js",
+      "src/i18n/marker.js",
       "src/ui/placeNames.js",
       "src/voice/sessionCommands.js",
       "src/voice/session.js",
@@ -3437,6 +3522,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/statusText.js"
     ],
     "external": []
@@ -3656,6 +3743,7 @@
   "transit-standalone": {
     "exports": ["./layers/transit/standalone"],
     "modules": [
+      "src/data/englishText.js",
       "src/cyberSonar.js",
       "src/app/sourceSlot.js",
       "src/celestialRing.js",
@@ -3733,13 +3821,16 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium", "egm96-universal", "pbf"]
   },
   "transit-layer": {
     "exports": ["./layers/transit"],
     "modules": [
+      "src/data/englishText.js",
       "src/data/iconOrientation.js",
       "src/data/inputOwnership.js",
       "src/data/transitFeeds.js",
@@ -3792,7 +3883,9 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium", "pbf"]
   },
@@ -3860,13 +3953,16 @@
       "src/i18n/index.js",
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
-      "src/i18n/locales/ru.json"
+      "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json"
     ],
     "external": ["cesium"]
   },
   "gnss": {
     "exports": ["./layers/gnss"],
     "modules": [
+      "src/ui/forkLayerNames.js",
       "src/layers/gnss/index.js",
       "src/sources/httpBody.js",
       "src/i18n/marker.js",
@@ -3876,6 +3972,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/statusText.js",
       "src/ui/layerNames.js"
     ],
@@ -3903,6 +4001,7 @@
   "tools": {
     "exports": ["./tools"],
     "modules": [
+      "src/data/englishText.js",
       "src/tools/index.js",
       "src/tools/catalog.js",
       "src/tools/schema.js",
@@ -4069,6 +4168,7 @@
   "air-quality": {
     "exports": ["./layers/air-quality"],
     "modules": [
+      "src/ui/forkLayerNames.js",
       "src/layers/airQuality/index.js",
       "src/layers/airQuality/model.js",
       "src/layers/airQuality/source.js",
@@ -4078,6 +4178,8 @@
       "src/i18n/locale.js",
       "src/i18n/locales/es.json",
       "src/i18n/locales/ru.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/ru.json",
       "src/ui/statusText.js",
       "src/ui/layerNames.js"
     ],

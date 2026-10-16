@@ -291,16 +291,18 @@ function buildRow(documentRef, key) {
       : key.expiry.warning
         ? 'key-setup-expiry warning'
         : 'key-setup-expiry';
-    // i18n-ignore: fork-only AEMET expiry badge
     badge.textContent = key.expiry.expired
-      ? 'expired'
+      ? t('expired', { context: 'API key' })
       : key.expiry.daysRemaining === 1
-        ? 'expires tomorrow'
-        : `expires in ${key.expiry.daysRemaining}d`;
-    // i18n-ignore: fork-only AEMET expiry badge
+        ? t('expires tomorrow')
+        : t('expires in {days}d', { days: key.expiry.daysRemaining });
     badge.title = key.expiry.expired
-      ? 'This key has passed its provider-side validity window — get a new one and paste it below'
-      : `Valid until ${new Date(key.expiry.expiresAtMs).toLocaleDateString()}`;
+      ? t(
+          'This key has passed its provider-side validity window — get a new one and paste it below',
+        )
+      : t('Valid until {date}', {
+          date: new Date(key.expiry.expiresAtMs).toLocaleDateString(),
+        });
     head.append(badge);
   }
   const get = documentRef.createElement('a');

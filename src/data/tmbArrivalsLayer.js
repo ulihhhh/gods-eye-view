@@ -9,6 +9,7 @@ import {
   setOverlayEntries,
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
+import { getLocale, msg, t, tn } from '../i18n/index.js';
 import { buildTmbArrivalsCopy } from './tmbArrivals.js';
 
 /**
@@ -81,22 +82,24 @@ const COLOR_OUTLINE = Cesium.Color.BLACK.withAlpha(0.6);
 const POINT_HEIGHT_OFFSET_M = 2.0;
 
 const AMB_STATUS_MESSAGES = Object.freeze({
-  unavailable: 'AMB unavailable',
-  not_found: 'AMB no longer lists this stop',
+  unavailable: msg('AMB unavailable'),
+  not_found: msg('AMB no longer lists this stop'),
 });
 
 /** Shown, with AMB stops still drawn, when TMB's half needs the key. */
 const TMB_KEY_HINT = Object.freeze({
-  no_key: 'AMB stops only — metro and TMB buses need the TMB key (POWER UP)',
-  rejected: 'AMB stops only — TMB refused the developer key (POWER UP)',
+  no_key: msg(
+    'AMB stops only — metro and TMB buses need the TMB key (POWER UP)',
+  ),
+  rejected: msg('AMB stops only — TMB refused the developer key (POWER UP)'),
 });
 
 const STATUS_MESSAGES = Object.freeze({
-  no_key: 'TMB developer key not configured — add it in POWER UP',
-  rejected: 'TMB refused the developer key — check it in POWER UP',
-  unavailable: 'TMB unavailable',
-  busy: 'TMB request limit reached — retrying shortly',
-  not_found: 'TMB no longer lists this stop',
+  no_key: msg('TMB developer key not configured — add it in POWER UP'),
+  rejected: msg('TMB refused the developer key — check it in POWER UP'),
+  unavailable: msg('TMB unavailable'),
+  busy: msg('TMB request limit reached — retrying shortly'),
+  not_found: msg('TMB no longer lists this stop'),
 });
 
 function hexToRgb(hex) {
@@ -283,22 +286,26 @@ export const TMB_ARRIVALS_DEFAULT_PARAMS = Object.freeze({
 });
 
 const TMB_ARRIVALS_CHIPS = Object.freeze([
-  Object.freeze({ key: 'metro', label: 'METRO', title: 'TMB metro' }),
-  Object.freeze({ key: 'tmbBus', label: 'TMB BUS', title: 'TMB buses' }),
+  Object.freeze({ key: 'metro', label: msg('METRO'), title: msg('TMB metro') }),
+  Object.freeze({
+    key: 'tmbBus',
+    label: msg('TMB BUS'),
+    title: msg('TMB buses'),
+  }),
   Object.freeze({
     key: 'ambBus',
-    label: 'AMB BUS',
-    title: 'AMB metropolitan buses',
+    label: msg('AMB BUS'),
+    title: msg('AMB metropolitan buses'),
   }),
   Object.freeze({
     key: 'lines',
-    label: 'LINES',
-    title: 'Metro and bus routes (stops stay)',
+    label: msg('LINES'),
+    title: msg('Metro and bus routes (stops stay)'),
   }),
   Object.freeze({
     key: 'alerts',
-    label: 'ALERTS',
-    title: 'Mark stations, stops and metro lines with service alerts',
+    label: msg('ALERTS'),
+    title: msg('Mark stations, stops and metro lines with service alerts'),
   }),
 ]);
 
@@ -352,10 +359,10 @@ export function tmbArrivalsRowControls(params) {
   return {
     chips: TMB_ARRIVALS_CHIPS.map(({ key, label, title }) => ({
       id: key,
-      label,
+      label: t(label),
       active: params[key],
       state: params[key] ? 'active' : 'idle',
-      title,
+      title: t(title),
       params: { [key]: !params[key] },
     })),
     legend: [],
@@ -376,14 +383,10 @@ export function createTmbSelectedOverlayEntry({
   now,
 }) {
   if (!place || !position) return null;
-  const { title, details } = buildTmbArrivalsCopy({
-    kind,
-    place,
-    arrivals,
-    status,
-    error,
-    now,
-  });
+  const { title, details } = buildTmbArrivalsCopy(
+    { kind, place, arrivals, status, error, now },
+    { t, tn, locale: getLocale() },
+  );
   return {
     id: tmbPlaceEntityId(kind, place.id),
     position,
@@ -803,10 +806,16 @@ export function createTmbArrivalsLayer({
       else error = messages[await errorCodeOf(response, messages)];
       if (response.ok && !Array.isArray(arrivals?.routes)) {
         arrivals = null;
-        error = `Malformed ${operator} answer`;
+        error =
+          operator === 'AMB'
+            ? msg('Malformed AMB answer')
+            : msg('Malformed TMB answer');
       }
     } catch {
-      error = `${operator} network error`;
+      error =
+        operator === 'AMB'
+          ? msg('AMB network error')
+          : msg('TMB network error');
     }
     if (_selection?.generation !== generation) return;
     selection.inFlight = false;
@@ -918,10 +927,10 @@ export function createTmbArrivalsLayer({
       const catalog = normalizeTmbCatalogPayload(await response.json());
       return catalog
         ? { catalog }
-        : { catalog: null, error: 'Malformed TMB station list' };
+        : { catalog: null, error: msg('Malformed TMB station list') };
     } catch (error) {
       console.warn('[Data:TmbArrivals] TMB fetch error:', error);
-      return { catalog: null, error: 'TMB network error' };
+      return { catalog: null, error: msg('TMB network error') };
     }
   }
 
@@ -929,14 +938,14 @@ export function createTmbArrivalsLayer({
   async function _loadAmbStops() {
     try {
       const response = await fetchImpl(AMB_STOPS_URL);
-      if (!response.ok) return { stops: null, error: 'AMB unavailable' };
+      if (!response.ok) return { stops: null, error: msg('AMB unavailable') };
       const stops = normalizeAmbStopsPayload(await response.json());
       return stops
         ? { stops }
-        : { stops: null, error: 'Malformed AMB stop list' };
+        : { stops: null, error: msg('Malformed AMB stop list') };
     } catch (error) {
       console.warn('[Data:TmbArrivals] AMB fetch error:', error);
-      return { stops: null, error: 'AMB network error' };
+      return { stops: null, error: msg('AMB network error') };
     }
   }
 

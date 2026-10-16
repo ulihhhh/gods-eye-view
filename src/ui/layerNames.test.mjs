@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { APPLICATION_LAYER_METADATA } from '../app/constructCatalog.js';
 import { setLocale, t } from '../i18n/index.js';
@@ -12,17 +11,7 @@ import {
 
 // Layers whose module name is a proper name and stays as it is in every
 // language: the Bhote Koshi pair belong to a scripted scene.
-// Fork-only layers keep their English names (scripts/i18n-fork-untranslated.json).
-const UNTRANSLATED_NAMES = new Set([
-  'bhote-koshi-2026',
-  'bhote-koshi-locator',
-  ...JSON.parse(
-    readFileSync(
-      new URL('../../scripts/i18n-fork-untranslated.json', import.meta.url),
-      'utf8',
-    ),
-  ).layers,
-]);
+const UNTRANSLATED_NAMES = new Set(['bhote-koshi-2026', 'bhote-koshi-locator']);
 
 const catalogIds = APPLICATION_LAYER_METADATA.map((layer) => layer.id);
 

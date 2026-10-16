@@ -10,6 +10,7 @@
  * at registration and asks for the source and the date to be cited — hence
  * the "Source: TMB · <time>" line on every card. Fork-local.
  */
+import { ENGLISH } from './englishText.js';
 import { transitAlertText } from './transitAlertText.js';
 
 /** Metro station groups (`CODI_GRUP_ESTACIO`) are 7-digit codes today. */
@@ -330,13 +331,16 @@ export function normalizeTmbBusArrivals(body) {
  * the minute for bus, and a countdown reads better than a clock time.
  * @param {number} arrivalMs
  * @param {number} nowMs
+ * @param {{t: Function}} [i18n] The UI's t(); English without it.
  * @returns {string|null} null once the vehicle has gone.
  */
-export function formatTmbEta(arrivalMs, nowMs) {
+export function formatTmbEta(arrivalMs, nowMs, { t } = ENGLISH) {
   const delta = arrivalMs - nowMs;
   if (delta < -DEPARTED_GRACE_MS) return null;
-  if (delta <= 30_000) return 'now';
-  return `${Math.max(1, Math.round(delta / 60_000))} min`;
+  if (delta <= 30_000) return t('now', { context: 'arrival' });
+  return t('{minutes} min', {
+    minutes: Math.max(1, Math.round(delta / 60_000)),
+  });
 }
 
 /** Clock time in Barcelona, independent of the viewer's own time zone. */
@@ -357,67 +361,71 @@ export function formatTmbClock(ms) {
  *   lines?: Array<{name: string}>}, arrivals?: {fetchedAt: number|null,
  *   routes: Array<{line: string, destination: string, arrivals: number[]}>}|null,
  *   status?: 'loading'|'ready'|'error', error?: string|null, now: number}} input
+ *   `error` is English (a msg() text), translated here.
+ * @param {{t: Function, tn: Function, locale: string}} [i18n] The UI's
+ *   t()/tn() and locale; English without them.
  * @returns {{title: string, details: string[]}}
  */
-export function buildTmbArrivalsCopy({
-  kind,
-  place,
-  arrivals = null,
-  status = 'ready',
-  error = null,
-  now,
-}) {
+export function buildTmbArrivalsCopy(
+  { kind, place, arrivals = null, status = 'ready', error = null, now },
+  i18n = ENGLISH,
+) {
+  const { t, tn, locale } = i18n;
   const metro = kind === 'metro';
   const operator = kind === 'amb' ? 'AMB' : 'TMB';
   const title = `${metro ? '🚇' : '🚏'} ${place?.name || place?.id || operator}`;
   const details = [];
   if (metro) {
     const lines = (place?.lines || []).map((line) => line.name).join(' ');
-    details.push(`Metro station · TMB${lines ? ` · ${lines}` : ''}`);
+    details.push(`${t('Metro station')} · TMB${lines ? ` · ${lines}` : ''}`);
   } else {
     const code = kind === 'amb' ? place?.code || place?.id : place?.id;
     details.push(
-      code ? `Bus stop ${code} · ${operator}` : `Bus stop · ${operator}`,
+      `${code ? t('Bus stop {code}', { code }) : t('Bus stop')} · ${operator}`,
     );
   }
   if (status === 'loading' && !arrivals) {
-    details.push(`Asking ${operator} for the next arrivals…`);
+    details.push(t('Asking {operator} for the next arrivals…', { operator }));
     return { title, details };
   }
   if (status === 'error' && !arrivals) {
-    details.push(error || `${operator} arrivals unavailable`);
+    details.push(
+      error ? t(error) : t('{operator} arrivals unavailable', { operator }),
+    );
     return { title, details };
   }
   // The place's service alerts, as the operator words them.
   const alertTexts = (Array.isArray(arrivals?.alerts) ? arrivals.alerts : [])
-    .map((alert) => transitAlertText(alert?.header))
+    .map((alert) => transitAlertText(alert?.header, undefined, locale))
     .filter(Boolean);
   for (const text of alertTexts.slice(0, TMB_CARD_MAX_ALERTS))
     details.push(`⚠ ${text}`);
   if (alertTexts.length > TMB_CARD_MAX_ALERTS) {
     const more = alertTexts.length - TMB_CARD_MAX_ALERTS;
-    details.push(`+${more} more alert${more === 1 ? '' : 's'}`);
+    details.push(tn(more, '+{count} more alert', '+{count} more alerts'));
   }
   const rows = [];
   for (const route of arrivals?.routes || []) {
     const etas = route.arrivals
-      .map((ms) => formatTmbEta(ms, now))
+      .map((ms) => formatTmbEta(ms, now, i18n))
       .filter(Boolean);
     if (!etas.length) continue;
     const towards = route.destination ? ` → ${route.destination}` : '';
     rows.push(`${route.line}${towards} · ${etas.join(', ')}`);
   }
-  if (!rows.length) details.push('No arrivals reported right now');
+  if (!rows.length) details.push(t('No arrivals reported right now'));
   details.push(...rows.slice(0, TMB_CARD_MAX_ROUTES));
   if (rows.length > TMB_CARD_MAX_ROUTES)
-    details.push(`+${rows.length - TMB_CARD_MAX_ROUTES} more`);
+    details.push(
+      t('+{count} more', { count: rows.length - TMB_CARD_MAX_ROUTES }),
+    );
   if (status === 'error' && error)
-    details.push(`${error} · showing last answer`);
+    details.push(`${t(error)} · ${t('showing last answer')}`);
   const at = arrivals?.fetchedAt;
   const source =
     kind === 'amb' ? 'AMB Mobilitat' : `TMB ${metro ? 'iMetro' : 'iBus'}`;
   details.push(
-    `Source: ${source}${Number.isFinite(at) ? ` · ${formatTmbClock(at)}` : ''}`,
+    `${t('Source: {source}', { source })}${Number.isFinite(at) ? ` · ${formatTmbClock(at)}` : ''}`,
   );
   return { title, details };
 }

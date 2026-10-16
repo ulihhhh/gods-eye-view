@@ -9,6 +9,7 @@ import {
   setOverlayEntries,
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
+import { msg, t } from '../i18n/index.js';
 
 /**
  * AEMET OpenData beach forecast (Phase A7) — a real point layer, same shape
@@ -135,20 +136,22 @@ function waterTempColor(waterTempC, alpha = POINT_ALPHA) {
  * @returns {{title: string, details: string[]}}
  */
 export function buildAemetBeachSelectionCopy(beach) {
-  const title = beach?.name || beach?.id || 'Beach';
+  const title = beach?.name || beach?.id || t('Beach');
   const forecast = beach?.forecast || {};
   const details = [];
   details.push(
     Number.isFinite(forecast.waterTempC)
-      ? `Water ${forecast.waterTempC}°C`
-      : 'Water temp unknown',
+      ? t('Water {value}°C', { value: forecast.waterTempC })
+      : t('Water temp unknown'),
   );
   if (Number.isFinite(forecast.maxTempC))
-    details.push(`Air max ${forecast.maxTempC}°C`);
+    details.push(t('Air max {value}°C', { value: forecast.maxTempC }));
   if (forecast.sky) details.push(String(forecast.sky));
-  if (forecast.wind) details.push(`Wind: ${forecast.wind}`);
-  if (forecast.waves) details.push(`Waves: ${forecast.waves}`);
-  if (Number.isFinite(forecast.uvMax)) details.push(`UV max ${forecast.uvMax}`);
+  if (forecast.wind) details.push(t('Wind: {value}', { value: forecast.wind }));
+  if (forecast.waves)
+    details.push(t('Waves: {value}', { value: forecast.waves }));
+  if (Number.isFinite(forecast.uvMax))
+    details.push(t('UV max {value}', { value: forecast.uvMax }));
   return { title, details };
 }
 
@@ -351,10 +354,11 @@ export function createAemetBeachesLayer({
       try {
         const response = await fetch(API_URL);
         if (response.status === 503) {
-          _lastError = 'AEMET_API_KEY not configured';
+          _lastError = msg('AEMET_API_KEY not configured');
           return false;
         }
         if (!response.ok) {
+          // i18n-ignore: HTTP status code
           _lastError = `AEMET HTTP ${response.status}`;
           console.warn(`[Data:AemetBeaches] API returned ${response.status}`);
           return false;
@@ -363,7 +367,7 @@ export function createAemetBeachesLayer({
         const payload = await response.json();
         const beaches = normalizeAemetBeachesPayload(payload);
         if (!beaches) {
-          _lastError = 'Malformed AEMET response';
+          _lastError = msg('Malformed AEMET response');
           return false;
         }
 
@@ -409,13 +413,13 @@ export function createAemetBeachesLayer({
         // stuck. Only report degraded when stale AND no sweep is running.
         _lastError =
           payload.stale && !payload.sweeping
-            ? 'Serving stale AEMET data (upstream unavailable)'
+            ? msg('Serving stale AEMET data (upstream unavailable)')
             : null;
         console.log(`[Data:AemetBeaches] Updated: ${_count} beaches`);
         return true;
       } catch (e) {
         console.warn('[Data:AemetBeaches] Fetch error:', e);
-        _lastError = 'AEMET network error';
+        _lastError = msg('AEMET network error');
         return false;
       }
     },

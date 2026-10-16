@@ -4,6 +4,7 @@ import {
   TRANSIT_SELECTED_OVERLAY_SOURCE_OPTIONS,
   createTransitSelectedOverlayEntry,
 } from './policy.js';
+import { t } from '../../i18n/index.js';
 
 /**
  * Follow the selected vehicle with the camera (fork-local; the aircraft
@@ -66,8 +67,8 @@ export function courseOf(east, north) {
 /** The card's line about following. */
 export function followCardLine(following) {
   return following
-    ? 'Following · click this card or press T to stop'
-    : 'Click this card or press T to follow';
+    ? t('Following · click this card or press T to stop')
+    : t('Click this card or press T to follow');
 }
 
 export function createFollow({ state, services, parts }) {
@@ -100,7 +101,7 @@ export function createFollow({ state, services, parts }) {
     const card = createTransitSelectedOverlayEntry(
       'follow-notice',
       Cesium.Cartesian3.clone(position),
-      { title, details: ['Stopped following: no longer in the feed'] },
+      { title, details: [t('Stopped following: no longer in the feed')] },
       'unknown',
     );
     if (!card) return;
@@ -141,8 +142,8 @@ export function createFollow({ state, services, parts }) {
           showNotice(
             at,
             entry?.record?.routeId
-              ? `Route ${entry.record.routeId}`
-              : 'Transit vehicle',
+              ? t('Route {route}', { route: entry.record.routeId })
+              : t('Transit vehicle'),
           );
       }
     }

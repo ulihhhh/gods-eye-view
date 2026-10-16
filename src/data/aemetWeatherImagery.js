@@ -7,6 +7,7 @@ import {
 } from '../overlays/worldOverlay.js';
 import { WORLD_OVERLAY_STYLE } from '../overlays/worldOverlayTokens.js';
 import { isOwnedByOtherLayer, resolvePickId } from './pickRegistry.js';
+import { msg, t } from '../i18n/index.js';
 
 /**
  * AEMET OpenData ambient composite imagery (Phase A16) — one layer sharing
@@ -78,42 +79,47 @@ const MAP_CONFIG = Object.freeze({
   lightning: Object.freeze({
     statusUrl: '/api/aemet/lightning/status',
     imageUrl: '/api/aemet/lightning',
-    titleBase: 'AEMET LIGHTNING',
+    titleBase: msg('AEMET LIGHTNING'),
     accent: 'rgb(255, 214, 61)', // lightning yellow
     thumbnailWidth: 168,
     thumbnailHeight: 126, // matches the real image's 4:3 aspect ratio
     expandedWidth: 560,
     expandedHeight: 420,
-    chipLabel: '⚡ LIGHTNING',
-    chipTitle: 'Nationwide lightning-strike composite (updates ~every 6h)',
+    chipIcon: '⚡',
+    chipLabel: msg('LIGHTNING'),
+    chipTitle: msg('Nationwide lightning-strike composite (updates ~every 6h)'),
     hasSourceField: false,
   }),
   fireRisk: Object.freeze({
     statusUrl: '/api/aemet/fire-risk/status',
     imageUrl: '/api/aemet/fire-risk',
-    titleBase: 'AEMET FIRE RISK',
+    titleBase: msg('AEMET FIRE RISK'),
     accent: 'rgb(255, 107, 53)', // wildfire orange
     thumbnailWidth: 168,
     thumbnailHeight: 112, // matches the real image's ~1525:1017 aspect ratio
     expandedWidth: 640,
     expandedHeight: 427,
-    chipLabel: '🔥 FIRE RISK',
-    chipTitle:
+    chipIcon: '🔥',
+    chipLabel: msg('FIRE RISK'),
+    chipTitle: msg(
       'Forest-fire meteorological risk forecast (today, or tomorrow if not yet published)',
+    ),
     hasSourceField: true, // 'estimado'/'previsto-1' → TODAY/TOMORROW
   }),
   sst: Object.freeze({
     statusUrl: '/api/aemet/sea-surface-temp/status',
     imageUrl: '/api/aemet/sea-surface-temp',
-    titleBase: 'AEMET SEA SURFACE TEMP',
+    titleBase: msg('AEMET SEA SURFACE TEMP'),
     accent: 'rgb(64, 200, 224)', // sea-surface cyan
     thumbnailWidth: 168,
     thumbnailHeight: 130, // matches the real image's 1000:773 aspect ratio
     expandedWidth: 560,
     expandedHeight: 433,
-    chipLabel: '🌊 SEA TEMP',
-    chipTitle:
+    chipIcon: '🌊',
+    chipLabel: msg('SEA TEMP'),
+    chipTitle: msg(
       'EUMETSAT OSI SAF sea-surface-temperature composite (updates ~once a day)',
+    ),
     hasSourceField: false,
   }),
 });
@@ -122,15 +128,15 @@ const MAP_CONFIG = Object.freeze({
 function relativeAgeLabel(fetchedAtMs, nowMs = Date.now()) {
   if (!Number.isFinite(fetchedAtMs)) return null;
   const minutes = Math.max(0, Math.floor((nowMs - fetchedAtMs) / 60_000));
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  return `${Math.floor(minutes / 60)}h ago`;
+  if (minutes < 1) return t('just now');
+  if (minutes < 60) return t('{count}m ago', { count: minutes });
+  return t('{count}h ago', { count: Math.floor(minutes / 60) });
 }
 
 /** `source` field from fire-risk's `/status` → a short label distinguishing today's map from tomorrow's fallback. */
 function sourceLabel(source) {
-  if (source === 'estimado') return 'TODAY';
-  if (source === 'previsto-1') return 'TOMORROW';
+  if (source === 'estimado') return t('TODAY');
+  if (source === 'previsto-1') return t('TOMORROW');
   return null;
 }
 
@@ -161,7 +167,7 @@ export function createAemetWeatherImageryOverlayEntry(
     position,
     variant: 'thumbnail',
     paintLane: 'thumbnail',
-    title: `${config.titleBase}${dayText}${ageText}${expanded ? ' · CLICK TO COLLAPSE' : ''}`,
+    title: `${t(config.titleBase)}${dayText}${ageText}${expanded ? ` · ${t('CLICK TO COLLAPSE')}` : ''}`,
     details: [],
     image: imageSlot,
     requireImage: true,
@@ -332,20 +338,21 @@ export function createAemetWeatherImageryLayer({
     try {
       const response = await fetch(config.statusUrl);
       if (!response.ok) {
+        // i18n-ignore: HTTP status code
         state.lastError = `AEMET HTTP ${response.status}`;
         return;
       }
       const status = normalizeAemetWeatherImageryStatus(await response.json());
       if (!status) {
-        state.lastError = 'Malformed AEMET response';
+        state.lastError = msg('Malformed AEMET response');
         return;
       }
       if (!status.hasKey) {
-        state.lastError = 'AEMET_API_KEY not configured';
+        state.lastError = msg('AEMET_API_KEY not configured');
         return;
       }
       state.lastError = status.stale
-        ? 'Serving stale AEMET data (upstream unavailable)'
+        ? msg('Serving stale AEMET data (upstream unavailable)')
         : null;
       // `lastFetch: null` means the PROXY itself has never fetched anything
       // yet — on first boot this must still fall through to a load. A
@@ -366,7 +373,7 @@ export function createAemetWeatherImageryLayer({
       const image = await loadImage(cacheBustUrl);
       if (token !== state.loadToken) return; // superseded by a disable or a newer poll
       if (!image) {
-        state.lastError = `AEMET ${mapKey} image failed to load`;
+        state.lastError = msg('AEMET image failed to load');
         return;
       }
       // Bootstrap case: the request above is what MADE the proxy fetch, so
@@ -394,7 +401,7 @@ export function createAemetWeatherImageryLayer({
       );
     } catch (e) {
       console.warn(`[Data:AemetWeatherImagery] ${mapKey} fetch error:`, e);
-      state.lastError = 'AEMET network error';
+      state.lastError = msg('AEMET network error');
     }
   }
 
@@ -481,10 +488,10 @@ export function createAemetWeatherImageryLayer({
           const active = _activeMap === mapKey;
           return {
             id: mapKey,
-            label: config.chipLabel,
+            label: `${config.chipIcon} ${t(config.chipLabel)}`,
             active,
             state: active ? 'active' : 'idle',
-            title: config.chipTitle,
+            title: t(config.chipTitle),
             params: { activeMap: mapKey },
           };
         }),
