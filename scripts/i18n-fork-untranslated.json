@@ -1,0 +1,20 @@
+{
+  "files": [
+    "^src/data/aemet[A-Za-z]*\\.js$",
+    "^src/data/liveuamap[A-Za-z]*\\.js$",
+    "^src/data/spainRailNetworkLayer\\.js$",
+    "^src/data/tmbArrivalsLayer\\.js$",
+    "^src/data/fgcGeotren\\.js$"
+  ],
+  "layers": [
+    "aemet-beaches",
+    "aemet-environmental",
+    "aemet-stations",
+    "aemet-uv-index",
+    "aemet-warnings",
+    "aemet-weather-imagery",
+    "liveuamap",
+    "spain-rail-network",
+    "tmb-arrivals"
+  ]
+}
