@@ -23,6 +23,7 @@ import {
   buildCercaniasTripDetails,
   buildRenfeLdTripDetails,
 } from './renfeTripDetails.js';
+import { buildCercaniasTimetable } from './renfeTimetable.js';
 
 /**
  * Renfe Cercanías labels are `<line>-<train>` with an optional platform
@@ -145,7 +146,11 @@ const FGC_TERMS = Object.freeze({
 const RENFE_GTFS_FILES = Object.freeze(['routes.txt', 'trips.txt']);
 const RENFE_CERCANIAS_TRIP_DETAILS = Object.freeze({
   url: 'https://ssl.renfe.com/ftransit/Fichero_CER_FOMENTO/fomento_transit.zip',
-  files: RENFE_GTFS_FILES,
+  files: Object.freeze([...RENFE_GTFS_FILES, 'calendar.txt']),
+  // The station boards' times: Renfe's trip updates carry one stop per
+  // train, so a station's calls come from the timetable (stop_times.txt,
+  // streamed) and move with the train's live delay.
+  timetable: buildCercaniasTimetable,
   maxBytes: 32 * 1024 * 1024,
   maxEntryBytes: 32 * 1024 * 1024,
   build: buildCercaniasTripDetails,

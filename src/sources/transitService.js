@@ -32,8 +32,11 @@ import {
   transitUpstreamHeaders,
 } from '../data/transitProxy.js';
 import { indexTripUpdates } from '../data/transitServiceFields.js';
-import { buildTransitArrivals } from '../data/transitArrivals.js';
-import { readZipTextEntries } from '../data/zipEntries.js';
+import {
+  buildTimetableArrivals,
+  buildTransitArrivals,
+} from '../data/transitArrivals.js';
+import { readZipTextEntries, zipEntryLines } from '../data/zipEntries.js';
 
 /** A TripUpdates index this old is no longer joined to positions. */
 export const TRANSIT_TRIP_UPDATES_STALE_MS = 5 * 60_000;
@@ -42,6 +45,20 @@ export const TRANSIT_TRIP_DETAILS_REFRESH_MS = 24 * 60 * 60_000;
 export const TRANSIT_TRIP_DETAILS_RETRY_MS = 60 * 60_000;
 export const TRANSIT_TRIP_DETAILS_TIMEOUT_MS = 120_000;
 export const TRANSIT_TRIP_DETAILS_MAX_BYTES = 64 * 1024 * 1024;
+/** A streamed timetable entry (Renfe Cercanías' stop_times.txt is ≈280 MB). */
+export const TRANSIT_TIMETABLE_MAX_ENTRY_BYTES = 512 * 1024 * 1024;
+
+/** `YYYYMMDD` of an instant in a feed's time zone (a timetable's `builtFor`). */
+function localDayKey(ms, timeZone) {
+  return new Intl.DateTimeFormat('en-CA', {
+    ...(timeZone ? { timeZone } : {}),
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .format(ms)
+    .replaceAll('-', '');
+}
 
 /**
  * Fetch a registered feed, resolving each redirect hop BEFORE following it.
@@ -276,7 +293,7 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
     return load.promise;
   }
 
-  /** @type {Map<string, {at: number, lookup: Map<string, object>|null, etag: string|null, lastModified: string|null, loading: boolean}>} */
+  /** @type {Map<string, {at: number, lookup: Map<string, object>|null, timetable: object|null, etag: string|null, lastModified: string|null, loading: boolean}>} */
   const tripDetailLoads = new Map();
 
   /**
@@ -298,6 +315,7 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
     const load = {
       at: now + TRANSIT_TRIP_DETAILS_RETRY_MS,
       lookup: known?.lookup ?? null,
+      timetable: known?.timetable ?? null,
       etag: known?.etag ?? null,
       lastModified: known?.lastModified ?? null,
       loading: true,
@@ -319,7 +337,11 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
         },
         controller.signal,
         fetchImpl,
-        load.lookup
+        // A timetable is for the days around the day it was built: a new
+        // day asks for the whole zip again even if it has not changed.
+        load.lookup &&
+          (!source.timetable ||
+            load.timetable?.builtFor === localDayKey(now, feed.timeZone))
           ? { etag: load.etag, lastModified: load.lastModified }
           : null,
       );
@@ -348,6 +370,24 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
         if (!(lookup instanceof Map) || !lookup.size)
           throw new Error('no trips in the schedule');
         load.lookup = lookup;
+        if (typeof source.timetable === 'function') {
+          // The station boards' timetable; the trip details stand without it.
+          try {
+            load.timetable = await source.timetable({
+              files,
+              lines: (name) =>
+                zipEntryLines(bytes, name, TRANSIT_TIMETABLE_MAX_ENTRY_BYTES),
+              now: Date.now(),
+              timeZone: feed.timeZone,
+            });
+          } catch (error) {
+            if (!closed)
+              console.warn(
+                `[transit] ${feed.id} timetable unavailable:`,
+                error?.message || error,
+              );
+          }
+        }
         load.etag = response.headers.get('etag');
         load.lastModified = response.headers.get('last-modified');
       }
@@ -368,6 +408,17 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
         load.loading = false;
       });
     return load.lookup;
+  }
+
+  /**
+   * The feed's station timetable (registry `tripDetails.timetable`), built
+   * with its trip details; null until the first load has finished.
+   * @param {object} feed
+   * @param {number} now
+   */
+  function timetableFor(feed, now) {
+    tripDetailsFor(feed, now);
+    return tripDetailLoads.get(feed.id)?.timetable ?? null;
   }
 
   /**
@@ -546,14 +597,23 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store',
       });
-    if (!index)
+    // A timetable feed lists from its timetable, the trip updates only
+    // moving it; otherwise the trip updates are the board.
+    const scheduled = typeof feed.tripDetails?.timetable === 'function';
+    const timetable = scheduled ? timetableFor(feed, now) : null;
+    if (scheduled ? !timetable : !index)
       return reply(
         503,
-        JSON.stringify({ error: 'Trip updates unavailable', feedId: feed.id }),
+        JSON.stringify({
+          error: scheduled
+            ? 'Timetable not loaded yet'
+            : 'Trip updates unavailable',
+          feedId: feed.id,
+        }),
         {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-store',
-          'Retry-After': '60',
+          'Retry-After': scheduled ? '15' : '60',
         },
       );
     const body = {
@@ -562,15 +622,26 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
       station: stopNames?.[stationId] ?? null,
       fetchedAt: tripUpdateLoads.get(feed.id)?.fetchedAt ?? null,
       positions: Array.isArray(vehicles),
-      arrivals: buildTransitArrivals({
-        stationId,
-        tripUpdates: index,
-        vehicles,
-        stopKey: feed.tripUpdates.stopKey ?? null,
-        stopPlatform: feed.tripUpdates.stopPlatform ?? null,
-        stopNames,
-        now,
-      }),
+      tripUpdates: Boolean(index),
+      ...(scheduled ? { timetable: timetable.builtFor } : {}),
+      arrivals: scheduled
+        ? buildTimetableArrivals({
+            stationId,
+            timetable,
+            tripUpdates: index,
+            vehicles,
+            stopNames,
+            now,
+          })
+        : buildTransitArrivals({
+            stationId,
+            tripUpdates: index,
+            vehicles,
+            stopKey: feed.tripUpdates.stopKey ?? null,
+            stopPlatform: feed.tripUpdates.stopPlatform ?? null,
+            stopNames,
+            now,
+          }),
     };
     return reply(200, JSON.stringify(body), {
       'Content-Type': 'application/json; charset=utf-8',

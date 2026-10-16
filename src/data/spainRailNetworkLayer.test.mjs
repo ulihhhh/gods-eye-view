@@ -614,8 +614,12 @@ test('an FGC station card asks for its trains, refreshes while open and stops on
     assert.equal(asked.length, 2, 'asks again once the answer is old');
 
     layer._selectForTest('spain-rail-network:station:renfe-cercanias:71801');
-    assert.equal(intervals.size, 0, 'a Renfe station has no board yet');
-    assert.equal(asked.length, 2);
+    assert.equal(asked.at(-1), '/api/transit/arrivals/renfe-cercanias/71801');
+    assert.equal(intervals.size, 1, 'one board at a time');
+    await settle();
+    layer._selectForTest('spain-rail-network:station:renfe-ld:60911');
+    assert.equal(intervals.size, 0, 'an AV/LD station has no board yet');
+    assert.equal(asked.length, 3);
     assert.ok(
       !entries.at(-1)[0].details.some((line) => line.startsWith('Asking')),
     );
@@ -623,4 +627,53 @@ test('an FGC station card asks for its trains, refreshes while open and stops on
     layer.destroy(viewer);
   }
   assert.equal(intervals.size, 0);
+});
+
+test('a Renfe station card says which times are live and which are timetabled', () => {
+  const rows = spainRailArrivalLines(
+    {
+      status: 'ready',
+      data: {
+        arrivals: [
+          {
+            tripId: 'x',
+            at: at(8),
+            line: 'C1',
+            destination: 'Aeropuerto-T4',
+            platform: '3',
+            delaySec: 180,
+            terminates: false,
+            realtime: true,
+          },
+          {
+            tripId: 'y',
+            at: at(10),
+            line: null,
+            destination: 'Aranjuez',
+            platform: null,
+            delaySec: null,
+            terminates: false,
+            realtime: false,
+          },
+          {
+            tripId: 'z',
+            at: at(12),
+            line: 'C3',
+            destination: 'Aranjuez',
+            platform: null,
+            delaySec: 30,
+            terminates: false,
+            realtime: true,
+          },
+        ],
+      },
+    },
+    BOARD_NOW,
+    'Renfe',
+  );
+  assert.deepEqual(rows, [
+    'C1 → Aeropuerto-T4 · 11:48 (8 min) · platform 3 · +3 min',
+    'Renfe → Aranjuez · 11:50 (10 min) · scheduled',
+    'C3 → Aranjuez · 11:52 (12 min)',
+  ]);
 });

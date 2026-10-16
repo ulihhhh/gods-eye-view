@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deflateRawSync } from 'node:zlib';
-import { PbfWriter } from 'pbf';
 import { readZipTextEntries } from './zipEntries.js';
+import {
+  renfePositions,
+  zipArchive as zip,
+} from '../testSupport/renfeGtfsFixtures.mjs';
 import {
   buildCercaniasTripDetails,
   buildRenfeLdTripDetails,
@@ -12,41 +14,6 @@ import { applyServiceFields } from './transitServiceFields.js';
 import { getTransitFeed } from './transitFeeds.js';
 import { buildTransitSelectionCopy } from '../layers/transit/policy.js';
 import { createTransitService } from '../sources/transitService.js';
-
-/** A zip with the given entries, deflated unless `stored` (CRCs left 0). */
-function zip(entries, { stored = false } = {}) {
-  const locals = [];
-  const centrals = [];
-  let offset = 0;
-  for (const [name, text] of Object.entries(entries)) {
-    const raw = Buffer.from(text, 'utf8');
-    const data = stored ? raw : deflateRawSync(raw);
-    const nameBytes = Buffer.from(name, 'utf8');
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(stored ? 0 : 8, 8);
-    local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(raw.length, 22);
-    local.writeUInt16LE(nameBytes.length, 26);
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(stored ? 0 : 8, 10);
-    central.writeUInt32LE(data.length, 20);
-    central.writeUInt32LE(raw.length, 24);
-    central.writeUInt16LE(nameBytes.length, 28);
-    central.writeUInt32LE(offset, 42);
-    locals.push(local, nameBytes, data);
-    centrals.push(central, nameBytes);
-    offset += 30 + nameBytes.length + data.length;
-  }
-  const directory = Buffer.concat(centrals);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(Object.keys(entries).length, 10);
-  end.writeUInt32LE(directory.length, 12);
-  end.writeUInt32LE(offset, 16);
-  return new Uint8Array(Buffer.concat([...locals, directory, end]));
-}
 
 // Hand-made GTFS in Renfe's shapes (fixed-width, space-padded Cercanías
 // fields; dated LD trip ids). Not Renfe data.
@@ -148,37 +115,6 @@ test('AV/LD trips give the service and the origin and destination codes', () => 
   assert.equal(own.destination, 'Own', 'the feed’s own value wins');
 });
 
-function embed(writer, tag, build) {
-  const inner = new PbfWriter();
-  build(inner);
-  writer.writeBytesField(tag, inner.finish());
-}
-
-/** One Cercanías position in Renfe's shape (no route id, label with line). */
-function positions() {
-  const writer = new PbfWriter();
-  embed(writer, 1, (h) => {
-    h.writeStringField(1, '2.0');
-    h.writeVarintField(3, 1_791_970_000);
-  });
-  embed(writer, 2, (entity) => {
-    entity.writeStringField(1, 'e1');
-    embed(entity, 4, (vehicle) => {
-      embed(vehicle, 1, (trip) => trip.writeStringField(1, '1001J19799C1'));
-      embed(vehicle, 2, (p) => {
-        p.writeFloatField(1, 40.42);
-        p.writeFloatField(2, -3.72);
-      });
-      vehicle.writeVarintField(5, 1_791_970_000);
-      embed(vehicle, 8, (d) => {
-        d.writeStringField(1, '19799');
-        d.writeStringField(2, 'C1-19799');
-      });
-    });
-  });
-  return writer.finish();
-}
-
 test('the proxy reads the schedule once a day beside positions, never waiting for it', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: 1_791_970_000_000 });
   const calls = [];
@@ -193,7 +129,13 @@ test('the proxy reads the schedule once a day beside positions, never waiting fo
       }
       if (url.includes('trip_updates'))
         return new Response(new Uint8Array(0), { status: 200 });
-      return new Response(positions(), { status: 200 });
+      return new Response(
+        renfePositions(
+          [{ tripId: '1001J19799C1', label: 'C1-19799' }],
+          1_791_970_000,
+        ),
+        { status: 200 },
+      );
     },
   });
   const get = async () =>

@@ -396,7 +396,9 @@ function burlingtonRouteLabel(routeId) {
  *   tripUpdates?: {url: string, minIntervalMs?: number, stopKey?: (stopId: string) => string,
  *     stopPlatform?: (stopId: string) => string|null},
  *   tripDetails?: {url: string, files: string[], build: (files: Map<string, string>) => Map<string, object>,
- *     maxBytes?: number, maxEntryBytes?: number, refreshMs?: number},
+ *     maxBytes?: number, maxEntryBytes?: number, refreshMs?: number,
+ *     timetable?: (options: {files: Map<string, string>, lines: (name: string) => AsyncIterable<string>,
+ *       now: number, timeZone?: string}) => Promise<object>},
  *   timeZone?: string,
  * }>>}
  */

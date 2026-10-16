@@ -105,3 +105,97 @@ export function buildTransitArrivals({
   rows.sort((a, b) => a.at - b.at || a.tripId.localeCompare(b.tripId));
   return rows.slice(0, Math.max(0, limit));
 }
+
+/** A scheduled call this long gone can still be ahead: trains run late. */
+const MAX_LATE_MS = 90 * 60_000;
+
+/**
+ * A station's next trains from a timetable (registry
+ * `tripDetails.timetable`), for feeds whose trip updates carry too few
+ * stops to list a station (Renfe's give one per train). Each scheduled call
+ * moves by its train's live delay: the trip update's when it has one, else
+ * the vehicle's. A trip update that names this very stop gives its own time.
+ * Rows without any live delay are `realtime: false`, at the timetable's
+ * time. A running train's platform (Renfe puts the one it will use next in
+ * the vehicle label) is shown for the stop its trip update times, or the
+ * one it is standing at.
+ * @param {{stationId: string,
+ *   timetable: {stations: Map<string, Array<{tripId: string, at: number,
+ *     last: boolean}>>, trips: Map<string, {line: string|null,
+ *     destination: string|null, originStopId: string|null}>}|null,
+ *   tripUpdates?: Map<string, {delaySec: number|null,
+ *     stops: Array<{stopId: string, time: number}>}>|null,
+ *   vehicles?: object[]|null,
+ *   stopNames?: Readonly<Record<string, string>>|null,
+ *   now?: number, limit?: number}} options
+ * @returns {Array<{tripId: string, at: number, scheduledAt: number,
+ *   line: string|null, destination: string|null, origin: string|null,
+ *   platform: string|null, delaySec: number|null, onTime: boolean|null,
+ *   terminates: boolean, running: boolean, realtime: boolean}>}
+ */
+export function buildTimetableArrivals({
+  stationId,
+  timetable,
+  tripUpdates = null,
+  vehicles = null,
+  stopNames = null,
+  now = Date.now(),
+  limit = TRANSIT_ARRIVALS_MAX,
+}) {
+  const calls = timetable?.stations?.get(stationId);
+  if (!Array.isArray(calls) || typeof stationId !== 'string') return [];
+  const byTrip = new Map();
+  for (const vehicle of Array.isArray(vehicles) ? vehicles : [])
+    if (typeof vehicle?.tripId === 'string' && !byTrip.has(vehicle.tripId))
+      byTrip.set(vehicle.tripId, vehicle);
+  const rows = [];
+  const seen = new Set();
+  for (const call of calls) {
+    if (call.at < now - MAX_LATE_MS) continue;
+    if (call.at > now + HORIZON_MS) break;
+    if (seen.has(call.tripId)) continue;
+    const update = tripUpdates?.get(call.tripId) ?? null;
+    const vehicle = byTrip.get(call.tripId) ?? null;
+    const own = update?.stops?.find(
+      (stop) => stop.stopId === stationId && Number.isFinite(stop.time),
+    );
+    const delaySec = Number.isFinite(update?.delaySec)
+      ? update.delaySec
+      : Number.isFinite(vehicle?.delaySec)
+        ? vehicle.delaySec
+        : null;
+    const at = own
+      ? own.time
+      : call.at + (Number.isFinite(delaySec) ? delaySec * 1000 : 0);
+    if (at < now - DEPARTED_GRACE_MS || at > now + HORIZON_MS) continue;
+    seen.add(call.tripId);
+    const trip = timetable.trips?.get(call.tripId) ?? null;
+    rows.push({
+      tripId: call.tripId,
+      at,
+      scheduledAt: call.at,
+      line: bounded(vehicle?.routeId, MAX_CODE_CHARS) ?? trip?.line ?? null,
+      destination:
+        bounded(vehicle?.destination, MAX_NAME_CHARS) ??
+        trip?.destination ??
+        null,
+      origin:
+        bounded(vehicle?.origin, MAX_NAME_CHARS) ??
+        nameOf(stopNames, trip?.originStopId),
+      // Renfe labels a train with the platform it will use next: the stop
+      // its trip update times, or the one it is standing at.
+      platform:
+        vehicle &&
+        (own || (vehicle.stopId === stationId && vehicle.stopRelation === 'at'))
+          ? bounded(vehicle.platform, MAX_CODE_CHARS)
+          : null,
+      delaySec,
+      onTime: typeof vehicle?.onTime === 'boolean' ? vehicle.onTime : null,
+      terminates: call.last === true,
+      running: Boolean(vehicle),
+      realtime: Boolean(own) || Number.isFinite(delaySec),
+    });
+  }
+  rows.sort((a, b) => a.at - b.at || a.tripId.localeCompare(b.tripId));
+  return rows.slice(0, Math.max(0, limit));
+}
