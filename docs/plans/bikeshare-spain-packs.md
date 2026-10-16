@@ -1,7 +1,9 @@
 # Plan — Bicis compartidas en España: packs 1 y 2 (PRs a upstream)
 
 Estado: **planificado, sin empezar**. Escrito el 2026-10-16. Todos los feeds se han
-probado en vivo ese día (rutas v2, nº de estaciones, licencia y frescura < 1 min).
+probado en vivo ese día (rutas v2, nº de estaciones, licencia y frescura < 1 min). Pack 1
+revisado a fondo el 2026-10-17 contra los parsers de GEV (sección "Revisión de los feeds
+del pack 1").
 
 ## Cómo retomar
 
@@ -36,16 +38,21 @@ probado en vivo ese día (rutas v2, nº de estaciones, licencia y frescura < 1 m
   `station_information(.json)` / `station_status(.json)`. PBSC sirve con y sin `.json`
   (Bicing usa `.json`, así que se usa `.json`).
 - **Nombre de ciudad** con el formato de upstream: `"Madrid, Spain"`, etc.
-- **`loadRadiusKm`:** `computeInRangeCities` aplica `max(CITY_RANGE_BASE_KM = 100,
-loadRadiusKm)`, así que cualquier valor ≤ 100 equivale a 100. #1176 usa 40; seguir con
-  40 por coherencia. Ningún sistema de estas tablas pasa de 12 km de su centro, salvo
-  Lovesharing (ver pack 2).
+- **`loadRadiusKm`:** cuenta dos veces. Para activar un sistema,
+  `computeInRangeCities` usa `max(CITY_RANGE_BASE_KM = 100, loadRadiusKm)`. Pero desde
+  7a38727b la ingestión **recorta las estaciones** con el `loadRadiusKm` real
+  (`stationsWithinCity`, `src/layers/bikeshare/model.js`), así que el valor sí importa:
+  tiene que alcanzar la estación más lejana. #1176 usa 40; seguir con 40. En el pack 1
+  la más lejana está a 11,7 km (BiciMAD).
 - **No hay tope de sistemas activos a la vez**, así que no pasa nada si se solapan
   (Madrid: BiciMAD + BicinRivas + bibo; Valencia: Valenbisi + BiciMislata + TorrentBici;
   Bizkaia: Bilbao Bizi + Bizkaibizi, y Dbizi entra a ~80 km; A Coruña + Arteixo).
 - **Ficheros que toca cada PR** (como #1176): `registry.js`, el test nuevo,
   `src/data/dataCredits.js` (clave `gbfs`), `DATA_SOURCES.md` (una fila por operador o
-  grupo), `docs/CURRENT-STATE.md` (fila Bikeshare) y `CHANGELOG.md`.
+  grupo), `docs/CURRENT-STATE.md` (fila Bikeshare) y un fragmento en `changelog.d/`
+  (desde upstream #787 el `CHANGELOG.md` se monta con `npm run changelog`; ver
+  `changelog.d/README.md`). El pack 1 toca además `src/sources/gbfsStations.js` y su test
+  (nombres con `_`, ver abajo).
 - **Fork (`mi-main`):** no meter estos sistemas en `registrySpain.js` mientras tanto,
   porque al mergear upstream saltaría `Duplicate GBFS city id`. Llegan a `mi-main` con
   la sincronización normal. En los mensajes de commit de `mi-main` no se citan números
@@ -86,45 +93,81 @@ deja Mislata y Torrent dentro de los 100 km.
 - Bilbao Bizi: `ZORROTZAKO KIROLDEGIA` (43.2778696, -2.9735575)
 - BicinRivas: `Polideportivo Parque Sureste` (40.3236695, -3.5127191)
 
-### Problemas de datos que el pack 1 tiene que resolver
+### Revisión de los feeds del pack 1 (2026-10-17, 00:54 hora de Madrid)
 
-> **Actualización 2026-10-17:** upstream ya filtra las estaciones de la **capa** por
-> distancia (commit 7a38727b, "drop stations outside a city's load radius", del PR de
-> Bogotá y Santiago). La ingestión (`src/layers/bikeshare/ingestion.js`) pasa ahora por
-> `stationsWithinCity(city, …)` con el `loadRadiusKm` de cada sistema: es la opción (a) de abajo, y también quita las
-> estaciones en (0,0) de la capa. Queda por mirar al empezar:
->
-> - `src/tools/queries/mobility.js` (voz y MCP) sigue usando `parseStationInformation`
->   sin ese filtro, aunque recorta por el área de la consulta (`areaContains`), así que
->   (0,0) no sale; `_LAB MADRID` solo saldría si una consulta sobre Madrid alcanzara a
->   Sevici.
-> - Si aun así conviene descartar (0,0) en el parser, como arreglo genérico aparte.
-> - Que el `loadRadiusKm` de cada fila nueva alcance sus estaciones más lejanas (el
->   test de Barcelona de #1176 ya lo comprueba para sus dos sistemas; copiarlo).
+Feeds descargados en vivo y leídos con los parsers de GEV (`parseStationInformation` /
+`parseStationStatus`, `src/sources/gbfsStations.js`). Los 9 sistemas son GBFS 2.3, las
+URLs de la tabla responden 200, y cada estación tiene información y estado (ninguna
+huérfana).
 
-1. **Estaciones en (0,0).** `parseStationInformation` (`src/sources/gbfsStations.js`)
-   solo descarta coordenadas no finitas, así que `lat: 0, lon: 0` pasa y se pinta en el
-   golfo de Guinea. Lo usan la capa y `src/tools/queries/mobility.js` (consultas de voz
-   y MCP), así que las estaciones fantasma también saldrían en las respuestas. Casos
-   vistos:
-   - BiciCoruña: `Playa de Oza` (24), `Campus Elviña 2` (37), `Campus Zapateira` (38)
-   - Sevici: `_TALLER SEVILLA` (el taller)
+| Sistema     | Estac. | Bicis | Más lejana | info / status | Rarezas                                                                              |
+| ----------- | ------ | ----- | ---------- | ------------- | ------------------------------------------------------------------------------------ |
+| BiciMAD     | 678    | 3722  | 11,7 km    | 562 / 290 KB  | 2 `NOT_IN_SERVICE` desde hace 3–4 días                                               |
+| Valenbisi   | 277    | 1896  | 5,5 km     | 44 / 75 KB    | Nombres `_GUILLEN_DE_CASTRO`; 2 sin nombre y capacidad 0; 5 sin instalar             |
+| Bizi        | 276    | 1500  | 6,2 km     | 167 / 136 KB  | —                                                                                    |
+| Sevici      | 245    | 2278  | 6,3 km     | 38 / 67 KB    | Nombres `_GLORIETA OLIMPICA`; 4 sin nombre; `_TALLER` en (0,0); `_LAB MADRID` 399 km |
+| BIKI        | 104    | 751   | 8,9 km     | 57 / 51 KB    | —                                                                                    |
+| BiciCoruña  | 84     | 491   | 4,0 km     | 44 / 41 KB    | 5 `PLANNED` (3 en (0,0)); 1 en `MAINTENANCE`                                         |
+| Dbizi       | 70     | 395   | 4,1 km     | 41 / 36 KB    | 1 `NOT_IN_SERVICE`                                                                   |
+| Bilbao Bizi | 67     | 1075  | 3,4 km     | 53 / 35 KB    | Las 67 con `is_renting: false` a las 00:54: probable cierre nocturno                 |
+| BicinRivas  | 42     | 331   | 3,7 km     | 20 / 19 KB    | —                                                                                    |
 
-   **Arreglo:** descartar `lat === 0 && lon === 0` en el parser y añadir un caso a su
-   test. Es un bug genérico, así que se explica aparte en el PR.
+**Resuelto sin código:**
 
-2. **Sevici `_LAB MADRID`** (station_id 298, 40.448779 / -3.584983, capacity 2,
-   address "Aprox."): estación de laboratorio de JCDecaux en Madrid. Solo se pinta
-   cuando Sevici está activo (cámara a ≤ 100 km de Sevilla), pero aparecería sobre
-   Madrid al alejar la cámara y en las consultas. Opciones:
-   - (a) **Recomendada:** en `loadCityStationInfo` (`src/layers/bikeshare/ingestion.js`)
-     descartar estaciones a más de `max(CITY_RANGE_BASE_KM, loadRadiusKm)` del centro
-     del sistema. Es genérico, ningún sistema actual tiene estaciones tan lejos (hay que
-     comprobarlo en el test con el registro entero) y también cubriría el caso (0,0).
-     Pero `mobility.js` llama al parser por su cuenta, así que allí habría que aplicar
-     el mismo filtro.
-   - (b) Dejarlo y documentarlo en `docs/KNOWN-ISSUES.md`.
-   - Decidirlo al empezar, después de ver cómo `mobility.js` elige los sistemas.
+- **Proxy:** nada que cambiar. El feed más grande (BiciMAD, 562 KB) queda muy por debajo
+  de `GBFS_MAX_BODY_BYTES` (5 MB). Además, la información de estaciones se pide una
+  sola vez por ciudad y el estado cada 60 s (`STATUS_POLL_MS`).
+- **(0,0) y `_LAB MADRID`:** los descarta el recorte por `loadRadiusKm` de la ingestión.
+  Ya no hace falta el arreglo del parser para (0,0) que se había planeado.
+  - Las consultas de voz y MCP (`src/tools/queries/mobility.js`) leen sin ese recorte,
+    pero filtran por el área de la consulta (`areaContains`): (0,0) no sale nunca.
+  - `_LAB MADRID` solo saldría si una consulta sobre Madrid eligiera Sevici, que está a
+    390 km con radio 40. No lo hace.
+- **Campos que usa GEV:** id, nombre, lat/lon, capacidad y `is_installed/renting/returning`
+  en información; bicis, anclajes, los tres indicadores y `last_reported` en estado.
+  Vienen completos en los 9.
+  - Las bicis `num_bikes_overflow` de PBSC ya van dentro de `num_bikes_available`.
+  - GEV no distingue entre bici eléctrica y mecánica (`vehicle_types_available`). Igual
+    que con Bicing.
+- **Estaciones fuera de servicio o cerradas:** punto gris y "No alquila" en la tarjeta.
+  Es correcto, así que se queda.
+
+**Decisiones (2026-10-17, con el usuario):**
+
+1. **Nombres de JCDecaux España.** Valenbisi y Sevici llevan `_` delante, y Valenbisi
+   además `_` en lugar de espacios (`_PLAZA_MUSICO_LOPEZ_CHAVARRI`). Lillestrøm, también
+   JCDecaux, no los lleva. Repaso de los 52 sistemas de upstream:
+   - **ninguno** tiene `_` en los nombres;
+   - las MAYÚSCULAS (Bicing 98 %, Lillestrøm 100 %) y los códigos delante (`123 - …` en
+     Brasil, Bogotá, Santiago, Honolulu) se dejan tal cual;
+   - GEV no tiene ninguna limpieza común de nombres, solo arreglos locales (Fintraffic
+     `_`→espacio en `server/providers/cctv/normalize.js`, mayúsculas de WFIGS a título
+     en `src/layers/perimeters/cards.js`).
+
+   **Decisión:** solo quitar los `_`, en `stationName()` de `src/sources/gbfsStations.js`
+   (lo usan la capa y las consultas). Se quitan los `_` del principio y del final, cada
+   `_` pasa a ser espacio y se juntan los espacios dobles. No afecta a ningún sistema de
+   upstream. Lleva test propio y se explica aparte en el PR. Mayúsculas y códigos
+   delante se quedan como en el resto.
+
+2. **Estaciones fantasma:** sin instalar con capacidad 0 o sin nombre. Son unas 8:
+   Valenbisi 2, Sevici 4 y Coruña 2 dentro del radio. **Se dejan en gris**, como hace
+   upstream con las de Bicing. La tarjeta dice "No instalada" y, sin nombre, muestra
+   "Estación {id}".
+3. **`last_reported` de JCDecaux:** no es la frescura del feed. La mediana es de 16–22 h
+   aunque `last_updated` tiene menos de 1 min, y pasa también en Lillestrøm. GEV solo
+   lo expone en las consultas de voz y MCP. Se documenta en el PR y no se toca.
+4. **URLs de JCDecaux:** `https://api.cyclocity.fr/contracts/<x>/gbfs/station_*.json`,
+   como Lillestrøm. El `gbfs.json` anuncia `/gbfs/v2/…`, y las dos formas devuelven lo
+   mismo.
+
+**Pendiente:**
+
+- Repetir Bilbao Bizi de día para confirmar que el `is_renting: false` es el cierre
+  nocturno.
+- Volver a sondear justo antes de abrir el PR. El script era desechable: bajar
+  `gbfs.json` → `system_information` / `station_information` / `station_status` y pasar
+  la información y el estado por los parsers de GEV.
 
 ### Licencias y atribución (pack 1)
 
