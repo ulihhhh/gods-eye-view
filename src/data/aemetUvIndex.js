@@ -9,6 +9,7 @@ import {
   setOverlayEntries,
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
+import { msg, t } from '../i18n/index.js';
 
 /**
  * AEMET OpenData UV-index forecast (Phase A8) — a real point layer, not the
@@ -117,6 +118,24 @@ function uvIndexColor(uvIndex, alpha = POINT_ALPHA) {
   return colorFromRgb(uvIndexColorRgb(uvIndex) ?? COLOR_UNKNOWN_RGB, alpha);
 }
 
+/** A category in the UI language: the index is masculine, as in "Low". */
+function uvCategoryText(category) {
+  switch (category) {
+    case 'Low':
+      return t('Low', { context: 'UV index' });
+    case 'Moderate':
+      return t('Moderate', { context: 'UV index' });
+    case 'High':
+      return t('High', { context: 'UV index' });
+    case 'Very High':
+      return t('Very High', { context: 'UV index' });
+    case 'Extreme':
+      return t('Extreme', { context: 'UV index' });
+    default:
+      return category;
+  }
+}
+
 /**
  * Title + detail lines for the in-world selected-city card. Pure, exported
  * for tests.
@@ -124,10 +143,10 @@ function uvIndexColor(uvIndex, alpha = POINT_ALPHA) {
  * @returns {{title: string, details: string[]}}
  */
 export function buildAemetUvIndexSelectionCopy(city) {
-  const title = city?.name || city?.municipioId || 'City';
+  const title = city?.name || city?.municipioId || t('City');
   const category = uvIndexCategory(city?.uvIndex);
   const details = [
-    `UV index ${Number.isFinite(city?.uvIndex) ? city.uvIndex : '—'}${category ? ` · ${category}` : ''}`,
+    `${t('UV index {value}', { value: Number.isFinite(city?.uvIndex) ? city.uvIndex : '—' })}${category ? ` · ${uvCategoryText(category)}` : ''}`,
   ];
   return { title, details };
 }
@@ -333,10 +352,11 @@ export function createAemetUvIndexLayer({
       try {
         const response = await fetch(API_URL);
         if (response.status === 503) {
-          _lastError = 'AEMET_API_KEY not configured';
+          _lastError = msg('AEMET_API_KEY not configured');
           return false;
         }
         if (!response.ok) {
+          // i18n-ignore: HTTP status code
           _lastError = `AEMET HTTP ${response.status}`;
           console.warn(`[Data:AemetUvIndex] API returned ${response.status}`);
           return false;
@@ -345,7 +365,7 @@ export function createAemetUvIndexLayer({
         const payload = await response.json();
         const cities = normalizeAemetUvIndexPayload(payload);
         if (!cities) {
-          _lastError = 'Malformed AEMET response';
+          _lastError = msg('Malformed AEMET response');
           return false;
         }
 
@@ -385,13 +405,13 @@ export function createAemetUvIndexLayer({
         _count = cities.length;
         _lastUpdate = Date.now();
         _lastError = payload.stale
-          ? 'Serving stale AEMET data (upstream unavailable)'
+          ? msg('Serving stale AEMET data (upstream unavailable)')
           : null;
         console.log(`[Data:AemetUvIndex] Updated: ${_count} cities`);
         return true;
       } catch (e) {
         console.warn('[Data:AemetUvIndex] Fetch error:', e);
-        _lastError = 'AEMET network error';
+        _lastError = msg('AEMET network error');
         return false;
       }
     },

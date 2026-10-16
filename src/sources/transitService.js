@@ -233,7 +233,7 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
   const COMPANIONS = Object.freeze({
     tripUpdates: Object.freeze({
       decode: indexTripUpdates,
-      label: 'trip updates', // i18n-ignore: error detail, fork-only
+      label: 'trip updates', // i18n-ignore: console log only
     }),
     alerts: Object.freeze({ decode: decodeAlerts, label: 'alerts' }),
   });

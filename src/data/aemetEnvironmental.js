@@ -9,6 +9,7 @@ import {
   setOverlayEntries,
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
+import { msg, t } from '../i18n/index.js';
 
 /**
  * AEMET OpenData environmental networks (Phase A10) — ozone and solar
@@ -141,17 +142,17 @@ export function environmentalStationColor(
  * @returns {{title: string, details: string[]}}
  */
 export function buildAemetEnvironmentalSelectionCopy(station) {
-  const title = station?.name || station?.indicativo || 'Station';
+  const title = station?.name || station?.indicativo || t('Station');
   const details = [];
   details.push(
     Number.isFinite(station?.ozoneDobson)
-      ? `Ozone ${station.ozoneDobson} DU`
-      : 'Ozone: no data',
+      ? t('Ozone {value} DU', { value: station.ozoneDobson })
+      : t('Ozone: no data'),
   );
   details.push(
     Number.isFinite(station?.globalRadiationSum)
-      ? `Radiation ${station.globalRadiationSum} (10·kJ/m²)`
-      : 'Radiation: no data',
+      ? t('Radiation {value} (10·kJ/m²)', { value: station.globalRadiationSum })
+      : t('Radiation: no data'),
   );
   return { title, details };
 }
@@ -417,12 +418,16 @@ export function createAemetEnvironmentalLayer({
         chips: [
           {
             id: 'networkType',
-            label: isOzone ? 'OZONE' : 'RADIATION',
+            label: isOzone ? t('OZONE') : t('RADIATION'),
             active: true,
             state: 'active',
             title: isOzone
-              ? 'Coloring by total-column ozone — click to switch to solar radiation'
-              : 'Coloring by daily solar radiation — click to switch to ozone',
+              ? t(
+                  'Coloring by total-column ozone — click to switch to solar radiation',
+                )
+              : t(
+                  'Coloring by daily solar radiation — click to switch to ozone',
+                ),
             params: { networkType: isOzone ? 'radiation' : 'ozone' },
           },
         ],
@@ -434,10 +439,11 @@ export function createAemetEnvironmentalLayer({
       try {
         const response = await fetch(API_URL);
         if (response.status === 503) {
-          _lastError = 'AEMET_API_KEY not configured';
+          _lastError = msg('AEMET_API_KEY not configured');
           return false;
         }
         if (!response.ok) {
+          // i18n-ignore: HTTP status code
           _lastError = `AEMET HTTP ${response.status}`;
           console.warn(
             `[Data:AemetEnvironmental] API returned ${response.status}`,
@@ -448,7 +454,7 @@ export function createAemetEnvironmentalLayer({
         const payload = await response.json();
         const stations = normalizeAemetEnvironmentalPayload(payload);
         if (!stations) {
-          _lastError = 'Malformed AEMET response';
+          _lastError = msg('Malformed AEMET response');
           return false;
         }
 
@@ -488,13 +494,13 @@ export function createAemetEnvironmentalLayer({
         _count = stations.length;
         _lastUpdate = Date.now();
         _lastError = payload.stale
-          ? 'Serving stale AEMET data (upstream unavailable)'
+          ? msg('Serving stale AEMET data (upstream unavailable)')
           : null;
         console.log(`[Data:AemetEnvironmental] Updated: ${_count} stations`);
         return true;
       } catch (e) {
         console.warn('[Data:AemetEnvironmental] Fetch error:', e);
-        _lastError = 'AEMET network error';
+        _lastError = msg('AEMET network error');
         return false;
       }
     },

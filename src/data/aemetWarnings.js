@@ -9,6 +9,7 @@ import {
   setOverlayEntries,
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
+import { msg, t } from '../i18n/index.js';
 
 /**
  * AEMET OpenData live weather-warning (avisos) zone polygons — Spain only
@@ -74,9 +75,9 @@ function fmtTime(ms) {
 }
 
 const LEVEL_LABEL = Object.freeze({
-  amarillo: 'Amarillo',
-  naranja: 'Naranja',
-  rojo: 'Rojo',
+  amarillo: msg('Yellow'),
+  naranja: msg('Orange'),
+  rojo: msg('Red'),
 });
 
 /**
@@ -88,12 +89,14 @@ const LEVEL_LABEL = Object.freeze({
  * @returns {string}
  */
 export function buildAemetWarningPhenomenonLine(phenomenon) {
-  const level = LEVEL_LABEL[phenomenon?.level] || phenomenon?.level || '—';
-  const name = phenomenon?.name || phenomenon?.event || 'Aviso';
+  const level = LEVEL_LABEL[phenomenon?.level]
+    ? t(LEVEL_LABEL[phenomenon.level])
+    : phenomenon?.level || '—';
+  const name = phenomenon?.name || phenomenon?.event || t('Warning');
   const window =
     phenomenon?.inEffect === false
-      ? `from ${fmtTime(phenomenon?.onsetMs) ?? '?'}`
-      : `until ${fmtTime(phenomenon?.expiresMs) ?? '?'}`;
+      ? t('from {time}', { time: fmtTime(phenomenon?.onsetMs) ?? '?' })
+      : t('until {time}', { time: fmtTime(phenomenon?.expiresMs) ?? '?' });
   const probability = phenomenon?.probability
     ? ` (${phenomenon.probability})`
     : '';
@@ -112,11 +115,11 @@ export function buildAemetWarningPhenomenonLine(phenomenon) {
  * @returns {{title: string, details: string[]}}
  */
 export function buildAemetWarningSelectionCopy(zone) {
-  const title = zone?.name || zone?.geocode || 'Zone';
+  const title = zone?.name || zone?.geocode || t('Zone');
   const phenomena = Array.isArray(zone?.phenomena) ? zone.phenomena : [];
   const details = phenomena.length
     ? phenomena.map(buildAemetWarningPhenomenonLine)
-    : ['No active warning'];
+    : [t('No active warning')];
   return { title, details };
 }
 
@@ -363,10 +366,11 @@ export function createAemetWarningsLayer({
       try {
         const response = await fetch(API_URL);
         if (response.status === 503) {
-          _lastError = 'AEMET_API_KEY not configured';
+          _lastError = msg('AEMET_API_KEY not configured');
           return false;
         }
         if (!response.ok) {
+          // i18n-ignore: HTTP status code
           _lastError = `AEMET HTTP ${response.status}`;
           console.warn(`[Data:AemetWarnings] API returned ${response.status}`);
           return false;
@@ -375,7 +379,7 @@ export function createAemetWarningsLayer({
         const payload = await response.json();
         const zones = normalizeAemetWarningsPayload(payload);
         if (!zones) {
-          _lastError = 'Malformed AEMET response';
+          _lastError = msg('Malformed AEMET response');
           return false;
         }
 
@@ -437,13 +441,13 @@ export function createAemetWarningsLayer({
         _count = zones.length;
         _lastUpdate = Date.now();
         _lastError = payload.stale
-          ? 'Serving stale AEMET data (upstream unavailable)'
+          ? msg('Serving stale AEMET data (upstream unavailable)')
           : null;
         console.log(`[Data:AemetWarnings] Updated: ${_count} active zones`);
         return true;
       } catch (e) {
         console.warn('[Data:AemetWarnings] Fetch error:', e);
-        _lastError = 'AEMET network error';
+        _lastError = msg('AEMET network error');
         return false;
       }
     },

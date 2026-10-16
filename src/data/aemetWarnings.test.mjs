@@ -64,9 +64,9 @@ function fakeViewer() {
 
 test('phenomenon line names the level, event, probability, and the right side of the validity window', () => {
   const inEffect = buildAemetWarningPhenomenonLine(MULTI_RING_ZONE.phenomena[0]);
-  assert.match(inEffect, /^Naranja Vientos \(>70%\) — until/);
+  assert.match(inEffect, /^Orange Vientos \(>70%\) — until/);
   const upcoming = buildAemetWarningPhenomenonLine(SINGLE_RING_ZONE.phenomena[0]);
-  assert.match(upcoming, /^Amarillo Temperaturas máximas \(40%-70%\) — from/, 'not yet in effect: "from", not "until"');
+  assert.match(upcoming, /^Yellow Temperaturas máximas \(40%-70%\) — from/, 'not yet in effect: "from", not "until"');
 });
 
 test('selection copy lists every phenomenon on its own line, nothing collapsed away', () => {

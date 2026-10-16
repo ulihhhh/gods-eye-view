@@ -18,8 +18,14 @@ import {
 } from './locale.js';
 import es from './locales/es.json' with { type: 'json' };
 import ru from './locales/ru.json' with { type: 'json' };
+// Fork-only layers' text, kept apart so syncs never touch upstream's catalogs.
+import forkEs from './fork/es.json' with { type: 'json' };
+import forkRu from './fork/ru.json' with { type: 'json' };
 
-const CATALOGS = Object.freeze({ es, ru });
+const CATALOGS = Object.freeze({
+  es: { ...es, ...forkEs },
+  ru: { ...ru, ...forkRu },
+});
 
 let currentLocale = DEFAULT_LOCALE;
 

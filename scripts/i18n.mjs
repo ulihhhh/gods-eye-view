@@ -422,19 +422,7 @@ export function findUnmarked() {
 
 // Text that never reaches the page as UI: tool results and descriptions for
 // AI clients (MCP and the voice model).
-// Fork-only layers keep their English text: scripts/i18n-fork-untranslated.json.
-const FORK_UNTRANSLATED = path.join(
-  ROOT,
-  'scripts/i18n-fork-untranslated.json',
-);
-const NOT_UI = [
-  /^src\/tools\//,
-  ...(existsSync(FORK_UNTRANSLATED)
-    ? JSON.parse(readFileSync(FORK_UNTRANSLATED, 'utf8')).files.map(
-        (pattern) => new RegExp(pattern),
-      )
-    : []),
-];
+const NOT_UI = [/^src\/tools\//];
 
 function sourceFiles() {
   return trackedFiles(
@@ -459,8 +447,22 @@ export function catalogPath(locale) {
   return path.join(LOCALES_DIR, `${locale}.json`);
 }
 
+// Fork-only catalogs (src/i18n/fork/<locale>.json), merged over upstream's
+// so syncs never touch src/i18n/locales. New fork text is translated there.
+const FORK_CATALOG_DIR = path.join(ROOT, 'src/i18n/fork');
+
+export function forkCatalogPath(locale) {
+  return path.join(FORK_CATALOG_DIR, `${locale}.json`);
+}
+
+const readJsonIfAny = (file) =>
+  existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {};
+
 export function readCatalog(locale) {
-  return JSON.parse(readFileSync(catalogPath(locale), 'utf8'));
+  return {
+    ...JSON.parse(readFileSync(catalogPath(locale), 'utf8')),
+    ...readJsonIfAny(forkCatalogPath(locale)),
+  };
 }
 
 export function shippedLocales() {
@@ -472,7 +474,10 @@ export function shippedLocales() {
 /** Messages a locale keeps exactly as in English, on purpose. */
 export function readSameAsEnglish(locale) {
   const lists = JSON.parse(readFileSync(SAME_AS_ENGLISH, 'utf8'));
-  return new Set(lists[locale] || []);
+  const fork = readJsonIfAny(
+    path.join(FORK_CATALOG_DIR, 'same-as-english.json'),
+  );
+  return new Set([...(lists[locale] || []), ...(fork[locale] || [])]);
 }
 
 /** The English a message shows: its text without the "context|" prefix. */
@@ -584,16 +589,17 @@ function main(args) {
   }
   let failed = false;
   for (const locale of shippedLocales()) {
-    let catalog = readCatalog(locale);
+    const catalog = readCatalog(locale);
     const { missing, stale, errors } = checkCatalog(locale, catalog, messages);
     if (args.includes('--prune') && stale.length) {
-      catalog = Object.fromEntries(
-        Object.entries(catalog).filter(([text]) => messages.has(text)),
-      );
-      writeFileSync(
-        catalogPath(locale),
-        `${JSON.stringify(catalog, null, 2)}\n`,
-      );
+      for (const file of [catalogPath(locale), forkCatalogPath(locale)]) {
+        if (!existsSync(file)) continue;
+        const own = JSON.parse(readFileSync(file, 'utf8'));
+        const kept = Object.fromEntries(
+          Object.entries(own).filter(([text]) => messages.has(text)),
+        );
+        writeFileSync(file, `${JSON.stringify(kept, null, 2)}\n`);
+      }
       console.log(`${locale}: pruned ${stale.length} unused entries`);
     } else if (stale.length) {
       failed = true;

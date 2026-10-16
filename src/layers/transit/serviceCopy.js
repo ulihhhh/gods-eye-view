@@ -6,6 +6,7 @@
  * them gets nothing, so feeds that never set them keep their card as it was.
  */
 
+import { englishText } from '../../data/englishText.js';
 import { transitAlertText } from '../../data/transitAlertText.js';
 
 /** Next stops named on the card; the rest are counted. */
@@ -40,28 +41,33 @@ export function transitClock(ms, timeZone = null) {
   return formatters.get(key).format(ms);
 }
 
-function punctuality(record) {
+function punctuality(record, t) {
   if (Number.isFinite(record.delaySec)) {
     const minutes = Math.round(record.delaySec / 60);
     if (Math.abs(record.delaySec) < ON_TIME_S || minutes === 0)
-      return 'On time';
-    return minutes > 0 ? `+${minutes} min late` : `${-minutes} min early`;
+      return t('On time');
+    return minutes > 0
+      ? t('+{minutes} min late', { minutes })
+      : t('{minutes} min early', { minutes: -minutes });
   }
-  if (record.onTime === true) return 'On time';
-  if (record.onTime === false) return 'Running late';
+  if (record.onTime === true) return t('On time');
+  if (record.onTime === false) return t('Running late');
   return null;
 }
 
 /**
  * @param {object} feed Registry entry (`timeZone` for clock times).
  * @param {object} record Vehicle record.
+ * @param {Function} [t] The UI's t() (passed down by policy.js, which AI
+ *   tools also import); English without it.
  * @returns {{routeLabel: string|null, destination: string|null,
  *   lines: string[], vehicleType: string|null}}
  */
-export function transitServiceCopy(feed, record) {
+export function transitServiceCopy(feed, record, t = englishText) {
   const lines = [];
-  const service = [punctuality(record)];
-  if (record.origin) service.push(`from ${record.origin}`);
+  const service = [punctuality(record, t)];
+  if (record.origin)
+    service.push(t('from {origin}', { origin: record.origin }));
   if (service.some(Boolean)) lines.push(service.filter(Boolean).join(' · '));
   const stops = Array.isArray(record.nextStops) ? record.nextStops : [];
   if (stops.length) {
@@ -75,7 +81,11 @@ export function transitServiceCopy(feed, record) {
       stops.length -
       shown.length +
       (Number.isFinite(record.nextStopsMore) ? record.nextStopsMore : 0);
-    lines.push(`Next: ${shown.join(' · ')}${more > 0 ? ` · +${more}` : ''}`);
+    lines.push(
+      t('Next: {stops}', {
+        stops: `${shown.join(' · ')}${more > 0 ? ` · +${more}` : ''}`,
+      }),
+    );
   }
   // Service alerts on the train's trip or line, as the operator words them.
   const alerts = Array.isArray(record.alerts) ? record.alerts : [];
@@ -89,10 +99,21 @@ export function transitServiceCopy(feed, record) {
     shown.length +
     (Number.isFinite(record.alertsMore) ? record.alertsMore : 0);
   if (shown.length && moreAlerts > 0)
-    lines.push(`+${moreAlerts} more alert${moreAlerts === 1 ? '' : 's'}`);
+    // Only t() reaches this card (policy.js), so no tn(): one key per form.
+    // The extractor reads a context only when it comes first.
+    lines.push(
+      moreAlerts === 1
+        ? t('+{count} more alert', { context: 'train card', count: 1 })
+        : t('+{count} more alerts', {
+            context: 'train card',
+            count: moreAlerts,
+          }),
+    );
   if (Array.isArray(record.carLoads) && record.carLoads.length)
     lines.push(
-      `Load by car: ${record.carLoads.map((pct) => `${pct}%`).join(' · ')}`,
+      t('Load by car: {loads}', {
+        loads: record.carLoads.map((pct) => `${pct}%`).join(' · '),
+      }),
     );
   return {
     // "ALVIA 04073": the service and the train number riders know.

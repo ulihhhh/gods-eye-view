@@ -10,6 +10,8 @@
  * see DATA_SOURCES.md.
  */
 
+import { msg } from '../i18n/marker.js';
+
 const num = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -20,14 +22,15 @@ const text = (v) => {
   return t || null;
 };
 
-/** Liveuamap status_id -> a short credibility tag + human line (site's own copy). */
+/** Liveuamap status_id -> a short credibility tag + human line (site's own
+ * copy, English: the popup translates it as the badge's tooltip). */
 export const LIVEUAMAP_STATUS = Object.freeze({
-  1: { tag: 'rumor', label: 'Not confirmed — possible fake or hoax' },
-  2: { tag: 'fake', label: 'Confirmed fake' },
-  3: { tag: 'verified', label: 'Confirmed and verified' },
-  5: { tag: 'ad', label: 'Paid commercial content' },
-  6: { tag: 'location-unknown', label: 'Event location is not known' },
-  10: { tag: 'outdated', label: 'Old — does not reflect recent events' },
+  1: { tag: 'rumor', label: msg('Not confirmed — possible fake or hoax') },
+  2: { tag: 'fake', label: msg('Confirmed fake') },
+  3: { tag: 'verified', label: msg('Confirmed and verified') },
+  5: { tag: 'ad', label: msg('Paid commercial content') },
+  6: { tag: 'location-unknown', label: msg('Event location is not known') },
+  10: { tag: 'outdated', label: msg('Old — does not reflect recent events') },
 });
 
 /** Attached-video type -> a coarse provider label. */

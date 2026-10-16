@@ -174,6 +174,7 @@ export function normalizeGeotrenRecord(record) {
     directionId: null,
     label: null,
     stopId: parkedAt || next,
+    // i18n-ignore: GTFS-Realtime status values, not text
     status: parkedAt ? 'STOPPED_AT' : next ? 'IN_TRANSIT_TO' : null,
     occupancy: occupancyOf(fields),
     // Generic optional service fields (see transitProxy applyServiceNames).

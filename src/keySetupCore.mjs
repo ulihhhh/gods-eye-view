@@ -83,7 +83,7 @@ export const KEY_SETUP_KEYS = Object.freeze([
   Object.freeze({
     id: 'aemet',
     title: 'AEMET OPENDATA', // i18n-ignore: provider product name
-    unlocks: 'Spanish weather stations & warnings',
+    unlocks: msg('Spanish weather stations & warnings'),
     getUrl: 'https://opendata.aemet.es/centrodedescargas/altaUsuario',
     envVars: Object.freeze(['AEMET_API_KEY']),
     tier: 'free',
@@ -98,8 +98,9 @@ export const KEY_SETUP_KEYS = Object.freeze([
   Object.freeze({
     id: 'tmb',
     title: 'TMB', // i18n-ignore: provider product name
-    unlocks:
+    unlocks: msg(
       'Barcelona metro and bus arrival times. Free: register an application at developer.tmb.cat and paste its app_id and app_key',
+    ),
     getUrl: 'https://developer.tmb.cat/',
     envVars: Object.freeze(['TMB_APP_ID', 'TMB_APP_KEY']),
     tier: 'free',

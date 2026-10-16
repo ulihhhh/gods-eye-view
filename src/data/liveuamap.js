@@ -7,6 +7,7 @@ import {
   fieldShapeKind,
 } from './liveuamapPresentation.js';
 import { iconUriForCategory } from './liveuamapIcons.js';
+import { msg, t, translateKnown } from '../i18n/index.js';
 import { horizonOccluder } from './iconOrientation.js';
 import { governorRequestRender } from '../renderGovernor.js';
 
@@ -170,21 +171,21 @@ export function createLiveuamapLayer() {
     el.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
         <span class="panel-title">LIVEUAMAP &middot; ${escapeHtml(region.toUpperCase())}</span>
-        <button type="button" data-luam-close aria-label="Close"
+        <button type="button" data-luam-close aria-label="${escapeHtml(t('Close'))}"
           style="background:none;border:0;color:var(--accent);cursor:pointer;font:14px/1 var(--font-mono);padding:0 2px">&#10005;</button>
       </div>
-      <div style="font:600 12px/1.35 var(--font-mono);letter-spacing:.02em;color:var(--text-primary);margin-top:8px">${escapeHtml(ev.name || '(untitled)')}</div>
-      ${badge ? `<div style="display:inline-block;margin-top:6px;padding:2px 7px;border-radius:3px;font:8px/1 var(--font-mono);letter-spacing:.06em;background:${badge.color};color:#0a0a0f">${badge.label}</div>` : ''}
+      <div style="font:600 12px/1.35 var(--font-mono);letter-spacing:.02em;color:var(--text-primary);margin-top:8px">${escapeHtml(ev.name || t('(untitled)'))}</div>
+      ${badge ? `<div style="display:inline-block;margin-top:6px;padding:2px 7px;border-radius:3px;font:8px/1 var(--font-mono);letter-spacing:.06em;background:${badge.color};color:#0a0a0f"${ev.status?.label ? ` title="${escapeHtml(translateKnown(ev.status.label))}"` : ''}>${escapeHtml(t(badge.label))}</div>` : ''}
       ${photo ? `<img src="${escapeHtml(photo)}" referrerpolicy="no-referrer" style="width:100%;border-radius:6px;margin-top:8px;display:block;border:1px solid var(--glass-border)" onerror="this.remove()">` : ''}
       <div style="margin-top:8px;display:grid;gap:4px">
-        ${popupRow('CITY', escapeHtml(ev.city))}
-        ${popupRow('WHEN', escapeHtml(relativeTime(ev.timestamp) || ev.timeAgo))}
-        ${popupRow('DESC', escapeHtml(ev.description))}
-        ${ev.video ? popupRow('VIDEO', `${escapeHtml(ev.videoKind || 'attached')} &#9654;`) : ''}
+        ${popupRow(t('CITY'), escapeHtml(ev.city))}
+        ${popupRow(t('WHEN'), escapeHtml(relativeTime(ev.timestamp) || ev.timeAgo))}
+        ${popupRow(t('DESC'), escapeHtml(ev.description))}
+        ${ev.video ? popupRow(t('VIDEO'), `${escapeHtml(ev.videoKind || t('attached', { context: 'video' }))} &#9654;`) : ''}
         ${
           (ev.otherRegions || []).length
             ? popupRow(
-                'ALSO ON',
+                t('ALSO ON'),
                 ev.otherRegions.map((r) => escapeHtml(r.name)).join(', '),
               )
             : ''
@@ -192,7 +193,7 @@ export function createLiveuamapLayer() {
       </div>
       ${
         ev.source
-          ? `<div style="margin-top:8px"><a href="${escapeHtml(ev.source)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font:10px/1 var(--font-mono);letter-spacing:.04em">SOURCE &#8599;</a></div>`
+          ? `<div style="margin-top:8px"><a href="${escapeHtml(ev.source)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font:10px/1 var(--font-mono);letter-spacing:.04em">${escapeHtml(t('SOURCE'))} &#8599;</a></div>`
           : ''
       }
     `;
@@ -474,7 +475,9 @@ export function createLiveuamapLayer() {
     _lastUpdate = Date.now();
     _lastError = anyData
       ? null
-      : 'No data yet — open a liveuamap.com tab with the bridge extension loaded';
+      : msg(
+          'No data yet — open a liveuamap.com tab with the bridge extension loaded',
+        );
     console.log('[Data:Liveuamap] Updated:', JSON.stringify(byRegion));
     // Freshly added entities default to `.show = true`; settle horizon
     // visibility immediately rather than waiting for the next 250ms tick.
@@ -540,7 +543,7 @@ export function createLiveuamapLayer() {
         return true;
       } catch (e) {
         console.warn('[Data:Liveuamap] Update error:', e);
-        _lastError = 'Liveuamap feed error';
+        _lastError = msg('Liveuamap feed error');
         return false;
       }
     },
@@ -565,26 +568,26 @@ export function createLiveuamapLayer() {
         chips: [
           {
             id: 'labels',
-            label: 'LABELS',
+            label: t('LABELS'),
             active: _params.showLabels,
             state: _params.showLabels ? 'active' : 'idle',
-            title: 'Toggle event name labels',
+            title: t('Toggle event name labels'),
             params: { showLabels: !_params.showLabels },
           },
           {
             id: 'fields',
-            label: 'TERRITORY',
+            label: t('TERRITORY'),
             active: _params.showFields,
             state: _params.showFields ? 'active' : 'idle',
-            title: 'Toggle territory / front-line polygons',
+            title: t('Toggle territory / front-line polygons'),
             params: { showFields: !_params.showFields },
           },
           {
             id: 'verified',
-            label: 'VERIFIED ONLY',
+            label: t('VERIFIED ONLY'),
             active: _params.verifiedOnly,
             state: _params.verifiedOnly ? 'active' : 'idle',
-            title: 'Show only Liveuamap-verified events',
+            title: t('Show only Liveuamap-verified events'),
             params: { verifiedOnly: !_params.verifiedOnly },
           },
         ],
@@ -597,7 +600,7 @@ export function createLiveuamapLayer() {
             label: region,
             color: regionColorCss(region),
             count: (r.events || 0) + (r.fields || 0),
-            blurb: [r.asOf, age ? `pushed ${age}` : null]
+            blurb: [r.asOf, age ? t('pushed {age}', { age }) : null]
               .filter(Boolean)
               .join(' · '),
           };
