@@ -23,7 +23,10 @@ import {
   buildCercaniasTripDetails,
   buildRenfeLdTripDetails,
 } from './renfeTripDetails.js';
-import { buildCercaniasTimetable } from './renfeTimetable.js';
+import {
+  buildCercaniasTimetable,
+  buildRenfeLdTimetable,
+} from './renfeTimetable.js';
 
 /**
  * Renfe Cercanías labels are `<line>-<train>` with an optional platform
@@ -157,10 +160,17 @@ const RENFE_CERCANIAS_TRIP_DETAILS = Object.freeze({
 });
 const RENFE_LD_TRIP_DETAILS = Object.freeze({
   url: 'https://ssl.renfe.com/gtransit/Fichero_AV_LD/google_transit.zip',
-  files: RENFE_GTFS_FILES,
+  files: Object.freeze([
+    ...RENFE_GTFS_FILES,
+    'calendar.txt',
+    'calendar_dates.txt',
+  ]),
   maxBytes: 8 * 1024 * 1024,
-  maxEntryBytes: 16 * 1024 * 1024,
+  // calendar_dates.txt is ≈13 MB unpacked.
+  maxEntryBytes: 32 * 1024 * 1024,
   build: buildRenfeLdTripDetails,
+  // Station boards, as for Cercanías (stop_times.txt is ≈25 MB).
+  timetable: buildRenfeLdTimetable,
 });
 
 /**

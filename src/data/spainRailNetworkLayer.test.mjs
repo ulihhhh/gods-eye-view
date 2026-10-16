@@ -19,7 +19,9 @@ import {
   spainRailIgnShown,
   SPAIN_RAIL_DEFAULT_PARAMS,
   SPAIN_RAIL_CARD_REFRESH_MS,
+  mergeSpainRailBoards,
   spainRailArrivalLines,
+  spainRailBoardFeeds,
 } from './spainRailNetworkLayer.js';
 import { loadBundledJson } from './bundledJson.js';
 import { isOwnedByOtherLayer } from './pickRegistry.js';
@@ -614,12 +616,21 @@ test('an FGC station card asks for its trains, refreshes while open and stops on
     assert.equal(asked.length, 2, 'asks again once the answer is old');
 
     layer._selectForTest('spain-rail-network:station:renfe-cercanias:71801');
-    assert.equal(asked.at(-1), '/api/transit/arrivals/renfe-cercanias/71801');
+    assert.deepEqual(
+      asked.slice(2),
+      [
+        '/api/transit/arrivals/renfe-cercanias/71801',
+        '/api/transit/arrivals/renfe-ld/71801',
+      ],
+      'Sants asks Cercanías and AV/LD',
+    );
     assert.equal(intervals.size, 1, 'one board at a time');
     await settle();
     layer._selectForTest('spain-rail-network:station:renfe-ld:60911');
-    assert.equal(intervals.size, 0, 'an AV/LD station has no board yet');
-    assert.equal(asked.length, 3);
+    assert.equal(asked.at(-1), '/api/transit/arrivals/renfe-ld/60911');
+    await settle();
+    layer._selectForTest('spain-rail-network:line:0');
+    assert.equal(intervals.size, 0, 'a line card has no board');
     assert.ok(
       !entries.at(-1)[0].details.some((line) => line.startsWith('Asking')),
     );
@@ -676,4 +687,38 @@ test('a Renfe station card says which times are live and which are timetabled', 
     'Renfe → Aranjuez · 11:50 (10 min) · scheduled',
     'C3 → Aranjuez · 11:52 (12 min)',
   ]);
+});
+
+test('a station shared with AV/LD asks both feeds and lists each train once', () => {
+  const [sants, pc, ciudadReal] = spainRailStationsFromPack(STATIONS, LINES);
+  assert.deepEqual(sants.alsoIn, ['renfe-ld']);
+  assert.deepEqual(spainRailBoardFeeds(sants), ['renfe-cercanias', 'renfe-ld']);
+  assert.deepEqual(spainRailBoardFeeds(pc), ['fgc-geotren']);
+  assert.deepEqual(spainRailBoardFeeds(ciudadReal), ['renfe-ld']);
+  assert.deepEqual(spainRailBoardFeeds({ network: 'other' }), []);
+
+  const merged = mergeSpainRailBoards([
+    {
+      fetchedAt: at(-2),
+      arrivals: [
+        { tripId: 'c1', at: at(5), line: 'R15', train: '15000' },
+        { tripId: 'c2', at: at(9), line: 'R2N', train: '28557' },
+      ],
+    },
+    {
+      fetchedAt: at(-1),
+      arrivals: [
+        // The same regional, as AV/LD names it.
+        { tripId: 'l1', at: at(6), line: 'REG.EXP. 15000', train: '15000' },
+        { tripId: 'l2', at: at(7), line: 'AVE 3123', train: '3123' },
+        // The same number hours later is another train.
+        { tripId: 'l3', at: at(150), line: 'REG.EXP. 15000', train: '15000' },
+      ],
+    },
+  ]);
+  assert.deepEqual(
+    merged.arrivals.map((train) => train.tripId),
+    ['c1', 'l2', 'c2', 'l3'],
+  );
+  assert.equal(merged.fetchedAt, at(-1));
 });

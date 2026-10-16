@@ -8,16 +8,14 @@ investigación.
 
 ## Cómo retomar (estado al 2026-10-16)
 
-- **Hecho y en `mi-main`**: fases 1–5f, 6a–6c y 7a. **7b** (paneles de Cercanías) en
-  la rama `feat/transit-es-cercanias-boards`. Siguiente: **7c** (AV/LD).
-- Punto de partida de la 7c:
-  - El horario de la 7b es un enganche genérico: `tripDetails.timetable` en la fila
-    del registro (`buildCercaniasTimetable` en `src/data/renfeTimetable.js`). Para
-    LD hay que medir su `stop_times.txt` y escribir su constructor (los `trip_id` de
-    LD llevan la fecha; su `calendar` puede ser distinto).
-  - La ficha: añadir `renfe-ld` a `SPAIN_RAIL_ARRIVAL_FEEDS`. Ojo: las estaciones que
-    están en Cercanías y LD (Sants, Atocha…) se dibujan una vez, como de Cercanías, así
-    que su panel tendría que juntar los dos feeds.
+- **Hecho y en `mi-main`**: fases 1–5f, 6a–6c, 7a y 7b. **7c** (paneles de AV/LD y
+  paneles combinados) en la rama `feat/transit-es-ld-boards`. Siguiente: **Fase 8**
+  (incidencias).
+- Los paneles: ruta `/api/transit/arrivals/<feed>/<estación>` (`arrivals()` en
+  `src/sources/transitService.js`), constructores en `src/data/transitArrivals.js`,
+  horarios en `src/data/renfeTimetable.js` (`buildGtfsTimetable` + adaptadores) y la
+  ficha en `src/data/spainRailNetworkLayer.js` (`spainRailBoardFeeds`,
+  `mergeSpainRailBoards`, `spainRailArrivalLines`).
 - **Entorno:**
   - Tests con Node 24 de nvm (`source ~/.nvm/nvm.sh && nvm use 24`); el Node 21 del
     sistema cuelga un test.
@@ -994,7 +992,7 @@ Así que la fase se parte en tres:
 - **7b — Renfe Cercanías** ✅ 2026-10-16: horario estático diario (`stop_times.txt` en streaming,
   solo los viajes de hoy) más el retraso del TU; la hora se marca "programada +
   retraso" cuando el tren no informa esa parada.
-- **7c — AV/LD**: igual si su `stop_times` es razonable; si no, el panel dice que solo
+- **7c — AV/LD** ✅ 2026-10-16: igual si su `stop_times` es razonable; si no, el panel dice que solo
   lista los trenes que informan la parada.
 
 **Resultado 7a:**
@@ -1052,6 +1050,28 @@ Así que la fase se parte en tres:
 - Tests: `src/data/renfeTimetable.test.mjs`; fixtures de Renfe (zip y posiciones) en
   `src/testSupport/renfeGtfsFixtures.mjs` (fuera de `src/data/` porque usan
   `node:zlib`).
+
+**Resultado 7c** (✅ 2026-10-16, rama `feat/transit-es-ld-boards`):
+
+- GTFS de AV/LD: zip de 0,9 MB; `stop_times.txt` 25 MB, `calendar_dates.txt` 12,5 MB
+  (35.734 excepciones), horas sin cero inicial (`8:30:00`), `pickup_type` /
+  `drop_off_type`. Hoy: 1.619 viajes, 14.341 filas; construcción 0,7 s.
+- `buildGtfsTimetable` genérico (calendar + calendar_dates, salta paradas sin subida
+  ni bajada, `stops` por viaje) con dos adaptadores: Cercanías (línea, destino del
+  nombre largo, nº de tren del `trip_id`) y LD (`AVE 3123`: servicio + nº de
+  `trip_short_name`; destino = código de estación del `route_id`).
+- **Un tren, varios viajes:** LD vende un tren como varios viajes (el AVE 3123 sale a
+  las 12:27 tres veces: a Lleida, Sants y Figueres) y repite otros (`00437` 1 y 2).
+  El panel junta por nº de tren + hora: nombra con el viaje más largo y toma el
+  retraso de cualquier variante que lo tenga.
+- **Estaciones compartidas:** las estaciones que están en Cercanías y LD se dibujan
+  como Cercanías (`alsoIn: ['renfe-ld']`); la ficha pide los dos feeds y
+  `mergeSpainRailBoards` quita los trenes repetidos (mismo nº a ≤ 30 min; en Sants
+  107 de 283 paradas LD son regionales que también están en Cercanías), quedándose
+  con la fila de Cercanías (trae la línea, R15).
+- En vivo (12:20): Puerta de Atocha, Sants, Zaragoza Delicias y Chamartín con 12
+  trenes. En las cabeceras casi todo sale `scheduled`: el TU de LD solo trae los
+  trenes que ya circulan.
 
 ### Fase 8 — Incidencias
 
