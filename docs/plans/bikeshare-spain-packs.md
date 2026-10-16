@@ -169,32 +169,42 @@ huérfana).
   `gbfs.json` → `system_information` / `station_information` / `station_status` y pasar
   la información y el estado por los parsers de GEV.
 
-### Licencias y atribución (pack 1)
+### Licencias y atribución (pack 1) — revisadas el 2026-10-17
 
-- **Valenbisi, Sevici (JCDecaux):** `license_url` =
-  [Licence Ouverte / Etalab](https://developer.jcdecaux.com/files/Open-Licence-fr.pdf),
-  atribución obligatoria. Ampliar la fila de JCDecaux Cyclocity en `DATA_SOURCES.md`
-  (hoy solo menciona Lillestrøm).
-- **PBSC (BiciMAD, Bizi, BIKI, BiciCoruña, Dbizi, Bilbao Bizi, BicinRivas):** los feeds
-  no declaran licencia (`system_information` sin `license_url`). Se trata igual que
-  Bicing, Toronto y Bike Itaú: "no licence is published, attribution to the operator".
-  Lo encontrado sobre cada uno:
-  - **BiciMAD:** el catálogo oficial del Ayuntamiento publica este mismo feed
-    (`https://datos.madrid.es/egob/catalogo/900021-0-bicimad-GBFS.json`, que apunta a
-    `madrid.publicbikesystem.net/customer/gbfs/v2/en/…`). La ficha en datos.gob.es
-    (`l01280796-bicimad-gbfs-general-bikeshare-feed-specification`) deja la licencia en
-    blanco y remite a los
-    [términos de EMT MobilityLabs](https://mobilitylabs.emtmadrid.es/sip/terms-of-use):
-    leerlos antes del PR. Atribución: "BiciMAD, EMT Madrid (Ayuntamiento de Madrid)".
-  - **Bilbao Bizi:** Bilbao Open Data es CC BY 4.0 en general, pero no hay dataset de
-    Bizi confirmado. Atribución: "Bilbao Bizi, Bilbao City Council".
-  - **BiciCoruña:** existe el dataset `datos.coruna.gal/dataset/bicicletas-publicas-bicicoruna`,
-    sin licencia visible. Comprobarla.
-  - **Zaragoza, Valladolid (AUVASA), Donostia, Rivas:** no se ha encontrado licencia.
-    Atribución al operador o ayuntamiento.
-- Créditos propuestos (clave `gbfs`): "BiciMAD, EMT Madrid; Bizi Zaragoza; BIKI,
-  AUVASA (Valladolid); BiciCoruña; Dbizi (Donostia); Bilbao Bizi; BicinRivas", más una
-  clave o texto para JCDecaux España ("Valenbisi, Sevici: JCDecaux, Licence Ouverte").
+Ninguna licencia impide reutilizar los feeds en una aplicación de código abierto: **los 9
+sistemas se quedan en el pack**. Por sistema:
+
+| Sistema                       | Licencia encontrada                                                                                                                                                                                                                                                                                                                                                   | Atribución                                                                                                      |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| BiciMAD                       | La ficha de datos.madrid.es (`dataset/900021-0-bicimad-gbfs`, de la EMT, que apunta a este mismo feed) aplica las [condiciones de EMT](https://mobilitylabs.emtmadrid.es/sip/terms-of-use): reutilización comercial y no comercial (sección 4). Los datos estáticos son libres; la clave solo se pide para los servicios web del portal MobilityLabs, no para el GBFS | **Obligatoria:** "Powered by EMT de Madrid", a ser posible enlazando a `https://www.emtmadrid.es` (sección 5.2) |
+| Valenbisi, Sevici             | `license_url` del feed: [Licence Ouverte / Etalab](https://developer.jcdecaux.com/files/Open-Licence-fr.pdf)                                                                                                                                                                                                                                                          | Obligatoria: JCDecaux, Licence Ouverte (como Lillestrøm)                                                        |
+| Bilbao Bizi                   | Bilbao Open Data es CC BY 4.0 en conjunto (registro en datos.gob.es), pero no hay dataset de Bizi                                                                                                                                                                                                                                                                     | Al operador: "Bilbao Bizi, Bilbao City Council"                                                                 |
+| BiciCoruña                    | El dataset municipal (`datos.coruna.gal/dataset/bicicletas-publicas-bicicoruna`, licencia `RISP_AC`, Ley 37/2007: citar la fuente, no alterar el contenido) es **otra API** (SOFIA, con clave), no el GBFS. El enlace a la licencia redirige a la portada                                                                                                             | Al operador: "BiciCoruña"                                                                                       |
+| Bizi, BIKI, Dbizi, BicinRivas | No hay licencia publicada por el operador ni por el ayuntamiento                                                                                                                                                                                                                                                                                                      | Al operador o ayuntamiento                                                                                      |
+
+**Mobility Database** (MobilityData) marca CC BY 4.0 en los 7 PBSC españoles, y también
+en Bicing, sin decir de dónde sale. Valenbisi aparece con la Licence Ouverte y la ficha
+de Sevici no se encontró. Upstream no lo ha usado como fuente: la fila de Bicing dice
+que el feed no publica licencia. Se cita como dato secundario y nada más.
+
+**Para los créditos y `DATA_SOURCES.md`:**
+
+- **Clave `gbfs`** (`dataCredits.js`): añadir el enlace "Powered by EMT de Madrid" →
+  `https://www.emtmadrid.es` (BiciMAD); "Bizi Zaragoza; BIKI, AUVASA (Valladolid);
+  BiciCoruña; Dbizi (Donostia); Bilbao Bizi, Bilbao City Council; BicinRivas, Rivas
+  City Council".
+- **Clave `jcdecaux-gbfs`:** "City bikes (Lillestrøm, Valencia, Seville): Bysykkel
+  Lillestrøm, Valenbisi, Sevici, JCDecaux — Licence Ouverte".
+- **Fila de BiciMAD** en `DATA_SOURCES.md`, aparte, porque tiene licencia propia:
+  condiciones de EMT, con atribución "Powered by EMT de Madrid" OBLIGATORIA.
+- **Fila conjunta** para Bizi, BIKI, BiciCoruña, Dbizi, Bilbao Bizi y BicinRivas, como
+  la de Bike Itaú: "Operator GBFS feeds. No licence is published by the operators;
+  MobilityData's catalogue lists CC BY 4.0 without naming a source. Attribution is given
+  to the operator."
+- **Fila de JCDecaux:** ampliarla con Valencia y Sevilla.
+- **Limpieza de los `_` frente a "no alterar el contenido":** las condiciones de EMT y la
+  Ley 37/2007 que cita Coruña piden no alterar el contenido. La limpieza solo cambia
+  nombres de JCDecaux, y la Licence Ouverte permite modificarlos, así que no choca.
 
 ## Pack 1 — Plan de implementación (2026-10-17)
 
@@ -210,12 +220,9 @@ Toronto y en la misma PR arregló un fallo genérico que había destapado. Rama
    cierre nocturno. Si sigue así de día, investigar antes de incluirlo.
 2. **Volver a sondear los 9 feeds:** número de estaciones, estaciones más lejanas y
    rarezas. Actualizar la lista de estaciones del test si han cambiado.
-3. **Licencias que faltan por leer:**
-   - términos de EMT MobilityLabs (BiciMAD);
-   - ficha `datos.coruna.gal/dataset/bicicletas-publicas-bicicoruna`;
-   - Bilbao Open Data, por si hay dataset de Bizi.
-
-   Si alguna prohíbe reutilizar el feed, ese sistema sale del pack.
+3. ~~Licencias que faltan por leer~~: ✅ revisadas el 2026-10-17 (sección de licencias
+   del pack 1). Ninguna prohíbe reutilizar los feeds. BiciMAD exige "Powered by EMT de
+   Madrid".
 
 ### Commit 1 — `fix(gbfs): read underscores in station names as spaces`
 
