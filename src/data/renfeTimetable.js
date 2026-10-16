@@ -1,16 +1,16 @@
 /**
  * @module renfeTimetable
- * @description Renfe Cercanías' timetable for the days around today, from
- * its static GTFS (`fomento_transit.zip`, CC BY 4.0, data.renfe.com), for
- * the station boards (`/api/transit/arrivals`). Renfe's trip updates carry
- * one stop per train, so a station's times come from here, moved by the
+ * @description Renfe's timetables for the days around today, from its two
+ * static GTFS zips (CC BY 4.0, data.renfe.com): Cercanías
+ * (`fomento_transit.zip`) and AV/LD/MD (`google_transit.zip`), for the
+ * station boards (`/api/transit/arrivals`). Renfe's trip updates carry one
+ * stop per train, so a station's times come from here, moved by the
  * train's live delay (src/data/transitArrivals.js).
  *
- * `calendar.txt` names the services that run on each day (Cercanías has one
- * service id per network and date, and no `calendar_dates.txt`);
- * `trips.txt` and `routes.txt` give each trip its line and destination;
- * `stop_times.txt` (≈280 MB) is read line by line and only the trips of the
- * kept days are held. GTFS times are counted from noon minus twelve hours,
+ * `calendar.txt` (and `calendar_dates.txt`, AV/LD's exceptions) name the
+ * services that run on each day; `trips.txt` and `routes.txt` name each
+ * trip; `stop_times.txt` (≈280 MB for Cercanías, 25 MB for AV/LD) is read
+ * line by line and only the trips of the kept days are held. GTFS times are counted from noon minus twelve hours,
  * local time, and may pass 24:00 for trains after midnight.
  *
  * Pure: no Cesium, no Node built-ins.
@@ -128,76 +128,106 @@ function gtfsSeconds(text) {
 
 /**
  * @typedef {{tripId: string, at: number, last: boolean}} TimetableCall
+ * @typedef {{line: string|null, train: string|null,
+ *   destination: string|null, destinationStopId: string|null,
+ *   originStopId: string|null, stops: number}} TimetableTrip
  * @typedef {{stations: Map<string, TimetableCall[]>,
- *   trips: Map<string, Readonly<{line: string|null,
- *     destination: string|null, originStopId: string|null}>>,
+ *   trips: Map<string, Readonly<TimetableTrip>>,
  *   days: string[], builtFor: string}} Timetable
  */
 
 /**
+ * A GTFS timetable for the days around `now`. `calendar_dates.txt`, when
+ * given, adds (1) and removes (2) service days. A stop where the train
+ * neither picks up nor drops off is left out.
  * @param {{files: Map<string, string>,
  *   lines: (name: string) => AsyncIterable<string>,
+ *   describe: (trip: Record<string, string>, route: Record<string, string>|null) =>
+ *     {line?: string|null, train?: string|null, destination?: string|null,
+ *      destinationStopId?: string|null},
  *   now?: number, timeZone?: string}} options `files` holds `calendar.txt`,
- *   `routes.txt` and `trips.txt`; `lines` streams `stop_times.txt`.
+ *   `routes.txt`, `trips.txt` and optionally `calendar_dates.txt`; `lines`
+ *   streams `stop_times.txt`; `describe` names a trip.
  * @returns {Promise<Timetable>} each station's calls sorted by time
  *   (departure, else arrival); `builtFor` is today's `YYYYMMDD`.
  */
-export async function buildCercaniasTimetable({
+export async function buildGtfsTimetable({
   files,
   lines,
+  describe,
   now = Date.now(),
   timeZone = 'Europe/Madrid',
 }) {
   const days = RENFE_TIMETABLE_DAYS.map((offset) =>
     localDay(now, timeZone, offset),
   );
-  /** service id → start instants of the kept days it runs on */
+  /** service id → kept days it runs on */
   const services = new Map();
+  const runs = (id) => {
+    if (!services.has(id)) services.set(id, new Set());
+    return services.get(id);
+  };
   for (const row of rows(files.get('calendar.txt'))) {
-    for (const { day, weekday } of days) {
-      if (row.start_date > day || row.end_date < day || row[weekday] !== '1')
-        continue;
-      if (!services.has(row.service_id)) services.set(row.service_id, []);
-      services.get(row.service_id).push(gtfsServiceDayStart(day, timeZone));
-    }
+    for (const { day, weekday } of days)
+      if (row.start_date <= day && day <= row.end_date && row[weekday] === '1')
+        runs(row.service_id).add(day);
   }
-  const routes = new Map();
-  for (const row of rows(files.get('routes.txt')))
-    routes.set(row.route_id, {
-      line: clean(row.route_short_name),
-      destination: cercaniasRouteDestination(row.route_long_name),
-    });
+  const kept = new Set(days.map(({ day }) => day));
+  if (files.has('calendar_dates.txt'))
+    for (const row of rows(files.get('calendar_dates.txt'))) {
+      if (!kept.has(row.date)) continue;
+      if (row.exception_type === '1') runs(row.service_id).add(row.date);
+      else if (row.exception_type === '2')
+        runs(row.service_id).delete(row.date);
+    }
+  const starts = new Map(
+    [...services].map(([id, set]) => [
+      id,
+      [...set].sort().map((day) => gtfsServiceDayStart(day, timeZone)),
+    ]),
+  );
+  const routes = new Map(
+    rows(files.get('routes.txt')).map((row) => [row.route_id, row]),
+  );
   /** trip id → start instants of its service days */
   const tripStarts = new Map();
-  const tripRoutes = new Map();
+  const tripRows = new Map();
   for (const row of rows(files.get('trips.txt'))) {
-    const starts = services.get(row.service_id);
-    if (!starts || !row.trip_id) continue;
-    tripStarts.set(row.trip_id, starts);
-    tripRoutes.set(row.trip_id, routes.get(row.route_id) ?? null);
+    const at = starts.get(row.service_id);
+    if (!at?.length || !row.trip_id) continue;
+    tripStarts.set(row.trip_id, at);
+    tripRows.set(row.trip_id, row);
   }
 
   const stations = new Map();
   const firstStop = new Map();
-  /** trip id → its latest call, to mark the trip's last stop */
+  /** trip id + day → its latest call, to mark the trip's last stop */
   const lastCall = new Map();
+  /** trip id → stops it serves (a train sold as several trips is the longest) */
+  const stopCounts = new Map();
   let column = null;
   for await (const raw of lines('stop_times.txt')) {
     if (column === null) {
       const header = raw.split(',').map((name) => name.trim());
       column = Object.fromEntries(
-        ['stop_id', 'arrival_time', 'departure_time', 'stop_sequence'].map(
-          (name) => [name, header.indexOf(name)],
-        ),
+        [
+          'stop_id',
+          'arrival_time',
+          'departure_time',
+          'stop_sequence',
+          'pickup_type',
+          'drop_off_type',
+        ].map((name) => [name, header.indexOf(name)]),
       );
       continue;
     }
     const comma = raw.indexOf(',');
     const tripId = raw.slice(0, comma).trim();
-    const starts = tripStarts.get(tripId);
-    if (!starts) continue;
+    const tripDays = tripStarts.get(tripId);
+    if (!tripDays) continue;
     const cells = raw.split(',');
-    const field = (name) => String(cells[column[name]] ?? '').trim();
+    const field = (name) =>
+      column[name] < 0 ? '' : String(cells[column[name]] ?? '').trim();
     const stopId = field('stop_id');
     const seconds =
       gtfsSeconds(field('departure_time')) ??
@@ -206,28 +236,36 @@ export async function buildCercaniasTimetable({
     if (!stopId || seconds === null) continue;
     if (!firstStop.has(tripId) || sequence < firstStop.get(tripId).sequence)
       firstStop.set(tripId, { sequence, stopId });
-    if (!stations.has(stopId)) stations.set(stopId, []);
-    for (const start of starts) {
+    const passing =
+      field('pickup_type') === '1' && field('drop_off_type') === '1';
+    if (!passing) stopCounts.set(tripId, (stopCounts.get(tripId) || 0) + 1);
+    for (const start of tripDays) {
       const call = { tripId, at: start + seconds * 1000, last: false };
-      stations.get(stopId).push(call);
       const key = `${tripId}\u0000${start}`;
       const previous = lastCall.get(key);
       if (!previous || sequence > previous.sequence)
         lastCall.set(key, { sequence, call });
+      if (passing) continue;
+      if (!stations.has(stopId)) stations.set(stopId, []);
+      stations.get(stopId).push(call);
     }
   }
   for (const { call } of lastCall.values()) call.last = true;
   for (const calls of stations.values()) calls.sort((a, b) => a.at - b.at);
 
   const trips = new Map();
-  for (const [tripId, route] of tripRoutes) {
+  for (const [tripId, row] of tripRows) {
     if (!firstStop.has(tripId)) continue;
+    const named = describe(row, routes.get(row.route_id) ?? null) || {};
     trips.set(
       tripId,
       Object.freeze({
-        line: route?.line ?? null,
-        destination: route?.destination ?? null,
+        line: clean(named.line),
+        train: clean(named.train),
+        destination: clean(named.destination),
+        destinationStopId: clean(named.destinationStopId),
         originStopId: firstStop.get(tripId).stopId,
+        stops: stopCounts.get(tripId) || 0,
       }),
     );
   }
@@ -237,6 +275,63 @@ export async function buildCercaniasTimetable({
     days: days.map(({ day }) => day),
     builtFor: timetableDay(now, timeZone),
   };
+}
+
+/**
+ * The train number in a Cercanías trip id: service (`1001J`), train
+ * (`19799`), line (`C1`, `R2N`).
+ */
+const CERCANIAS_TRIP_TRAIN = /^\d{4}[A-Z](\d+?)[A-Z][A-Za-z0-9]*$/;
+
+/** Train numbers compare as numbers: LD writes `00190`, Cercanías `190`. */
+function trainNumber(text) {
+  return /^\d{1,8}$/.test(String(text ?? '')) ? String(Number(text)) : null;
+}
+
+/**
+ * Cercanías: the line is `route_short_name`, the destination the second
+ * half of the fixed-width `route_long_name`, the train number in the trip
+ * id. One service id per network and date, and no `calendar_dates.txt`.
+ * @param {{files: Map<string, string>,
+ *   lines: (name: string) => AsyncIterable<string>,
+ *   now?: number, timeZone?: string}} options
+ * @returns {Promise<Timetable>}
+ */
+export function buildCercaniasTimetable(options) {
+  return buildGtfsTimetable({
+    ...options,
+    describe: (trip, route) => ({
+      line: route?.route_short_name,
+      train: trainNumber(CERCANIAS_TRIP_TRAIN.exec(trip.trip_id)?.[1]),
+      destination: cercaniasRouteDestination(route?.route_long_name),
+    }),
+  });
+}
+
+/**
+ * AV/LD/MD: the service (AVE, ALVIA, MD…) and the train number name the
+ * trip (`AVE 3100`); the destination is the station code in characters
+ * 6–10 of `route_id`, named by the feed's station dictionary.
+ * `calendar_dates.txt` removes days from long services.
+ * @param {{files: Map<string, string>,
+ *   lines: (name: string) => AsyncIterable<string>,
+ *   now?: number, timeZone?: string}} options
+ * @returns {Promise<Timetable>}
+ */
+export function buildRenfeLdTimetable(options) {
+  return buildGtfsTimetable({
+    ...options,
+    describe: (trip, route) => {
+      const service = clean(route?.route_short_name);
+      const train = trainNumber(trip.trip_short_name);
+      return {
+        line: [service, train].filter(Boolean).join(' ') || null,
+        train,
+        destinationStopId:
+          /^\d{5}(\d{5})/.exec(String(trip.route_id ?? ''))?.[1] ?? null,
+      };
+    },
+  });
 }
 
 /**

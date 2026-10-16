@@ -93,13 +93,59 @@ const DEFAULT_OVERLAY_HOST = Object.freeze({
 
 /**
  * Station networks whose card lists the next trains, and the Transit feed
- * that has them (`/api/transit/arrivals/<feed>/<code>`, built from the
- * feed's trip updates).
+ * that has them (`/api/transit/arrivals/<feed>/<code>`).
  */
 export const SPAIN_RAIL_ARRIVAL_FEEDS = Object.freeze({
   fgc: 'fgc-geotren',
   'renfe-cercanias': 'renfe-cercanias',
+  'renfe-ld': 'renfe-ld',
 });
+
+/**
+ * The feeds a station's card asks. A Cercanías station AV/LD/MD trains also
+ * call at (Sants, Chamartín…) is drawn once, as Cercanías, and asks both.
+ * @param {{network: string, alsoIn?: string[]}} station
+ * @returns {string[]}
+ */
+export function spainRailBoardFeeds(station) {
+  return [station?.network, ...(station?.alsoIn || [])]
+    .map((network) => SPAIN_RAIL_ARRIVAL_FEEDS[network])
+    .filter(Boolean);
+}
+
+/** A train both feeds list (Catalan regionals) within this is one train. */
+const SAME_TRAIN_MS = 30 * 60_000;
+
+/**
+ * One board from each feed's answer, in feed order: a train numbered the
+ * same within half an hour of an earlier feed's is that feed's (Cercanías
+ * names its line, R15, where AV/LD says REG.EXP. 15000).
+ * @param {Array<{arrivals: object[], fetchedAt?: number|null}>} answers
+ * @returns {{arrivals: object[], fetchedAt: number|null}}
+ */
+export function mergeSpainRailBoards(answers) {
+  const arrivals = [];
+  for (const answer of answers) {
+    for (const train of answer?.arrivals || []) {
+      const twin =
+        train?.train &&
+        arrivals.some(
+          (kept) =>
+            kept.train === train.train &&
+            Math.abs(kept.at - train.at) <= SAME_TRAIN_MS,
+        );
+      if (!twin) arrivals.push(train);
+    }
+  }
+  arrivals.sort((a, b) => a.at - b.at);
+  const times = answers
+    .map((answer) => answer?.fetchedAt)
+    .filter(Number.isFinite);
+  return {
+    arrivals,
+    fetchedAt: times.length ? Math.max(...times) : null,
+  };
+}
 /** Card repaint (countdown) and the age at which it asks again. */
 export const SPAIN_RAIL_CARD_TICK_MS = 5_000;
 export const SPAIN_RAIL_CARD_REFRESH_MS = 20_000;
@@ -281,6 +327,12 @@ export function spainRailStationsFromPack(pack, linesPack = null) {
               : null,
           });
       }
+      // Drawn once, as Cercanías, where AV/LD/MD trains call too.
+      const alsoIn =
+        network === 'renfe-cercanias' &&
+        Object.hasOwn(pack?.networks?.['renfe-ld'] || {}, code)
+          ? ['renfe-ld']
+          : [];
       stations.push({
         id: `${network}:${code}`,
         network,
@@ -289,6 +341,7 @@ export function spainRailStationsFromPack(pack, linesPack = null) {
         lat,
         lon,
         lines: [...served.values()],
+        ...(alsoIn.length ? { alsoIn } : {}),
       });
     }
   }
@@ -468,7 +521,7 @@ export function createSpainRailNetworkLayer({
   /**
    * The open station card's next trains: what the server last said, and
    * whether a request is out. `generation` drops answers for a closed card.
-   * @type {{station: object, feedId: string, data: object|null,
+   * @type {{station: object, feeds: string[], data: object|null,
    *   status: 'loading'|'ready'|'error', error: string|null, askedAt: number,
    *   inFlight: boolean, retrySoon?: boolean, generation: number,
    *   position: Cesium.Cartesian3}|null}
@@ -500,63 +553,62 @@ export function createSpainRailNetworkLayer({
     if (!board || board.inFlight) return;
     board.inFlight = true;
     board.askedAt = now();
-    const { generation, feedId, station } = board;
-    let data = null;
-    let error = null;
-    try {
-      const response = await fetchImpl(
-        `/api/transit/arrivals/${encodeURIComponent(feedId)}/${encodeURIComponent(station.code)}`,
-      );
-      if (response.ok) {
-        data = await response.json();
-        if (!Array.isArray(data?.arrivals)) {
-          data = null;
-          error = 'Malformed arrivals answer';
+    const { generation, feeds, station } = board;
+    const answers = await Promise.all(
+      feeds.map(async (feedId) => {
+        try {
+          const response = await fetchImpl(
+            `/api/transit/arrivals/${encodeURIComponent(feedId)}/${encodeURIComponent(station.code)}`,
+          );
+          if (!response.ok) return { status: response.status };
+          const data = await response.json();
+          return Array.isArray(data?.arrivals)
+            ? { data }
+            : { error: 'Malformed arrivals answer' };
+        } catch {
+          return { error: 'Network error' };
         }
-      } else {
-        error =
-          response.status === 404
-            ? 'No train times for this station'
-            : response.status === 503 && station.network !== 'fgc'
-              ? 'Loading the Renfe timetable…'
-              : 'Next trains unavailable';
-        // The timetable takes seconds to load: ask again on the next tick.
-        board.retrySoon = response.status === 503;
-      }
-    } catch {
-      error = 'Network error';
-    }
+      }),
+    );
     if (_board?.generation !== generation) return;
     board.inFlight = false;
-    if (data) {
-      board.data = data;
+    // The timetables take seconds to load: ask again on the next tick.
+    board.retrySoon = answers.some((answer) => answer.status === 503);
+    const answered = answers.filter((answer) => answer.data);
+    if (answered.length) {
+      board.data = mergeSpainRailBoards(answered.map(({ data }) => data));
       board.status = 'ready';
       board.error = null;
-      board.retrySoon = false;
     } else {
+      const [first] = answers;
       board.status = 'error';
-      board.error = error;
+      board.error =
+        first?.error ??
+        (first?.status === 404
+          ? 'No train times for this station'
+          : first?.status === 503 && station.network !== 'fgc'
+            ? 'Loading the Renfe timetable…'
+            : 'Next trains unavailable');
     }
     _showCard(_selectedKey, 'station', station, board.position);
   }
 
   function _onTick() {
     if (!_board) return;
-    const wait =
-      _board.status === 'error' && _board.retrySoon
-        ? SPAIN_RAIL_CARD_TICK_MS
-        : SPAIN_RAIL_CARD_REFRESH_MS;
+    const wait = _board.retrySoon
+      ? SPAIN_RAIL_CARD_TICK_MS
+      : SPAIN_RAIL_CARD_REFRESH_MS;
     if (now() - _board.askedAt >= wait) void _askArrivals();
     _showCard(_selectedKey, 'station', _board.station, _board.position);
   }
 
   function _openBoard(station, position) {
-    const feedId = SPAIN_RAIL_ARRIVAL_FEEDS[station.network];
-    if (!feedId) return;
+    const feeds = spainRailBoardFeeds(station);
+    if (!feeds.length) return;
     _generation += 1;
     _board = {
       station,
-      feedId,
+      feeds,
       data: null,
       status: 'loading',
       error: null,

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildCercaniasTimetable,
+  buildRenfeLdTimetable,
   gtfsServiceDayStart,
   timetableDay,
 } from './renfeTimetable.js';
@@ -131,8 +132,11 @@ test('the timetable keeps yesterday, today and tomorrow, sorted per station', as
   assert.equal(stations.get('10000')[0].last, true);
   assert.deepEqual(trips.get('FRI100C1'), {
     line: 'C1',
+    train: null,
     destination: 'Aeropuerto-T4',
+    destinationStopId: null,
     originStopId: '18000',
+    stops: 3,
   });
   assert.equal(
     trips.get('FRI200C3').destination,
@@ -290,4 +294,104 @@ test('the service builds Cercanías boards from the daily timetable and live del
   } finally {
     service.close();
   }
+});
+
+// Hand-made GTFS in Renfe AV/LD's shapes: long services trimmed by
+// calendar_dates, unpadded times, one train sold as two trips, and a stop
+// it only passes. Not Renfe data.
+const LD_GTFS = {
+  'calendar.txt': [
+    'service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date',
+    'S-OCT,1,1,1,1,1,1,1,20261001,20261031',
+    'S-OFF,1,1,1,1,1,1,1,20261001,20261031',
+    'S-EXTRA,0,0,0,0,0,0,0,20261001,20261031',
+  ].join('\n'),
+  'calendar_dates.txt': [
+    'service_id,date,exception_type',
+    'S-OFF,20261016,2',
+    'S-EXTRA,20261016,1',
+  ].join('\n'),
+  'routes.txt': [
+    'route_id,agency_id,route_short_name,route_long_name,route_desc,route_type,route_url,route_color,route_text_color',
+    '6000071801VL001,1071,AVE,,,2,,F2F5F5,',
+    '6000004307VL001,1071,AVE,,,2,,F2F5F5,',
+    '7180165000GL001,1071,REG.EXP.,,,2,,F2F5F5,',
+  ].join('\n'),
+  'trips.txt': [
+    'route_id,service_id,trip_id,trip_headsign,trip_short_name,direction_id,block_id,shape_id,wheelchair_accessible',
+    '6000071801VL001,S-OCT,0312312026-10-16,,03123,,,,1',
+    '6000004307VL001,S-OCT,0312322026-10-16,,03123,,,,1',
+    '7180165000GL001,S-OFF,1506512026-10-16,,15065,,,,1',
+    '7180165000GL001,S-EXTRA,1506612026-10-16,,15066,,,,1',
+  ].join('\n'),
+  'stop_times.txt': [
+    'trip_id,arrival_time,departure_time,stop_id,stop_sequence,stop_headsign,pickup_type,drop_off_type,shape_dist_traveled',
+    '0312312026-10-16,12:27:00,12:27:00,60000,01,,0,1,',
+    '0312312026-10-16,13:40:00,13:41:00,04040,02,,1,1,',
+    '0312312026-10-16,15:00:00,15:00:00,71801,03,,1,0,',
+    '0312322026-10-16,12:27:00,12:27:00,60000,01,,0,1,',
+    '0312322026-10-16,15:00:00,15:02:00,71801,02,,0,0,',
+    '0312322026-10-16,16:00:00,16:00:00,04307,03,,1,0,',
+    '1506512026-10-16,12:33:00,12:33:00,71801,01,,0,1,',
+    '1506612026-10-16,12:40:00,12:40:00,71801,01,,0,1,',
+  ].join('\n'),
+};
+
+async function ldTimetable() {
+  const bytes = zipArchive(LD_GTFS);
+  const files = await readZipTextEntries(
+    bytes,
+    ['calendar.txt', 'calendar_dates.txt', 'routes.txt', 'trips.txt'],
+    1024 * 1024,
+  );
+  return buildRenfeLdTimetable({
+    files,
+    lines: (name) => zipEntryLines(bytes, name, 1024 * 1024),
+    now: NOW,
+  });
+}
+
+test('AV/LD days follow calendar_dates, and a stop only passed is not listed', async () => {
+  const { stations, trips } = await ldTimetable();
+  const sants = stations
+    .get('71801')
+    .filter(
+      (call) =>
+        call.at >= madrid('2026-10-16T00:00:00') &&
+        call.at < madrid('2026-10-17T00:00:00'),
+    );
+  assert.deepEqual(
+    sants.map(({ tripId }) => tripId),
+    ['1506612026-10-16', '0312312026-10-16', '0312322026-10-16'],
+    'the 15065 is off today; the 15066 runs today only',
+  );
+  assert.equal(stations.has('04040'), false, 'Zaragoza is passed through');
+  assert.deepEqual(trips.get('0312322026-10-16'), {
+    line: 'AVE 3123',
+    train: '3123',
+    destination: null,
+    destinationStopId: '04307',
+    originStopId: '60000',
+    stops: 3,
+  });
+  assert.equal(trips.get('0312312026-10-16').stops, 2);
+});
+
+test('a train sold as several trips is one row, named by its longest trip', async () => {
+  const tt = await ldTimetable();
+  const names = { '04307': 'Figueres-Vilafant', 71801: 'Barcelona-Sants' };
+  const board = buildTimetableArrivals({
+    stationId: '60000',
+    timetable: tt,
+    // Only the shorter trip has live data.
+    tripUpdates: new Map([['0312312026-10-16', { delaySec: 240, stops: [] }]]),
+    stopNames: names,
+    now: NOW,
+  });
+  const today = board.filter((row) => row.at < madrid('2026-10-17T00:00:00'));
+  assert.equal(today.length, 1);
+  assert.equal(today[0].line, 'AVE 3123');
+  assert.equal(today[0].destination, 'Figueres-Vilafant');
+  assert.equal(today[0].delaySec, 240);
+  assert.equal(today[0].at, madrid('2026-10-16T12:31:00'));
 });

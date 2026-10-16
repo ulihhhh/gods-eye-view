@@ -122,14 +122,17 @@ const MAX_LATE_MS = 90 * 60_000;
  * @param {{stationId: string,
  *   timetable: {stations: Map<string, Array<{tripId: string, at: number,
  *     last: boolean}>>, trips: Map<string, {line: string|null,
- *     destination: string|null, originStopId: string|null}>}|null,
+ *     train?: string|null, destination: string|null,
+ *     destinationStopId?: string|null, originStopId: string|null,
+ *     stops?: number}>}|null,
  *   tripUpdates?: Map<string, {delaySec: number|null,
  *     stops: Array<{stopId: string, time: number}>}>|null,
  *   vehicles?: object[]|null,
  *   stopNames?: Readonly<Record<string, string>>|null,
  *   now?: number, limit?: number}} options
  * @returns {Array<{tripId: string, at: number, scheduledAt: number,
- *   line: string|null, destination: string|null, origin: string|null,
+ *   line: string|null, train: string|null, destination: string|null,
+ *   origin: string|null,
  *   platform: string|null, delaySec: number|null, onTime: boolean|null,
  *   terminates: boolean, running: boolean, realtime: boolean}>}
  */
@@ -148,12 +151,17 @@ export function buildTimetableArrivals({
   for (const vehicle of Array.isArray(vehicles) ? vehicles : [])
     if (typeof vehicle?.tripId === 'string' && !byTrip.has(vehicle.tripId))
       byTrip.set(vehicle.tripId, vehicle);
-  const rows = [];
-  const seen = new Set();
+  /**
+   * One train per number and time: AV/LD sells one train as several trips
+   * (Madrid–Barcelona and Madrid–Figueres), and lists some twice.
+   * @type {Map<string, object[]>}
+   */
+  const trains = new Map();
   for (const call of calls) {
     if (call.at < now - MAX_LATE_MS) continue;
     if (call.at > now + HORIZON_MS) break;
-    if (seen.has(call.tripId)) continue;
+    const trip = timetable.trips?.get(call.tripId) ?? null;
+    const key = trip?.train ? `${trip.train}\u0000${call.at}` : call.tripId;
     const update = tripUpdates?.get(call.tripId) ?? null;
     const vehicle = byTrip.get(call.tripId) ?? null;
     const own = update?.stops?.find(
@@ -164,21 +172,37 @@ export function buildTimetableArrivals({
       : Number.isFinite(vehicle?.delaySec)
         ? vehicle.delaySec
         : null;
+    if (!trains.has(key)) trains.set(key, []);
+    trains.get(key).push({ call, trip, vehicle, own, delaySec });
+  }
+  const rows = [];
+  for (const variants of trains.values()) {
+    // The longest trip names the train; the first variant with live data
+    // times it.
+    const named = variants.reduce((best, variant) =>
+      (variant.trip?.stops ?? 0) > (best.trip?.stops ?? 0) ? variant : best,
+    );
+    const live =
+      variants.find((variant) => variant.own) ??
+      variants.find((variant) => Number.isFinite(variant.delaySec)) ??
+      variants.find((variant) => variant.vehicle) ??
+      named;
+    const { call, trip } = named;
+    const { vehicle, own, delaySec } = live;
     const at = own
       ? own.time
       : call.at + (Number.isFinite(delaySec) ? delaySec * 1000 : 0);
     if (at < now - DEPARTED_GRACE_MS || at > now + HORIZON_MS) continue;
-    seen.add(call.tripId);
-    const trip = timetable.trips?.get(call.tripId) ?? null;
     rows.push({
       tripId: call.tripId,
       at,
       scheduledAt: call.at,
       line: bounded(vehicle?.routeId, MAX_CODE_CHARS) ?? trip?.line ?? null,
+      train: trip?.train ?? null,
       destination:
         bounded(vehicle?.destination, MAX_NAME_CHARS) ??
         trip?.destination ??
-        null,
+        nameOf(stopNames, trip?.destinationStopId),
       origin:
         bounded(vehicle?.origin, MAX_NAME_CHARS) ??
         nameOf(stopNames, trip?.originStopId),

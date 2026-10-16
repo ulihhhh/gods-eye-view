@@ -363,6 +363,15 @@
   Mapillary only and hide while GOOGLE STREET VIEW is lit; its globe marker
   is a Google-blue view cone.
 
+- AV/LD/MD stations in Rail network (Spain) list their next trains as well
+  (`AVE 3123 → Figueres-Vilafant · 12:27 (5 min)`), from Renfe's AV/LD/MD
+  timetable for the day (`calendar_dates.txt` exceptions included, stops a
+  train only passes left out) and each train's live delay. A train Renfe
+  sells as several trips is listed once, named by its longest trip. A
+  Cercanías station AV/LD trains also call at (Sants, Chamartín…) lists
+  both, a train both list (Catalan regionals) once, under its Cercanías
+  line. The timetable builder is now generic (`buildGtfsTimetable`).
+
 - Clicking a Cercanías / Rodalies station in Rail network (Spain) lists its
   next trains too (`C1 → Aeropuerto-T4 · 12:08 (8 min) · platform 3 · +3
   min`). Renfe's trip updates time one stop per train, so the times come
