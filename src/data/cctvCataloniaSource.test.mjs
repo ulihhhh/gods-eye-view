@@ -8,6 +8,7 @@ import {
   CATALONIA_CAMERAS_URL,
   CATALONIA_MAX_CATALOG_BYTES,
 } from '../../server/providers/cctv/constants.js';
+import { decodeNumericEntities } from '../../server/providers/cctv/normalize.js';
 import {
   parseCataloniaXml,
   normalizeCataloniaImageUrl,
@@ -139,7 +140,7 @@ test('normalizeCataloniaImageUrl rewrites SCT RenderService links to the direct 
   );
 });
 
-test('normalizeCataloniaImageUrl accepts the other three registered hosts, upgraded to https', () => {
+test('normalizeCataloniaImageUrl accepts the other registered hosts, upgraded to https', () => {
   assert.equal(
     normalizeCataloniaImageUrl('http://www.bcn.cat/transit/imatges/a.gif'),
     'https://www.bcn.cat/transit/imatges/a.gif',
@@ -159,6 +160,11 @@ test('normalizeCataloniaImageUrl accepts the other three registered hosts, upgra
     '',
     'a look-alike host is rejected',
   );
+  assert.equal(
+    normalizeCataloniaImageUrl('https://unlisted-publisher.example/frame.gif'),
+    '',
+    'any host outside the allowlist is rejected',
+  );
   assert.equal(normalizeCataloniaImageUrl(''), '');
   assert.equal(normalizeCataloniaImageUrl('not a url'), '');
 });
@@ -176,13 +182,75 @@ test('normalizeCataloniaImageUrl rejects credential-bearing URLs on every allowe
   }
 });
 
+test("normalizeCataloniaImageUrl rejects explicit ports and paths outside each host's frame directory", () => {
+  // An allowlisted hostname alone would let catalog data aim the frame
+  // request at another service or path on that host.
+  for (const link of [
+    'http://www.bcn.cat:8080/transit/imatges/a.gif',
+    'https://emap.terrassa.cat:8443/it_terrassa/cam02.jpeg',
+    'http://mct.gencat.cat:8080/mct2bo/RenderService?sctidcam=nc87.gif',
+    'http://www.bcn.cat/admin/a.gif',
+    'http://www.bcn.cat/transit/imatges/',
+    'http://www.bcn.cat/transit/imatges/sub/a.gif',
+    'http://www.bcn.cat/transit/imatges/../../admin/a.gif',
+    'https://emap.terrassa.cat/other/cam02.jpeg',
+    'http://mct.gencat.cat/mct2bo/OtherService?sctidcam=nc87.gif',
+  ]) {
+    assert.equal(normalizeCataloniaImageUrl(link), '', link);
+  }
+});
+
+test('normalizeCataloniaImageUrl accepts only a bare image filename as the SCT sctidcam', () => {
+  for (const camId of [
+    '../../etc/passwd',
+    '..%2F..%2Fetc%2Fpasswd',
+    'nc87.png',
+    'nc87',
+    'nc87.gif/../x.gif',
+    'nc87.gif&nom=other.gif',
+    'nc-87.gif',
+  ]) {
+    const link = `http://mct.gencat.cat/mct2bo/RenderService?sctidcam=${encodeURIComponent(camId)}`;
+    assert.equal(normalizeCataloniaImageUrl(link), '', camId);
+  }
+  assert.equal(
+    normalizeCataloniaImageUrl(
+      'http://mct.gencat.cat/mct2bo/RenderService?sctidcam=CB10.JPEG',
+    ),
+    'http://mct.gencat.cat/mct2bo/TransitCamera?nom=CB10.JPEG&visualitzacio=imatge',
+  );
+});
+
+test('decodeNumericEntities decodes decimal and hex references and leaves invalid ones as written', () => {
+  assert.equal(decodeNumericEntities('Llu&#237;s'), 'Lluís');
+  assert.equal(decodeNumericEntities('Llu&#xED;s &#x1F6A6;'), 'Lluís 🚦');
+  assert.equal(decodeNumericEntities('Llu&#XeD;s'), 'Lluís');
+  for (const raw of [
+    'a&#99999999999999999999999;b',
+    'a&#1114112;b',
+    'a&#x110000;b',
+    'a&#xFFFFFFFFFFFFFFFFFFFF;b',
+    'a&#55296;b',
+    'a&#xDFFF;b',
+    'a&#0;b',
+  ]) {
+    assert.equal(decodeNumericEntities(raw), raw, raw);
+  }
+});
+
 test('cataloniaCameraName joins road and municipality, skipping a redundant municipality', () => {
-  assert.equal(cataloniaCameraName('C-58', 'Nus Trinitat'), 'C-58 (Nus Trinitat)');
+  assert.equal(
+    cataloniaCameraName('C-58', 'Nus Trinitat'),
+    'C-58 (Nus Trinitat)',
+  );
   assert.equal(
     cataloniaCameraName('Plaça Urquinaona', 'Barcelona'),
     'Plaça Urquinaona (Barcelona)',
   );
-  assert.equal(cataloniaCameraName('Barcelona Ronda Litoral', 'Barcelona'), 'Barcelona Ronda Litoral');
+  assert.equal(
+    cataloniaCameraName('Barcelona Ronda Litoral', 'Barcelona'),
+    'Barcelona Ronda Litoral',
+  );
   assert.equal(cataloniaCameraName('', ''), 'Càmera de trànsit');
   assert.equal(cataloniaCameraName('C-58', ''), 'C-58');
 });
@@ -223,7 +291,7 @@ test('Catalonia loader keeps SCT, Barcelona, Terrassa and Andorra cameras with p
         font: 'Terrassa',
       }),
       cataloniaFeature({
-        fid: 'cameres.fid-4',
+        fid: 'cameres.fid-6',
         lon: '1.50065231',
         lat: '42.49383514',
         carretera: 'Av. Santa Coloma PK 1+950',
@@ -234,15 +302,15 @@ test('Catalonia loader keeps SCT, Barcelona, Terrassa and Andorra cameras with p
       }),
       // Rejected: link host not in the allowlist.
       cataloniaFeature({
-        fid: 'cameres.fid-5',
+        fid: 'cameres.fid-4',
         lon: '2.0',
         lat: '41.5',
         link: 'https://example.com/fake.gif',
         font: 'SCT',
       }),
-      // Rejected: outside the Catalonia+Andorra bounding box.
+      // Rejected: outside the Catalonia bounding box.
       cataloniaFeature({
-        fid: 'cameres.fid-6',
+        fid: 'cameres.fid-5',
         lon: '-3.7',
         lat: '40.4',
         link: 'http://mct.gencat.cat/mct2bo/RenderService?sctidcam=x.gif',
@@ -264,10 +332,16 @@ test('Catalonia loader keeps SCT, Barcelona, Terrassa and Andorra cameras with p
   );
   assert.deepEqual(
     cameras.map((camera) => camera.id).sort(),
-    ['cat-1', 'cat-2', 'cat-3', 'cat-4'],
+    [
+      'cat-app-mobilitat-ad-gifs-stacoloma-gif',
+      'cat-emap-terrassa-cat-it-terrassa-cam02-jpeg',
+      'cat-sct-nc87',
+      'cat-www-bcn-cat-transit-imatges-plurquinaona-gif',
+    ],
+    'the off-allowlist link (fid-4) and the out-of-bbox row (fid-5) are excluded',
   );
 
-  const sct = cameras.find((c) => c.id === 'cat-1');
+  const sct = cameras.find((c) => c.id === 'cat-sct-nc87');
   assert.equal(sct.name, 'C-58 (Nus Trinitat)');
   assert.equal(sct.provider, 'Servei Català de Trànsit');
   assert.equal(sct.credit, '', 'SCT is the publisher, no separate credit');
@@ -279,16 +353,22 @@ test('Catalonia loader keeps SCT, Barcelona, Terrassa and Andorra cameras with p
   assert.equal(sct.groundElevationM, 80);
   assert.equal(sct.headingConfidence, 'low', 'the feed carries no heading');
 
-  const bcn = cameras.find((c) => c.id === 'cat-2');
+  const bcn = cameras.find(
+    (c) => c.id === 'cat-www-bcn-cat-transit-imatges-plurquinaona-gif',
+  );
   assert.equal(bcn.credit, 'Ajuntament de Barcelona');
   assert.equal(bcn.city, 'Barcelona');
   assert.equal(bcn.groundElevationM, 20);
 
-  const terrassa = cameras.find((c) => c.id === 'cat-3');
+  const terrassa = cameras.find(
+    (c) => c.id === 'cat-emap-terrassa-cat-it-terrassa-cam02-jpeg',
+  );
   assert.equal(terrassa.credit, 'Ajuntament de Terrassa');
   assert.equal(terrassa.groundElevationM, 270);
 
-  const andorra = cameras.find((c) => c.id === 'cat-4');
+  const andorra = cameras.find(
+    (c) => c.id === 'cat-app-mobilitat-ad-gifs-stacoloma-gif',
+  );
   assert.equal(andorra.credit, "Govern d'Andorra");
   assert.equal(andorra.city, 'Andorra');
   assert.equal(andorra.groundElevationM, 1100);
@@ -427,7 +507,7 @@ test('CCTV catalog merges Catalonia cameras and CCTV_CATALONIA_ENABLED=0 skips t
   const sources = await createCctvCatalog({ sourceRoot })();
   assert.deepEqual(
     sources.map((source) => source.id),
-    ['cat-1'],
+    ['cat-sct-nc87'],
   );
 
   process.env.CCTV_CATALONIA_ENABLED = '0';
@@ -435,8 +515,196 @@ test('CCTV catalog merges Catalonia cameras and CCTV_CATALONIA_ENABLED=0 skips t
   assert.deepEqual(await createCctvCatalog({ sourceRoot })(), []);
   assert.ok(requested.length > 0, 'the other live packs still load');
   assert.equal(
-    requested.includes(CATALONIA_CAMERAS_URL),
+    requested.some(([url]) => url === CATALONIA_CAMERAS_URL),
     false,
     'a disabled pack makes no request',
+  );
+});
+
+/** The two SCT, one Barcelona and one Terrassa rows of a real feed snapshot,
+ * under one upstream run's `fid` prefix. */
+function snapshotFeed(fidPrefix) {
+  return cataloniaFeed([
+    cataloniaFeature({
+      fid: `cameres.fid-${fidPrefix}_386f`,
+      lon: '2.1849528',
+      lat: '41.45989301',
+      carretera: 'C-58',
+      link: 'http://mct.gencat.cat/mct2bo/RenderService?sctidcam=nc87.gif',
+      font: 'SCT',
+    }),
+    cataloniaFeature({
+      fid: `cameres.fid-${fidPrefix}_b48`,
+      lon: '2.18',
+      lat: '41.46',
+      carretera: 'C-31',
+      link: 'http://mct.gencat.cat/mct2bo/RenderService?sctidcam=nc85.gif',
+      font: 'SCT',
+    }),
+    cataloniaFeature({
+      fid: `cameres.fid-${fidPrefix}_1c2`,
+      lon: '2.17228212',
+      lat: '41.38890733',
+      carretera: 'Plaça Urquinaona',
+      municipi: 'Barcelona',
+      link: 'http://www.bcn.cat/transit/imatges/PlUrquinaona.gif?a=1',
+      font: 'IMI',
+    }),
+    cataloniaFeature({
+      fid: `cameres.fid-${fidPrefix}_1c3`,
+      lon: '2.0111',
+      lat: '41.5636',
+      municipi: 'Terrassa',
+      link: 'https://emap.terrassa.cat/it_terrassa/cam01.jpeg?a=1 &#13;',
+      font: 'Terrassa',
+    }),
+  ]);
+}
+
+async function loadFromFeed(t, xml) {
+  t.mock.method(globalThis, 'fetch', async () => {
+    return new Response(xml, {
+      status: 200,
+      headers: { 'Content-Type': 'application/xml' },
+    });
+  });
+  try {
+    return await loadCataloniaSourcesFromOpenData();
+  } finally {
+    t.mock.restoreAll();
+  }
+}
+
+test('Catalonia camera ids survive an upstream restart that changes every fid', async (t) => {
+  quiet(t);
+  withEnv(t, { CCTV_CATALONIA_MAX_SOURCES: undefined });
+  // The fid embeds the upstream server-start stamp: the PR fixture's
+  // 1a0a06bea1c run and a later 1a140311953 run name the same cameras.
+  const before = await loadFromFeed(t, snapshotFeed('52bf6eca_1a0a06bea1c'));
+  const after = await loadFromFeed(t, snapshotFeed('52bf6eca_1a140311953'));
+  const ids = (cameras) => cameras.map((camera) => camera.id).sort();
+  assert.deepEqual(ids(before), [
+    'cat-emap-terrassa-cat-it-terrassa-cam01-jpeg',
+    'cat-sct-nc85',
+    'cat-sct-nc87',
+    'cat-www-bcn-cat-transit-imatges-plurquinaona-gif',
+  ]);
+  assert.deepEqual(ids(after), ids(before));
+});
+
+test('Catalonia loader collapses rows the feed repeats for one camera', async (t) => {
+  quiet(t);
+  withEnv(t, { CCTV_CATALONIA_MAX_SOURCES: undefined });
+  // The live feed lists nc85, cb5, cb10, cb25 and cd17 twice each, under
+  // different fids.
+  const row = (fid, camId) =>
+    cataloniaFeature({
+      fid,
+      lon: '2.18',
+      lat: '41.46',
+      carretera: 'C-31',
+      link: `http://mct.gencat.cat/mct2bo/RenderService?sctidcam=${camId}`,
+      font: 'SCT',
+    });
+  const cameras = await loadFromFeed(
+    t,
+    cataloniaFeed([
+      row('cameres.fid-x_1', 'nc85.gif'),
+      row('cameres.fid-x_2', 'cb5.gif'),
+      row('cameres.fid-x_3', 'nc85.gif'),
+      row('cameres.fid-x_4', 'cb5.gif'),
+      row('cameres.fid-x_5', 'cb10.gif'),
+    ]),
+  );
+  assert.deepEqual(cameras.map((camera) => camera.id).sort(), [
+    'cat-sct-cb10',
+    'cat-sct-cb5',
+    'cat-sct-nc85',
+  ]);
+});
+
+test('Catalonia loader drops ported and bad-sctidcam links but keeps the rest', async (t) => {
+  quiet(t);
+  withEnv(t, { CCTV_CATALONIA_MAX_SOURCES: undefined });
+  const cameras = await loadFromFeed(
+    t,
+    cataloniaFeed([
+      cataloniaFeature({
+        fid: 'cameres.fid-x_1',
+        lon: '2.17',
+        lat: '41.39',
+        link: 'http://www.bcn.cat:8080/transit/imatges/PlUrquinaona.gif?a=1',
+        font: 'IMI',
+      }),
+      cataloniaFeature({
+        fid: 'cameres.fid-x_2',
+        lon: '2.0111',
+        lat: '41.5636',
+        link: 'https://emap.terrassa.cat:8443/it_terrassa/cam02.jpeg?a=1',
+        font: 'Terrassa',
+      }),
+      cataloniaFeature({
+        fid: 'cameres.fid-x_3',
+        lon: '2.18',
+        lat: '41.46',
+        link: 'http://mct.gencat.cat/mct2bo/RenderService?sctidcam=../../etc/passwd',
+        font: 'SCT',
+      }),
+      cataloniaFeature({
+        fid: 'cameres.fid-x_4',
+        lon: '2.18',
+        lat: '41.46',
+        link: 'http://mct.gencat.cat/mct2bo/RenderService?sctidcam=nc87.gif',
+        font: 'SCT',
+      }),
+    ]),
+  );
+  assert.deepEqual(
+    cameras.map((camera) => [camera.id, camera.url]),
+    [
+      [
+        'cat-sct-nc87',
+        'http://mct.gencat.cat/mct2bo/TransitCamera?nom=nc87.gif&visualitzacio=imatge',
+      ],
+    ],
+  );
+});
+
+test('a malformed numeric entity in one row neither throws nor empties the Catalonia pack', async (t) => {
+  quiet(t);
+  withEnv(t, { CCTV_CATALONIA_MAX_SOURCES: undefined });
+  const cameras = await loadFromFeed(
+    t,
+    cataloniaFeed([
+      cataloniaFeature({
+        fid: 'cameres.fid-x_1',
+        lon: '2.18',
+        lat: '41.46',
+        carretera: 'C-31 &#99999999999999999999;',
+        municipi: 'Bad&#xD800;',
+        link: 'http://mct.gencat.cat/mct2bo/RenderService?sctidcam=nc85.gif',
+        font: 'SCT',
+      }),
+      cataloniaFeature({
+        fid: 'cameres.fid-x_2',
+        lon: '2.18',
+        lat: '41.46',
+        carretera: 'Pla&#xE7;a Catalunya',
+        municipi: 'Llinars del Vall&#232;s',
+        link: 'http://mct.gencat.cat/mct2bo/RenderService?sctidcam=nc87.gif',
+        font: 'SCT',
+      }),
+    ]),
+  );
+  const byId = new Map(cameras.map((camera) => [camera.id, camera]));
+  assert.equal(cameras.length, 2);
+  assert.equal(
+    byId.get('cat-sct-nc85').name,
+    'C-31 &#99999999999999999999; (Bad&#xD800;)',
+    'an invalid reference is kept as written',
+  );
+  assert.equal(
+    byId.get('cat-sct-nc87').name,
+    'Plaça Catalunya (Llinars del Vallès)',
   );
 });

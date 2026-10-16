@@ -348,8 +348,12 @@ export function createIngestion({ state, services, parts, source }) {
     for (const record of records) {
       if (isStaleVehicleFix(record, now, fetchedAt)) continue;
       const key = transitVehicleKey(feed.id, record.id);
-      const mode = transitModeFor(feed, record.routeId);
-      const modeInferred = !transitModeResolved(feed, record.routeId);
+      const mode = transitModeFor(feed, record.routeId, record.id);
+      const modeInferred = !transitModeResolved(
+        feed,
+        record.routeId,
+        record.id,
+      );
       // The operator filled this report's position with something other than
       // the vehicle's place: the vehicle stays, the position is not used.
       const untrusted = record.positionUntrusted === true;
