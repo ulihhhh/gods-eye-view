@@ -32,6 +32,8 @@ import {
   transitUpstreamHeaders,
 } from '../data/transitProxy.js';
 import { indexTripUpdates } from '../data/transitServiceFields.js';
+import { decodeAlerts } from '../data/gtfsAlerts.js';
+import { publicTransitAlerts } from '../data/transitServiceFields.js';
 import {
   buildTimetableArrivals,
   buildTransitArrivals,
@@ -124,6 +126,8 @@ export const TRANSIT_RECENT_MAX_FIXES = 8;
  *   GET /api/transit/vehicles/<feedId>  → decoded snapshot as JSON
  *   GET /api/transit/arrivals/<feedId>/<stationId> → the station's next
  *       trains (feeds with `tripUpdates`; see src/data/transitArrivals.js)
+ *   GET /api/transit/alerts/<feedId>    → the feed's active service alerts
+ *       (feeds with `alerts`; see src/data/gtfsAlerts.js)
  *
  * Only URLs in `src/data/transitFeeds.js` are ever fetched — the browser
  * names a registered id, never a URL (SECURITY.md). Redirects are resolved hop
@@ -222,24 +226,40 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
     return load.promise;
   }
 
-  /** @type {Map<string, {at: number, fetchedAt: number|null, index: Map<string, object>|null, promise: Promise<object|null>|null}>} */
-  const tripUpdateLoads = new Map();
+  /**
+   * GTFS-Realtime companions of a feed's positions, by registry hook: the
+   * TripUpdates index and the service Alerts.
+   */
+  const COMPANIONS = Object.freeze({
+    tripUpdates: Object.freeze({
+      decode: indexTripUpdates,
+      label: 'trip updates',
+    }),
+    alerts: Object.freeze({ decode: decodeAlerts, label: 'alerts' }),
+  });
+
+  /** @type {Map<string, {at: number, fetchedAt: number|null, index: object|null, promise: Promise<object|null>|null}>} feed id + hook → load */
+  const companionLoads = new Map();
+  const companionKey = (feed, hook) => `${feed.id}\u0000${hook}`;
 
   /**
-   * The feed's TripUpdates index (registry `tripUpdates`), fetched at most
-   * once per its own interval (`minIntervalMs`, else the proxy TTL) and
-   * shared by every position refresh. A failed fetch keeps the last index
-   * while it is younger than TRANSIT_TRIP_UPDATES_STALE_MS, and is not
-   * retried before the interval passes. Never rejects: positions are served
-   * without next-stop times rather than not at all.
+   * One of the feed's GTFS-Realtime companions (registry `tripUpdates` or
+   * `alerts`: `{url, minIntervalMs?}`), fetched at most once per its own
+   * interval (`minIntervalMs`, else the proxy TTL) and shared by every
+   * request. A failed fetch keeps the last answer while it is younger than
+   * TRANSIT_TRIP_UPDATES_STALE_MS, and is not retried before the interval
+   * passes. Never rejects: positions are served without it rather than not
+   * at all.
    * @param {object} feed
+   * @param {'tripUpdates'|'alerts'} hook
    * @param {number} now
-   * @returns {Promise<Map<string, object>|null>}
+   * @returns {Promise<object|null>}
    */
-  function tripUpdatesFor(feed, now) {
-    const source = feed.tripUpdates;
+  function companionFor(feed, hook, now) {
+    const source = feed[hook];
     if (!source?.url) return Promise.resolve(null);
-    const known = tripUpdateLoads.get(feed.id);
+    const key = companionKey(feed, hook);
+    const known = companionLoads.get(key);
     if (known?.promise) return known.promise;
     const usable = (load) =>
       load?.index && now - load.fetchedAt < TRANSIT_TRIP_UPDATES_STALE_MS
@@ -273,12 +293,12 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
           response,
           TRANSIT_PROXY_MAX_BODY_BYTES,
         );
-        load.index = indexTripUpdates(bytes);
+        load.index = COMPANIONS[hook].decode(bytes);
         load.fetchedAt = now;
       } catch (error) {
         if (!closed)
           console.warn(
-            `[transit] ${feed.id} trip updates unavailable:`,
+            `[transit] ${feed.id} ${COMPANIONS[hook].label} unavailable:`,
             error?.message || error,
           );
       } finally {
@@ -289,9 +309,16 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
       }
       return usable(load);
     })();
-    tripUpdateLoads.set(feed.id, load);
+    companionLoads.set(key, load);
     return load.promise;
   }
+
+  /** The feed's TripUpdates index (`tripId → {delaySec, stops}`). */
+  const tripUpdatesFor = (feed, now) => companionFor(feed, 'tripUpdates', now);
+  /** The feed's service alerts (src/data/gtfsAlerts.js). */
+  const alertsFor = (feed, now) => companionFor(feed, 'alerts', now);
+  const companionFetchedAt = (feed, hook) =>
+    companionLoads.get(companionKey(feed, hook))?.fetchedAt ?? null;
 
   /** @type {Map<string, {at: number, lookup: Map<string, object>|null, timetable: object|null, etag: string|null, lastModified: string|null, loading: boolean}>} */
   const tripDetailLoads = new Map();
@@ -482,6 +509,7 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
     const previous = cache.get(feed.id);
     // Asked beside the positions, not after them.
     const tripUpdates = tripUpdatesFor(feed, now);
+    const alerts = alertsFor(feed, now);
     try {
       const { response, finalUrl } = await fetchTransitFeed(
         feed,
@@ -525,10 +553,11 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
         response,
         TRANSIT_PROXY_MAX_BODY_BYTES,
       );
-      const [stopNames, stopPlaces, tripIndex] = await Promise.all([
+      const [stopNames, stopPlaces, tripIndex, alertList] = await Promise.all([
         stopDictionaryFor(feed, 'stopNames', now),
         stopDictionaryFor(feed, 'stopPlaces', now),
         tripUpdates,
+        alerts,
       ]);
       const snapshot = yieldShared(
         feed,
@@ -537,6 +566,7 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
           stopPlaces,
           tripUpdates: tripIndex,
           tripDetails: tripDetailsFor(feed, now),
+          alerts: alertList,
         }),
       );
       if (closed) throw new Error('Transit provider closed');
@@ -620,7 +650,7 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
       feedId: feed.id,
       stationId,
       station: stopNames?.[stationId] ?? null,
-      fetchedAt: tripUpdateLoads.get(feed.id)?.fetchedAt ?? null,
+      fetchedAt: companionFetchedAt(feed, 'tripUpdates'),
       positions: Array.isArray(vehicles),
       tripUpdates: Boolean(index),
       ...(scheduled ? { timetable: timetable.builtFor } : {}),
@@ -706,6 +736,31 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
       );
     }
     if (route.route === 'arrivals') return arrivals(feed, route.stationId, url);
+    if (route.route === 'alerts') {
+      const list = await alertsFor(feed, now);
+      if (!list)
+        return reply(
+          503,
+          JSON.stringify({ error: 'Alerts unavailable', feedId: feed.id }),
+          {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store',
+            'Retry-After': '60',
+          },
+        );
+      return reply(
+        200,
+        JSON.stringify({
+          feedId: feed.id,
+          fetchedAt: companionFetchedAt(feed, 'alerts'),
+          alerts: publicTransitAlerts(list, now),
+        }),
+        {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Cache-Control': 'public, max-age=60',
+        },
+      );
+    }
     const cached = cache.get(feed.id);
     const ttlMs = transitFeedTtlMs(feed);
     const feedTtlSeconds = Math.ceil(ttlMs / 1000);

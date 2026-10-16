@@ -38,6 +38,8 @@ const STATIONS_URL = '/api/tmb/stations';
 const AMB_STOPS_URL = '/api/amb/stops';
 const TMB_BUS_LINES_URL = '/api/tmb/bus-lines';
 const AMB_LINES_URL = '/api/amb/lines';
+const TMB_ALERTS_URL = '/api/tmb/alerts';
+const AMB_ALERTS_URL = '/api/amb/alerts';
 
 /** Arrivals URL of a station or stop. */
 function arrivalsUrl(kind, id) {
@@ -276,6 +278,8 @@ export const TMB_ARRIVALS_DEFAULT_PARAMS = Object.freeze({
   tmbBus: true,
   ambBus: true,
   lines: true,
+  // Marks the stations, stops and metro lines with service alerts.
+  alerts: false,
 });
 
 const TMB_ARRIVALS_CHIPS = Object.freeze([
@@ -291,7 +295,39 @@ const TMB_ARRIVALS_CHIPS = Object.freeze([
     label: 'LINES',
     title: 'Metro and bus routes (stops stay)',
   }),
+  Object.freeze({
+    key: 'alerts',
+    label: 'ALERTS',
+    title: 'Mark stations, stops and metro lines with service alerts',
+  }),
 ]);
+
+/** The mark of a place or line with an alert: amber, as on the cards. */
+const ALERT_RGB = [255, 176, 0];
+const ALERT_HALO_WIDTH_PX = 9;
+/** How often the ALERTS pill asks again while on. */
+export const TMB_ALERT_MARKS_REFRESH_MS = 120_000;
+
+/**
+ * Entity ids the ALERTS pill marks. An AMB stop TMB also serves is drawn as
+ * TMB's bus stop (`000108` is `108`).
+ * @param {{metro?: string[], bus?: string[]}|null} tmb `/api/tmb/alerts`
+ * @param {{stops?: string[]}|null} amb `/api/amb/alerts`
+ * @param {Map<string, object>} places entity id → place
+ * @returns {Set<string>}
+ */
+export function tmbAlertedEntityIds(tmb, amb, places) {
+  const ids = new Set();
+  for (const id of tmb?.metro || []) ids.add(tmbPlaceEntityId('metro', id));
+  for (const id of tmb?.bus || []) ids.add(tmbPlaceEntityId('bus', id));
+  for (const id of amb?.stops || []) {
+    const own = tmbPlaceEntityId('amb', id);
+    ids.add(
+      places?.has(own) ? own : tmbPlaceEntityId('bus', String(Number(id))),
+    );
+  }
+  return new Set([...ids].filter((id) => places?.has(id)));
+}
 
 /**
  * Whether the pills show a place. A stop both operators serve is drawn as
@@ -414,6 +450,13 @@ export function createTmbArrivalsLayer({
   let _clickHandler = null;
   /** @type {Cesium.GroundPolylinePrimitive|null} metro line geometry */
   let _linesPrimitive = null;
+  /** The metro lines drawn, for the ALERTS pill's halo. */
+  let _metroLines = [];
+  /** What the ALERTS pill marks: place entity ids and metro line names. */
+  let _alertMarks = { places: new Set(), lines: new Set() };
+  let _alertHalo = null;
+  let _alertTick = null;
+  let _alertAnswers = { tmb: null, amb: null };
   /** Bus route geometry per operator, and the server fetch time drawn. */
   const _busLines = {
     tmb: { primitive: null, key: null },
@@ -435,6 +478,9 @@ export function createTmbArrivalsLayer({
   function _applyVisibility() {
     if (_linesPrimitive)
       _linesPrimitive.show = _enabled && _params.metro && _params.lines;
+    if (_alertHalo)
+      _alertHalo.show =
+        _enabled && _params.alerts && _params.metro && _params.lines;
     if (_busLines.tmb.primitive)
       _busLines.tmb.primitive.show =
         _enabled && _params.tmbBus && _params.lines;
@@ -551,6 +597,116 @@ export function createTmbArrivalsLayer({
       console.warn('[Data:TmbArrivals] bus routes fetch error:', error);
       return { lines: [], fetchedAt: null };
     }
+  }
+
+  function _removeAlertHalo() {
+    if (_alertHalo && _viewer?.scene?.groundPrimitives)
+      _viewer.scene.groundPrimitives.remove(_alertHalo);
+    _alertHalo = null;
+  }
+
+  /** Restyle the places and redraw the halo from the last answers. */
+  function _applyAlertMarks() {
+    const on = _enabled && _params.alerts;
+    _alertMarks = on
+      ? {
+          places: tmbAlertedEntityIds(
+            _alertAnswers.tmb,
+            _alertAnswers.amb,
+            _places,
+          ),
+          lines: new Set(_alertAnswers.tmb?.lines || []),
+        }
+      : { places: new Set(), lines: new Set() };
+    if (_dataSource) {
+      _dataSource.entities.suspendEvents();
+      for (const entity of _dataSource.entities.values) {
+        const entry = _places.get(entity.id);
+        if (!entry || !entity.point) continue;
+        const marked = _alertMarks.places.has(entity.id);
+        const metro = entry.kind === 'metro';
+        entity.point.outlineColor = marked
+          ? Cesium.Color.fromBytes(...ALERT_RGB, 255)
+          : COLOR_OUTLINE;
+        entity.point.outlineWidth = marked ? 3 : 1;
+        entity.point.pixelSize = (metro ? 9 : 6) + (marked ? 3 : 0);
+      }
+      _dataSource.entities.resumeEvents();
+    }
+    _removeAlertHalo();
+    const lines = _metroLines.filter((line) =>
+      _alertMarks.lines.has(line.name),
+    );
+    let supported = false;
+    try {
+      supported =
+        lines.length > 0 &&
+        Boolean(_viewer?.scene?.groundPrimitives) &&
+        Cesium.GroundPolylinePrimitive.isSupported(_viewer.scene);
+    } catch {
+      supported = false; // no WebGL context to ask
+    }
+    if (supported) {
+      const color = Cesium.ColorGeometryInstanceAttribute.fromColor(
+        Cesium.Color.fromBytes(...ALERT_RGB, 150),
+      );
+      _alertHalo = _viewer.scene.groundPrimitives.add(
+        new Cesium.GroundPolylinePrimitive({
+          geometryInstances: lines.flatMap((line) =>
+            line.paths.map(
+              (path) =>
+                new Cesium.GeometryInstance({
+                  geometry: new Cesium.GroundPolylineGeometry({
+                    positions: Cesium.Cartesian3.fromDegreesArray(path),
+                    width: ALERT_HALO_WIDTH_PX,
+                  }),
+                  attributes: { color },
+                }),
+            ),
+          ),
+          appearance: new Cesium.PolylineColorAppearance(),
+          classificationType: Cesium.ClassificationType.BOTH,
+          allowPicking: false,
+          asynchronous: true,
+          show: false,
+        }),
+      );
+    }
+    _applyVisibility();
+  }
+
+  /** Ask both operators which places have alerts; either may fail alone. */
+  async function _askAlertMarks() {
+    const read = async (url) => {
+      try {
+        const response = await fetchImpl(url);
+        return response.ok ? await response.json() : null;
+      } catch {
+        return null;
+      }
+    };
+    const [tmb, amb] = await Promise.all([
+      read(TMB_ALERTS_URL),
+      read(AMB_ALERTS_URL),
+    ]);
+    _alertAnswers = { tmb, amb };
+    if (_params.alerts) _applyAlertMarks();
+  }
+
+  /** Start or stop asking with the ALERTS pill. */
+  function _syncAlertPill() {
+    const on = _enabled && _params.alerts;
+    if (on && _alertTick === null) {
+      void _askAlertMarks();
+      _alertTick = setIntervalImpl(
+        () => void _askAlertMarks(),
+        TMB_ALERT_MARKS_REFRESH_MS,
+      );
+    } else if (!on && _alertTick !== null) {
+      clearIntervalImpl(_alertTick);
+      _alertTick = null;
+    }
+    _applyAlertMarks();
   }
 
   function _removeMetroLines() {
@@ -846,13 +1002,14 @@ export function createTmbArrivalsLayer({
       registerPickOwner(LAYER_ID, (pickedId) =>
         Boolean(parseTmbPlaceEntityId(pickedId)),
       );
+      _syncAlertPill();
     },
 
     disable() {
       _enabled = false;
       _clearSelection();
       if (_dataSource) _dataSource.show = false;
-      _applyVisibility();
+      _syncAlertPill();
       overlayHost.setVisible(TMB_ARRIVALS_SELECTED_OVERLAY_SOURCE_ID, false);
       _removeClickHandler();
       unregisterPickOwner(LAYER_ID);
@@ -879,8 +1036,12 @@ export function createTmbArrivalsLayer({
       _dataSource.entities.removeAll();
       for (const entity of entities) _dataSource.entities.add(entity);
       _dataSource.entities.resumeEvents();
-      if (tmb.catalog) _drawMetroLines(tmb.catalog.lines);
-      _applyVisibility();
+      if (tmb.catalog) {
+        _metroLines = tmb.catalog.lines || [];
+        _drawMetroLines(tmb.catalog.lines);
+      }
+      if (_params.alerts) _applyAlertMarks();
+      else _applyVisibility();
       if (_selection) {
         const still = _places.get(_selection.entityId);
         if (still) {
@@ -902,6 +1063,10 @@ export function createTmbArrivalsLayer({
     },
 
     destroy(viewer) {
+      if (_alertTick !== null) clearIntervalImpl(_alertTick);
+      _alertTick = null;
+      _removeAlertHalo();
+      _alertAnswers = { tmb: null, amb: null };
       _removeMetroLines();
       _removeBusLines();
       _clearSelection();
@@ -951,18 +1116,21 @@ export function createTmbArrivalsLayer({
     },
 
     /**
-     * `{metro, tmbBus, ambBus, lines}` booleans, from the row's pills or a
-     * share link. Any subset may be given; unknown keys are ignored.
+     * `{metro, tmbBus, ambBus, lines, alerts}` booleans, from the row's
+     * pills or a share link. Any subset may be given; unknown keys are
+     * ignored.
      */
     setParams(params = {}) {
       let changed = false;
+      const alertsBefore = _params.alerts;
       for (const key of Object.keys(TMB_ARRIVALS_DEFAULT_PARAMS)) {
         if (params[key] === undefined) continue;
         const next = params[key] !== false;
         if (_params[key] !== next) changed = true;
         _params[key] = next;
       }
-      if (changed) _applyVisibility();
+      if (_params.alerts !== alertsBefore) _syncAlertPill();
+      else if (changed) _applyVisibility();
       return true;
     },
 

@@ -10,6 +10,7 @@
  * at registration and asks for the source and the date to be cited — hence
  * the "Source: TMB · <time>" line on every card. Fork-local.
  */
+import { transitAlertText } from './transitAlertText.js';
 
 /** Metro station groups (`CODI_GRUP_ESTACIO`) are 7-digit codes today. */
 export const TMB_METRO_ID_PATTERN = /^\d{1,7}$/;
@@ -22,6 +23,9 @@ export const TMB_ARRIVALS_PER_ROUTE = 3;
 
 /** Route rows on one card before the rest fold into "+N more". */
 export const TMB_CARD_MAX_ROUTES = 8;
+
+/** Alerts written out on a stop or station card; the rest are counted. */
+export const TMB_CARD_MAX_ALERTS = 2;
 
 /** A prediction this far in the past is a train or bus that has gone. */
 const DEPARTED_GRACE_MS = 60_000;
@@ -383,6 +387,16 @@ export function buildTmbArrivalsCopy({
   if (status === 'error' && !arrivals) {
     details.push(error || `${operator} arrivals unavailable`);
     return { title, details };
+  }
+  // The place's service alerts, as the operator words them.
+  const alertTexts = (Array.isArray(arrivals?.alerts) ? arrivals.alerts : [])
+    .map((alert) => transitAlertText(alert?.header))
+    .filter(Boolean);
+  for (const text of alertTexts.slice(0, TMB_CARD_MAX_ALERTS))
+    details.push(`⚠ ${text}`);
+  if (alertTexts.length > TMB_CARD_MAX_ALERTS) {
+    const more = alertTexts.length - TMB_CARD_MAX_ALERTS;
+    details.push(`+${more} more alert${more === 1 ? '' : 's'}`);
   }
   const rows = [];
   for (const route of arrivals?.routes || []) {

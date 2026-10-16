@@ -10,22 +10,32 @@ import {
   buildAmbTrips,
   decodeTripUpdates,
 } from '../../src/data/ambArrivals.js';
+import { decodeAlerts } from '../../src/data/gtfsAlerts.js';
+import {
+  ambAlertMarks,
+  ambStopAlerts,
+} from '../../src/data/barcelonaAlerts.js';
 
 /**
  * AMB (Àrea Metropolitana de Barcelona) bus arrivals — keyless.
  *
- * Two fixed upstream files, both from ambmobilitat.cat:
+ * Three fixed upstream files, all from ambmobilitat.cat:
  *   - the static GTFS zip (stops, lines, trip headsigns and line shapes),
  *     refreshed daily;
  *   - the GTFS-Realtime TripUpdates feed, refreshed at most every 30 s and
  *     shared by every stop, so the number of stops viewers ask about never
- *     changes the traffic sent to AMB.
+ *     changes the traffic sent to AMB;
+ *   - the GTFS-Realtime Alerts feed, refreshed at most every two minutes
+ *     and shared the same way.
  *
  * Routes:
  *   GET /api/amb/stops → {stops: [{id, code, name, lat, lon}], fetchedAt}
  *   GET /api/amb/lines → {lines: [{name, desc, color, paths}], fetchedAt}
  *     Each line's route as AMB publishes it, from the same daily GTFS.
- *   GET /api/amb/arrivals/<stopId> → {kind: 'amb', id, fetchedAt, routes}
+ *   GET /api/amb/alerts → {stops: [stopId], fetchedAt}: the stops with an
+ *     active alert of their own (the ALERTS pill).
+ *   GET /api/amb/arrivals/<stopId> → {kind: 'amb', id, fetchedAt, routes,
+ *     alerts: [{header}]} (the stop's active alerts, from alerts.bin)
  *     `fetchedAt` is the feed's own timestamp (the licence asks for the date
  *     of the last update to be cited).
  *   Errors: 404 {error:'not_found'}, 502 {error:'unavailable'}.
@@ -40,6 +50,12 @@ export const AMB_TRIP_UPDATES_URL =
   'https://www.ambmobilitat.cat/transit/trips-updates/trips.bin';
 
 /** How long the static GTFS answers before a refresh (published daily). */
+/** AMB's GTFS-Realtime service alerts (detours, stops moved). */
+export const AMB_ALERTS_URL =
+  'https://www.ambmobilitat.cat/transit/alerts/alerts.bin';
+/** How long one alerts file answers every stop card. */
+export const AMB_ALERTS_TTL_MS = 120_000;
+const AMB_ALERTS_MAX_BYTES = 4 * 1024 * 1024;
 export const AMB_SCHEDULE_TTL_MS = 24 * 60 * 60_000;
 
 /** How long one TripUpdates download answers (AMB regenerates ~30 s). */
@@ -151,6 +167,35 @@ export function createAmbArrivalsService({
   let live = null;
   /** @type {Promise<object>|null} */
   let liveInflight = null;
+  /** @type {{alerts: object[]|null, at: number}|null} */
+  let alertsLoad = null;
+  /** @type {Promise<object[]|null>|null} */
+  let alertsInflight = null;
+
+  /**
+   * AMB's alerts, at most every two minutes; the last good list kept when
+   * a refresh fails. Never rejects: stops are served without alerts.
+   */
+  async function currentAlerts() {
+    if (alertsLoad && now() - alertsLoad.at < AMB_ALERTS_TTL_MS)
+      return alertsLoad.alerts;
+    alertsInflight ??= (async () => {
+      try {
+        const { bytes } = await fetchBytes(
+          fetchImpl,
+          AMB_ALERTS_URL,
+          AMB_ALERTS_MAX_BYTES,
+        );
+        alertsLoad = { alerts: decodeAlerts(bytes), at: now() };
+      } catch {
+        alertsLoad = { alerts: alertsLoad?.alerts ?? null, at: now() };
+      }
+      return alertsLoad.alerts;
+    })().finally(() => {
+      alertsInflight = null;
+    });
+    return alertsInflight;
+  }
 
   async function loadSchedule() {
     const { bytes } = await fetchBytes(
@@ -247,6 +292,15 @@ export function createAmbArrivalsService({
       const current = await currentSchedule();
       return { stops: current.stops, fetchedAt: current.fetchedAt };
     },
+    /** @returns {Promise<{stops: string[], fetchedAt: number}>} the stops with an active alert of their own */
+    async alertedStops() {
+      const current = await currentSchedule();
+      const alerts = await currentAlerts();
+      return {
+        stops: alerts ? ambAlertMarks(alerts, current.stopIds, now()) : [],
+        fetchedAt: alertsLoad?.at ?? now(),
+      };
+    },
     /** @returns {Promise<{lines: object[], fetchedAt: number}>} */
     async lines() {
       const current = await currentSchedule();
@@ -255,19 +309,29 @@ export function createAmbArrivalsService({
     /**
      * @param {string} stopId
      * @returns {Promise<{kind: 'amb', id: string, fetchedAt: number,
-     *   routes: object[]}>}
+     *   routes: object[], alerts: object[]}>}
      */
     async arrivals(stopId) {
       const id = String(stopId || '');
       if (!AMB_STOP_ID_PATTERN.test(id)) throw new AmbError('not_found');
       const current = await currentSchedule();
       if (!current.stopIds.has(id)) throw new AmbError('not_found');
-      const result = await currentLive(current);
+      const [result, alerts] = await Promise.all([
+        currentLive(current),
+        currentAlerts(),
+      ]);
+      const routes = result.index.get(id) || [];
+      // The GTFS routes of the lines arriving here, which AMB's alerts name.
+      const names = new Set(routes.map((route) => route.line));
+      const routeIds = [...current.routes]
+        .filter(([, route]) => names.has(route.name))
+        .map(([routeId]) => routeId);
       return {
         kind: 'amb',
         id,
         fetchedAt: result.feedAt ?? result.at,
-        routes: result.index.get(id) || [],
+        routes,
+        alerts: alerts ? ambStopAlerts(alerts, id, routeIds, now()) : [],
       };
     },
   };
@@ -320,6 +384,21 @@ export function ambProxy(options = {}) {
           return sendJson(res, 405, { error: 'Method not allowed' });
         try {
           return sendJson(res, 200, await service.lines());
+        } catch (error) {
+          return sendAmbError(res, error);
+        }
+      }),
+    );
+    server.middlewares.use(
+      '/api/amb/alerts',
+      sameSiteGated(async (req, res) => {
+        const rest = String(req.url || '/').split('?')[0];
+        if (rest !== '/' && rest !== '')
+          return sendJson(res, 404, { error: 'not_found' });
+        if (req.method !== 'GET')
+          return sendJson(res, 405, { error: 'Method not allowed' });
+        try {
+          return sendJson(res, 200, await service.alertedStops());
         } catch (error) {
           return sendAmbError(res, error);
         }

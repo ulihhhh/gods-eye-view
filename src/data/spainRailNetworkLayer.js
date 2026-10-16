@@ -10,6 +10,7 @@ import {
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
 import { loadBundledJson } from './bundledJson.js';
+import { transitAlertText } from './transitAlertText.js';
 
 /**
  * Rail network (Spain, fork-local) — the Cercanías / Rodalies and FGC lines
@@ -145,6 +146,79 @@ export function mergeSpainRailBoards(answers) {
     arrivals,
     fetchedAt: times.length ? Math.max(...times) : null,
   };
+}
+
+/** Feeds whose alerts the line and station cards show (Renfe's, by route). */
+export const SPAIN_RAIL_ALERT_FEEDS = Object.freeze({
+  'renfe-cercanias': 'renfe-cercanias',
+});
+/** How long the card keeps a feed's alerts before asking again. */
+export const SPAIN_RAIL_ALERTS_REFRESH_MS = 120_000;
+/** Alerts written out on a card; the rest are counted. */
+export const SPAIN_RAIL_CARD_ALERTS = 2;
+
+/** A Cercanías GTFS route id: network (`10`), `T`, a number, the line. */
+const CERCANIAS_ROUTE = /^(\d{2})T\d{4}([A-Z][A-Za-z0-9]*)$/;
+
+/**
+ * The alerts a line or station card shows: a line's own (by network and
+ * line), a station's own (by stop), then those of the lines serving it.
+ * Each text once.
+ * @param {'line'|'station'|'ign'} kind
+ * @param {object} item
+ * @param {Array<{header: object, routes?: string[], stops?: string[]}>} alerts
+ * @returns {object[]}
+ */
+export function spainRailAlertsFor(kind, item, alerts) {
+  if (!Array.isArray(alerts) || !item || kind === 'ign') return [];
+  const onLine = (alert, group, line) =>
+    (alert.routes || []).some((route) => {
+      const match = CERCANIAS_ROUTE.exec(route);
+      return match && match[1] === group && match[2] === line;
+    });
+  let found;
+  if (kind === 'line') {
+    if (item.network !== 'renfe-cercanias') return [];
+    found = alerts.filter((alert) =>
+      onLine(alert, String(item.group), item.line),
+    );
+  } else {
+    const own = alerts.filter((alert) =>
+      (alert.stops || []).includes(item.code),
+    );
+    const lines = alerts.filter(
+      (alert) =>
+        !own.includes(alert) &&
+        (item.lines || []).some(
+          (line) => line.group && onLine(alert, line.group, line.name),
+        ),
+    );
+    found = [...own, ...lines];
+  }
+  const texts = new Set();
+  return found.filter((alert) => {
+    const text = JSON.stringify(alert.header);
+    if (texts.has(text)) return false;
+    texts.add(text);
+    return true;
+  });
+}
+
+/**
+ * Card lines for alerts.
+ * @param {object[]} alerts
+ * @returns {string[]}
+ */
+export function spainRailAlertLines(alerts) {
+  const texts = (alerts || [])
+    .map((alert) => transitAlertText(alert.header))
+    .filter(Boolean);
+  const lines = texts
+    .slice(0, SPAIN_RAIL_CARD_ALERTS)
+    .map((text) => `⚠ ${text}`);
+  const more = texts.length - lines.length;
+  if (more > 0) lines.push(`+${more} more alert${more === 1 ? '' : 's'}`);
+  return lines;
 }
 /** Card repaint (countdown) and the age at which it asks again. */
 export const SPAIN_RAIL_CARD_TICK_MS = 5_000;
@@ -325,6 +399,7 @@ export function spainRailStationsFromPack(pack, linesPack = null) {
             color: /^[0-9A-Fa-f]{6}$/.test(String(line.color || ''))
               ? line.color
               : null,
+            ...(line.group ? { group: String(line.group) } : {}),
           });
       }
       // Drawn once, as Cercanías, where AV/LD/MD trains call too.
@@ -371,6 +446,8 @@ export const SPAIN_RAIL_DEFAULT_PARAMS = Object.freeze({
   fgc: true,
   national: true,
   stations: true,
+  // Marks the Cercanías lines and stations with service alerts.
+  alerts: false,
 });
 
 const SPAIN_RAIL_CHIPS = Object.freeze([
@@ -394,7 +471,40 @@ const SPAIN_RAIL_CHIPS = Object.freeze([
     label: 'STATIONS',
     title: 'Station points',
   }),
+  Object.freeze({
+    key: 'alerts',
+    label: 'ALERTS',
+    title: 'Mark Cercanías lines and stations with service alerts',
+  }),
 ]);
+
+/** The mark of a line or station with an alert: amber, as on the cards. */
+const ALERT_RGB = [255, 176, 0];
+const ALERT_HALO_WIDTH_PX = 9;
+
+/**
+ * What the ALERTS pill marks: the lines with an alert of their own, and the
+ * stations with one of their own (a lift, an entrance) — not every station
+ * of a line with an alert.
+ * @param {object[]} lines
+ * @param {Iterable<object>} stations
+ * @param {object[]} alerts
+ * @returns {{lines: Set<number>, stations: Set<string>}} line indexes and
+ *   station ids
+ */
+export function spainRailAlertMarks(lines, stations, alerts) {
+  const marked = { lines: new Set(), stations: new Set() };
+  if (!Array.isArray(alerts) || !alerts.length) return marked;
+  (lines || []).forEach((line, index) => {
+    if (spainRailAlertsFor('line', line, alerts).length)
+      marked.lines.add(index);
+  });
+  for (const station of stations || [])
+    if (alerts.some((alert) => (alert.stops || []).includes(station.code)))
+      if (SPAIN_RAIL_ALERT_FEEDS[station.network])
+        marked.stations.add(station.id);
+  return marked;
+}
 
 /**
  * Which pill owns a line or a station: `cercanias`, `fgc` or `national`.
@@ -437,9 +547,16 @@ export function parseSpainRailPickId(pickedId) {
 
 /**
  * Card copy for a line, a national-network track or a station; a station
- * with a `board` lists its next trains.
+ * with a `board` lists its next trains, and `alerts` (already matched,
+ * spainRailAlertsFor) go under the header lines.
  */
-export function buildSpainRailCopy(kind, item, board = null, now = Date.now()) {
+export function buildSpainRailCopy(
+  kind,
+  item,
+  board = null,
+  now = Date.now(),
+  alerts = [],
+) {
   if (kind === 'ign') {
     return {
       title: '🛤 Railway',
@@ -454,6 +571,7 @@ export function buildSpainRailCopy(kind, item, board = null, now = Date.now()) {
       title: `🛤 ${item.line}`,
       details: [
         `${spainRailNetworkLabel(item)} · line`,
+        ...spainRailAlertLines(alerts),
         `Source: ${item.network === 'fgc' ? 'FGC' : 'Renfe Operadora'} open data`,
       ],
     };
@@ -470,6 +588,7 @@ export function buildSpainRailCopy(kind, item, board = null, now = Date.now()) {
     details: [
       `${kindLabel} · ${item.code}`,
       ...(lines ? [`Lines: ${lines}`] : []),
+      ...spainRailAlertLines(alerts),
       ...spainRailArrivalLines(board, now, fgc ? 'FGC' : 'Renfe'),
       `Source: ${fgc ? 'FGC' : 'Renfe Operadora'} open data` +
         (Number.isFinite(board?.data?.fetchedAt)
@@ -529,6 +648,19 @@ export function createSpainRailNetworkLayer({
   let _board = null;
   let _generation = 0;
   let _tick = null;
+  /**
+   * Alerts per feed, shared by every card, and the open card to repaint
+   * when they arrive.
+   * @type {Map<string, {at: number, alerts: object[]|null, inFlight: boolean}>}
+   */
+  const _alerts = new Map();
+  /** @type {{key: string, kind: string, item: object, position: Cesium.Cartesian3}|null} */
+  let _card = null;
+  /** The ALERTS pill's amber halo under the lines with alerts. */
+  let _alertPrimitive = null;
+  /** Asks for alerts again while the ALERTS pill is on. */
+  let _alertTick = null;
+  let _groundSupported = false;
   /** @type {Cesium.ScreenSpaceEventHandler|null} */
   let _clickHandler = null;
 
@@ -540,8 +672,128 @@ export function createSpainRailNetworkLayer({
     );
   }
 
+  /** The feed whose alerts a line or station card shows, if any. */
+  function _alertFeed(kind, item) {
+    if (kind === 'ign' || !item) return null;
+    return SPAIN_RAIL_ALERT_FEEDS[item.network] ?? null;
+  }
+
+  /** The cached alerts a card shows, asking for them when old or missing. */
+  function _alertsFor(kind, item) {
+    const feedId = _alertFeed(kind, item);
+    if (!feedId) return [];
+    const known = _alerts.get(feedId);
+    if (
+      !known ||
+      (!known.inFlight && now() - known.at >= SPAIN_RAIL_ALERTS_REFRESH_MS)
+    )
+      void _askAlerts(feedId);
+    return spainRailAlertsFor(kind, item, known?.alerts || []);
+  }
+
+  async function _askAlerts(feedId) {
+    const known = _alerts.get(feedId);
+    const load = {
+      at: now(),
+      alerts: known?.alerts ?? null,
+      inFlight: true,
+    };
+    _alerts.set(feedId, load);
+    try {
+      const response = await fetchImpl(
+        `/api/transit/alerts/${encodeURIComponent(feedId)}`,
+      );
+      const data = response.ok ? await response.json() : null;
+      if (Array.isArray(data?.alerts)) load.alerts = data.alerts;
+    } catch {
+      /* the card shows what it had */
+    }
+    load.inFlight = false;
+    if (_card && _alertFeed(_card.kind, _card.item) === feedId)
+      _showCard(_card.key, _card.kind, _card.item, _card.position);
+    if (_params.alerts) _applyAlertMarks();
+  }
+
+  function _removeAlertHalo() {
+    if (_alertPrimitive && _viewer?.scene?.groundPrimitives)
+      _viewer.scene.groundPrimitives.remove(_alertPrimitive);
+    _alertPrimitive = null;
+  }
+
+  /** Draw (or clear) what the ALERTS pill marks, from the cached alerts. */
+  function _applyAlertMarks() {
+    _removeAlertHalo();
+    const on = _enabled && _params.alerts;
+    const alerts = on
+      ? (_alerts.get(SPAIN_RAIL_ALERT_FEEDS['renfe-cercanias'])?.alerts ?? [])
+      : [];
+    const marks = spainRailAlertMarks(_lines, _stations.values(), alerts);
+    if (
+      marks.lines.size &&
+      _groundSupported &&
+      _viewer?.scene?.groundPrimitives
+    ) {
+      const color = Cesium.ColorGeometryInstanceAttribute.fromColor(
+        Cesium.Color.fromBytes(...ALERT_RGB, 150),
+      );
+      const instances = [];
+      for (const index of marks.lines)
+        for (const path of _lines[index].paths)
+          instances.push(
+            new Cesium.GeometryInstance({
+              // Clicking the halo opens the line's card.
+              id: `${LAYER_ID}:line:${index}`,
+              geometry: new Cesium.GroundPolylineGeometry({
+                positions: Cesium.Cartesian3.fromDegreesArray(path),
+                width: ALERT_HALO_WIDTH_PX,
+              }),
+              attributes: { color },
+            }),
+          );
+      _alertPrimitive = _groundPolylines(instances);
+    }
+    if (_dataSource) {
+      _dataSource.entities.suspendEvents();
+      for (const entity of _dataSource.entities.values) {
+        const marked = marks.stations.has(
+          parseSpainRailPickId(entity.id)?.key ?? '',
+        );
+        entity.point.outlineColor = marked
+          ? Cesium.Color.fromBytes(...ALERT_RGB, 255)
+          : COLOR_OUTLINE;
+        entity.point.outlineWidth = marked ? 3 : 1;
+        entity.point.pixelSize = marked ? 12 : 9;
+      }
+      _dataSource.entities.resumeEvents();
+    }
+    _applyVisibility();
+  }
+
+  /** Start or stop asking for alerts with the ALERTS pill. */
+  function _syncAlertPill() {
+    const on = _enabled && _params.alerts;
+    if (on && _alertTick === null) {
+      const feedId = SPAIN_RAIL_ALERT_FEEDS['renfe-cercanias'];
+      const ask = () => {
+        const known = _alerts.get(feedId);
+        if (
+          !known ||
+          (!known.inFlight && now() - known.at >= SPAIN_RAIL_ALERTS_REFRESH_MS)
+        )
+          void _askAlerts(feedId);
+      };
+      ask();
+      _alertTick = setIntervalImpl(ask, SPAIN_RAIL_ALERTS_REFRESH_MS);
+    } else if (!on && _alertTick !== null) {
+      clearIntervalImpl(_alertTick);
+      _alertTick = null;
+    }
+    _applyAlertMarks();
+  }
+
   function _clearSelection() {
     _selectedKey = null;
+    _card = null;
     if (_tick !== null) clearIntervalImpl(_tick);
     _tick = null;
     _board = null;
@@ -624,11 +876,13 @@ export function createSpainRailNetworkLayer({
   function _showCard(key, kind, item, position) {
     if (!position) return;
     _selectedKey = key;
+    _card = { key, kind, item, position };
     const { title, details } = buildSpainRailCopy(
       kind,
       item,
       kind === 'station' ? _board : null,
       now(),
+      _alertsFor(kind, item),
     );
     const rgb =
       kind === 'line'
@@ -753,6 +1007,8 @@ export function createSpainRailNetworkLayer({
             : _params[group]);
     for (const { groups, primitive } of _sharedPrimitives)
       primitive.show = _enabled && spainRailIgnShown(groups, _params);
+    if (_alertPrimitive)
+      _alertPrimitive.show = _enabled && _params.alerts && _params.cercanias;
     if (_dataSource) {
       _dataSource.entities.suspendEvents();
       for (const entity of _dataSource.entities.values) {
@@ -803,6 +1059,7 @@ export function createSpainRailNetworkLayer({
     } catch {
       supported = false; // no WebGL context to ask
     }
+    _groundSupported = supported;
     if (!supported) {
       _lastError = 'Ground polylines unsupported here — stations only';
       return;
@@ -916,13 +1173,14 @@ export function createSpainRailNetworkLayer({
       registerPickOwner(LAYER_ID, (pickedId) =>
         Boolean(parseSpainRailPickId(pickedId)),
       );
+      _syncAlertPill();
     },
 
     disable() {
       _enabled = false;
       _clearSelection();
       if (_dataSource) _dataSource.show = false;
-      _applyVisibility();
+      _syncAlertPill();
       overlayHost.setVisible(SPAIN_RAIL_SELECTED_OVERLAY_SOURCE_ID, false);
       _removeClickHandler();
       unregisterPickOwner(LAYER_ID);
@@ -960,6 +1218,7 @@ export function createSpainRailNetworkLayer({
         _lastError = null;
         _buildLines();
         _buildStations(stations);
+        if (_params.alerts) _applyAlertMarks();
         _count = lines.length + _ignPaths.length + stations.length;
         _lastUpdate = Date.now();
         return true;
@@ -972,6 +1231,10 @@ export function createSpainRailNetworkLayer({
 
     destroy(viewer) {
       _clearSelection();
+      if (_alertTick !== null) clearIntervalImpl(_alertTick);
+      _alertTick = null;
+      _removeAlertHalo();
+      _alerts.clear();
       _removeClickHandler();
       unregisterPickOwner(LAYER_ID);
       overlayHost.setVisible(SPAIN_RAIL_SELECTED_OVERLAY_SOURCE_ID, false);
@@ -995,18 +1258,21 @@ export function createSpainRailNetworkLayer({
     },
 
     /**
-     * `{cercanias, fgc, national, stations}` booleans, from the row's pills
-     * or a share link. Any subset may be given; unknown keys are ignored.
+     * `{cercanias, fgc, national, stations, alerts}` booleans, from the
+     * row's pills or a share link. Any subset may be given; unknown keys are
+     * ignored.
      */
     setParams(params = {}) {
       let changed = false;
+      const alertsBefore = _params.alerts;
       for (const key of Object.keys(SPAIN_RAIL_DEFAULT_PARAMS)) {
         if (params[key] === undefined) continue;
         const next = params[key] !== false;
         if (_params[key] !== next) changed = true;
         _params[key] = next;
       }
-      if (changed) _applyVisibility();
+      if (_params.alerts !== alertsBefore) _syncAlertPill();
+      else if (changed) _applyVisibility();
       return true;
     },
 

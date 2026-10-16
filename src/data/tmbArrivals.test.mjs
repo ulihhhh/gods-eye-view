@@ -316,3 +316,25 @@ test('a busy stop folds the rest of its lines into "+N more"', () => {
   assert.equal(details.at(-2), '+3 more');
   assert.equal(details[1], 'V0 · 2 min');
 });
+
+test('the card lists the place’s alerts above its arrivals, two at most', () => {
+  const copy = buildTmbArrivalsCopy({
+    kind: 'metro',
+    place: { id: '6660100', name: 'Plaça Exemple', lines: [{ name: 'L1' }] },
+    arrivals: {
+      ...normalizeTmbMetroArrivals(IMETRO),
+      alerts: [
+        { header: { ca: 'Accés tancat', es: 'Acceso cerrado' } },
+        { header: { en: 'Lift out of service' } },
+        { header: { ca: 'Tercer avís' } },
+      ],
+    },
+    now: T0,
+  });
+  assert.deepEqual(copy.details.slice(0, 4), [
+    'Metro station · TMB · L1',
+    '⚠ Acceso cerrado',
+    '⚠ Lift out of service',
+    '+1 more alert',
+  ]);
+});

@@ -78,8 +78,15 @@ test('Cercanías destinations come from the fixed-width long name', () => {
   );
   assert.equal(cercaniasRouteDestination(`${pad('Aranjuez', 40)}-`), null);
   const trips = buildCercaniasTripDetails(CERCANIAS);
-  assert.deepEqual(trips.get('1001J19799C1'), { destination: 'Aeropuerto-T4' });
-  assert.equal(trips.has('1001J33001C3'), false, 'no destination, no entry');
+  assert.deepEqual(trips.get('1001J19799C1'), {
+    destination: 'Aeropuerto-T4',
+    gtfsRouteId: '10T0001C1',
+  });
+  assert.deepEqual(
+    trips.get('1001J33001C3'),
+    { gtfsRouteId: '10T0050C3' },
+    'no destination: the route alone, which alerts name',
+  );
 });
 
 test('AV/LD trips give the service and the origin and destination codes', () => {
@@ -88,6 +95,7 @@ test('AV/LD trips give the service and the origin and destination codes', () => 
     serviceName: 'ALVIA',
     originStopId: '17000',
     destinationStopId: '14223',
+    gtfsRouteId: '1700014223GL023',
   });
   const [train] = applyServiceFields(
     [{ id: '04073', label: '04073', tripId: '0407312026-10-14' }],

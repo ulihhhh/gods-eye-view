@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { deflateRawSync } from 'node:zlib';
 import {
+  AMB_ALERTS_TTL_MS,
+  AMB_ALERTS_URL,
   AMB_GTFS_URL,
   AMB_TRIP_UPDATES_TTL_MS,
   AMB_TRIP_UPDATES_URL,
@@ -16,6 +18,7 @@ import {
   TRIPS_CSV,
   encodeTripUpdates,
 } from '../data/ambArrivalsFixtures.mjs';
+import { encodeAlerts } from '../data/gtfsAlertsFixtures.mjs';
 
 /** A zip with each file deflated (or stored when `store` names it). */
 function makeZip(files, store = new Set()) {
@@ -73,6 +76,7 @@ function ambApi({
       { tripId: '129.1', stops: [{ stopId: '100005', time: at(4) }] },
     ]),
   gtfs = () => GTFS_ZIP,
+  alerts = () => null,
 } = {}) {
   const calls = [];
   const fetchImpl = async (url, init) => {
@@ -89,6 +93,12 @@ function ambApi({
       const body = feed();
       return body
         ? new Response(body, { status: 200, headers: { etag: 'W/"v1"' } })
+        : new Response('', { status: 503 });
+    }
+    if (url === AMB_ALERTS_URL) {
+      const body = alerts();
+      return body
+        ? new Response(body, { status: 200 })
         : new Response('', { status: 503 });
     }
     return new Response('', { status: 404 });
@@ -139,6 +149,7 @@ test('arrivals at any stop share one trip-updates download per 30 s, revalidated
         arrivals: [at(4) * 1000],
       },
     ],
+    alerts: [],
   });
   assert.deepEqual((await service.arrivals('000108')).routes, []);
   const feedCalls = () => calls.filter((c) => c.url === AMB_TRIP_UPDATES_URL);
@@ -237,4 +248,75 @@ test('line routes come from the same daily GTFS download as the stops', async ()
   assert.equal(fetchedAt, NOW);
   assert.equal(stops.length, 2);
   assert.equal(calls.length, 1);
+});
+
+test('a stop’s arrivals carry its active AMB alerts, read every two minutes', async () => {
+  let clock = NOW;
+  const { fetchImpl, calls } = ambApi({
+    alerts: () =>
+      encodeAlerts([
+        {
+          id: 'detour',
+          header: { ca: 'Desviament al carrer', es: 'Desvío en la calle' },
+          effect: 4,
+          routes: ['129'],
+          stops: ['100005'],
+        },
+        {
+          // On the stop's line (87, route 129) and naming no stop.
+          id: 'line',
+          header: { es: 'Servicio reducido en la línea 87' },
+          routes: ['129'],
+        },
+        {
+          id: 'elsewhere',
+          header: { es: 'Otra parada' },
+          routes: ['130'],
+          stops: ['000108'],
+        },
+        {
+          id: 'later',
+          header: { es: 'Más adelante' },
+          periods: [{ start: Math.round(NOW / 1000) + 86_400 }],
+          stops: ['100005'],
+        },
+      ]),
+  });
+  const service = createAmbArrivalsService({ fetchImpl, now: () => clock });
+  const arrivals = await service.arrivals('100005');
+  assert.deepEqual(
+    arrivals.alerts.map((alert) => alert.header.es),
+    ['Desvío en la calle', 'Servicio reducido en la línea 87'],
+  );
+  const alertCalls = () => calls.filter((c) => c.url === AMB_ALERTS_URL);
+  await service.arrivals('000108');
+  assert.equal(alertCalls().length, 1, 'shared by every stop');
+  assert.equal(alertCalls()[0].init.redirect, 'error');
+  clock += AMB_ALERTS_TTL_MS;
+  await service.arrivals('100005');
+  assert.equal(alertCalls().length, 2);
+});
+
+test('AMB arrivals still answer when its alerts do not', async () => {
+  const { fetchImpl } = ambApi();
+  const service = createAmbArrivalsService({ fetchImpl, now: () => NOW });
+  const arrivals = await service.arrivals('100005');
+  assert.equal(arrivals.routes.length, 1);
+  assert.deepEqual(arrivals.alerts, []);
+});
+
+test('the alerted-stops list names only AMB stops with an active alert of their own', async () => {
+  const { fetchImpl } = ambApi({
+    alerts: () =>
+      encodeAlerts([
+        {
+          id: 'a',
+          header: { es: 'Parada movida' },
+          stops: ['100005', '999999'],
+        },
+        { id: 'b', header: { es: 'Línea' }, routes: ['129'] },
+      ]),
+  });
+  const service = createAmbArrivalsService({ fetchImpl, now: () => NOW });
+  assert.deepEqual((await service.alertedStops()).stops, ['100005']);
 });

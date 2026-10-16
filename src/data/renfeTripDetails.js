@@ -61,17 +61,23 @@ export function cercaniasRouteDestination(longName) {
 /**
  * @param {Map<string, string>|Record<string, string>} files `routes.txt`
  *   and `trips.txt` text.
- * @returns {Map<string, Readonly<{destination?: string}>>}
+ * @returns {Map<string, Readonly<{destination?: string,
+ *   gtfsRouteId: string}>>}
  */
 export function buildCercaniasTripDetails(files) {
   const get = (name) => (files instanceof Map ? files.get(name) : files[name]);
   const byRoute = new Map();
   for (const route of parseCsv(get('routes.txt'))) {
+    const routeId = String(route.route_id ?? '').trim();
     const destination = cercaniasRouteDestination(route.route_long_name);
-    if (destination)
+    if (routeId)
       byRoute.set(
-        String(route.route_id ?? '').trim(),
-        Object.freeze({ destination }),
+        routeId,
+        Object.freeze({
+          ...(destination ? { destination } : {}),
+          // Renfe's alerts name the route.
+          gtfsRouteId: routeId,
+        }),
       );
   }
   return tripsToDetails(get('trips.txt'), byRoute);
@@ -81,7 +87,8 @@ export function buildCercaniasTripDetails(files) {
  * @param {Map<string, string>|Record<string, string>} files `routes.txt`
  *   and `trips.txt` text.
  * @returns {Map<string, Readonly<{serviceName?: string,
- *   destinationStopId?: string, originStopId?: string}>>}
+ *   destinationStopId?: string, originStopId?: string,
+ *   gtfsRouteId?: string}>>}
  */
 export function buildRenfeLdTripDetails(files) {
   const get = (name) => (files instanceof Map ? files.get(name) : files[name]);
@@ -93,6 +100,7 @@ export function buildRenfeLdTripDetails(files) {
     const details = {
       ...(serviceName ? { serviceName } : {}),
       ...(codes ? { originStopId: codes[1], destinationStopId: codes[2] } : {}),
+      ...(routeId ? { gtfsRouteId: routeId } : {}),
     };
     if (Object.keys(details).length)
       byRoute.set(routeId, Object.freeze(details));

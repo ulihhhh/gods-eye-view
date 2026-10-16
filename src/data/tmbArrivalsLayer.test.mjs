@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as Cesium from 'cesium';
 import {
   TMB_ARRIVALS_DEFAULT_PARAMS,
+  TMB_ALERT_MARKS_REFRESH_MS,
   TMB_ARRIVALS_SELECTED_OVERLAY_SOURCE_ID,
   TMB_BUS_MAX_DISTANCE_M,
   TMB_CARD_REFRESH_MS,
@@ -17,6 +18,7 @@ import {
   tmbPlaceColorRgb,
   tmbPlaceEntityId,
   tmbPlaceShown,
+  tmbAlertedEntityIds,
 } from './tmbArrivalsLayer.js';
 import { isOwnedByOtherLayer } from './pickRegistry.js';
 
@@ -476,6 +478,7 @@ test('the pills switch metro, each bus operator and the routes on their own', as
         ['TMB BUS', true],
         ['AMB BUS', true],
         ['LINES', true],
+        ['ALERTS', false],
       ],
     );
     assert.deepEqual(chips[0].params, { metro: false }, 'a click flips one');
@@ -496,6 +499,63 @@ test('the pills switch metro, each bus operator and the routes on their own', as
       ['bus'],
       'voice answers about what the map shows',
     );
+  } finally {
+    h.layer.destroy(h.viewer);
+  }
+});
+
+test('the ALERTS pill marks places with alerts; an AMB stop TMB serves is its bus stop', () => {
+  const places = new Map([
+    ['tmb-arrivals:metro:6660100', {}],
+    ['tmb-arrivals:bus:108', {}],
+    ['tmb-arrivals:amb:100005', {}],
+  ]);
+  assert.deepEqual(
+    [
+      ...tmbAlertedEntityIds(
+        { metro: ['6660100', '999'], bus: [] },
+        { stops: ['000108', '100005'] },
+        places,
+      ),
+    ].sort(),
+    [
+      'tmb-arrivals:amb:100005',
+      'tmb-arrivals:bus:108',
+      'tmb-arrivals:metro:6660100',
+    ],
+    'places not on the map are left out',
+  );
+  assert.deepEqual([...tmbAlertedEntityIds(null, null, places)], []);
+});
+
+test('the ALERTS pill asks both operators while on, outlines what they name, and stops when off', async () => {
+  const h = harness((url) =>
+    url === '/api/tmb/alerts'
+      ? json(200, { metro: ['6660100'], bus: [], lines: ['L1'] })
+      : url === '/api/amb/alerts'
+        ? json(200, { stops: ['000108'] })
+        : json(200, CATALOG),
+  );
+  try {
+    assert.equal(await h.layer.update(), true);
+    const entities = h.viewer._dataSources[0].entities;
+    const width = (id) =>
+      entities.getById(id).point.outlineWidth.getValue(Cesium.JulianDate.now());
+    assert.equal(width('tmb-arrivals:metro:6660100'), 1);
+    assert.ok(!h.requests.includes('/api/tmb/alerts'), 'off by default');
+    h.layer.setParams({ alerts: true });
+    assert.ok(h.requests.includes('/api/tmb/alerts'));
+    assert.ok(h.requests.includes('/api/amb/alerts'));
+    await flush();
+    assert.equal(width('tmb-arrivals:metro:6660100'), 3);
+    assert.equal(width('tmb-arrivals:bus:108'), 3, 'AMB 000108 is TMB 108');
+    const tick = h.timers.findIndex(
+      (timer) => timer?.ms === TMB_ALERT_MARKS_REFRESH_MS,
+    );
+    assert.ok(tick >= 0, 'asks again every two minutes');
+    h.layer.setParams({ alerts: false });
+    assert.equal(width('tmb-arrivals:metro:6660100'), 1);
+    assert.equal(h.timers[tick], null);
   } finally {
     h.layer.destroy(h.viewer);
   }
