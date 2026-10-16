@@ -32,6 +32,7 @@ import {
   transitUpstreamHeaders,
 } from '../data/transitProxy.js';
 import { indexTripUpdates } from '../data/transitServiceFields.js';
+import { buildTransitArrivals } from '../data/transitArrivals.js';
 import { readZipTextEntries } from '../data/zipEntries.js';
 
 /** A TripUpdates index this old is no longer joined to positions. */
@@ -104,6 +105,8 @@ export const TRANSIT_RECENT_MAX_FIXES = 8;
  *
  *   GET /api/transit/feeds              → public catalog (coverage + credit)
  *   GET /api/transit/vehicles/<feedId>  → decoded snapshot as JSON
+ *   GET /api/transit/arrivals/<feedId>/<stationId> → the station's next
+ *       trains (feeds with `tripUpdates`; see src/data/transitArrivals.js)
  *
  * Only URLs in `src/data/transitFeeds.js` are ever fetched — the browser
  * names a registered id, never a URL (SECURITY.md). Redirects are resolved hop
@@ -131,6 +134,13 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
     windowMs: 60000,
     max: 30,
     globalMax: 120,
+  });
+  // Station boards are computed from cached data, but each one parses a
+  // snapshot: bounded like the trail reads.
+  const admitArrivals = makeRateLimiter({
+    windowMs: 60000,
+    max: 60,
+    globalMax: 240,
   });
   let closed = false;
   const inFlight = new Map();
@@ -499,6 +509,75 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
     }
   }
 
+  /**
+   * A station's next trains: the feed's cached TripUpdates index joined to
+   * its position snapshot, read through `handle` so the snapshot keeps its
+   * own cache, limits and backoff. No request of its own to the operator.
+   */
+  async function arrivals(feed, stationId, url) {
+    if (!admitArrivals(feed.id))
+      return reply(
+        429,
+        JSON.stringify({ error: 'Transit arrivals read limit reached' }),
+        {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'Retry-After': '60',
+        },
+      );
+    const now = Date.now();
+    let vehicles = null;
+    try {
+      const positions = await handle(
+        new Request(
+          `${url.origin}/api/transit/vehicles/${encodeURIComponent(feed.id)}`,
+        ),
+      );
+      if (positions.ok) vehicles = (await positions.json()).vehicles ?? null;
+    } catch {
+      vehicles = null;
+    }
+    const [index, stopNames] = await Promise.all([
+      tripUpdatesFor(feed, now),
+      stopDictionaryFor(feed, 'stopNames', now),
+    ]);
+    if (stopNames && !Object.hasOwn(stopNames, stationId))
+      return reply(404, JSON.stringify({ error: 'Unknown station' }), {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      });
+    if (!index)
+      return reply(
+        503,
+        JSON.stringify({ error: 'Trip updates unavailable', feedId: feed.id }),
+        {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'Retry-After': '60',
+        },
+      );
+    const body = {
+      feedId: feed.id,
+      stationId,
+      station: stopNames?.[stationId] ?? null,
+      fetchedAt: tripUpdateLoads.get(feed.id)?.fetchedAt ?? null,
+      positions: Array.isArray(vehicles),
+      arrivals: buildTransitArrivals({
+        stationId,
+        tripUpdates: index,
+        vehicles,
+        stopKey: feed.tripUpdates.stopKey ?? null,
+        stopPlatform: feed.tripUpdates.stopPlatform ?? null,
+        stopNames,
+        now,
+      }),
+    };
+    return reply(200, JSON.stringify(body), {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+  }
+
   async function handle(incoming) {
     const url = new URL(incoming.url);
     if (!url.pathname.startsWith('/api/transit/'))
@@ -555,6 +634,7 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
         { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       );
     }
+    if (route.route === 'arrivals') return arrivals(feed, route.stationId, url);
     const cached = cache.get(feed.id);
     const ttlMs = transitFeedTtlMs(feed);
     const feedTtlSeconds = Math.ceil(ttlMs / 1000);

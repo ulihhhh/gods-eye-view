@@ -77,13 +77,19 @@ export const TRANSIT_BACKOFF_LADDER_MS = Object.freeze([
  * registered feed. Anything else — a different route, an unknown id, path
  * tricks, a query string — resolves to null and the caller 404s.
  * @param {string} url Request URL relative to the mount point.
- * @returns {{ route: 'feeds' } | { route: 'vehicles', feed: object } | null}
+ * `/trail/<feedId>/<vehicleId>` and `/arrivals/<feedId>/<stationId>` resolve
+ * only for feeds that keep history or have a TripUpdates companion.
+ * @returns {{ route: 'feeds' } | { route: 'vehicles', feed: object } |
+ *   { route: 'trail', feed: object, vehicleId: string } |
+ *   { route: 'arrivals', feed: object, stationId: string } | null}
  */
 export function resolveTransitRoute(url) {
   const pathname = String(url || '').split('?')[0];
   if (pathname === '/feeds' || pathname === '/feeds/')
     return { route: 'feeds' };
-  const match = /^\/(vehicles|trail)\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname);
+  const match = /^\/(vehicles|trail|arrivals)\/([^/]+)(?:\/([^/]+))?\/?$/.exec(
+    pathname,
+  );
   if (!match) return null;
   let id, vehicleId;
   try {
@@ -96,6 +102,11 @@ export function resolveTransitRoute(url) {
   if (!feed) return null;
   if (match[1] === 'vehicles')
     return vehicleId === null ? { route: 'vehicles', feed } : null;
+  // A station's next trains, for feeds with a TripUpdates companion.
+  if (match[1] === 'arrivals')
+    return feed.tripUpdates?.url && validTransitIdentifier(vehicleId)
+      ? { route: 'arrivals', feed, stationId: vehicleId }
+      : null;
   return feed.historyRetention === true && validTransitIdentifier(vehicleId)
     ? { route: 'trail', feed, vehicleId }
     : null;

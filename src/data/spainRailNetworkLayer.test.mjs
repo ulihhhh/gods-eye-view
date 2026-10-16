@@ -18,6 +18,8 @@ import {
   spainRailGroup,
   spainRailIgnShown,
   SPAIN_RAIL_DEFAULT_PARAMS,
+  SPAIN_RAIL_CARD_REFRESH_MS,
+  spainRailArrivalLines,
 } from './spainRailNetworkLayer.js';
 import { loadBundledJson } from './bundledJson.js';
 import { isOwnedByOtherLayer } from './pickRegistry.js';
@@ -457,4 +459,168 @@ test('the pills of both Spanish layers travel in a share link', async () => {
   assert.equal(decoded.options['spain-rail-network'].fgc, false);
   assert.equal(decoded.options['spain-rail-network'].cercanias, true);
   assert.equal(decoded.options['tmb-arrivals'].lines, false);
+});
+
+const BOARD_NOW = Date.parse('2026-10-16T09:40:00Z'); // 11:40 in Barcelona
+const at = (m) => BOARD_NOW + m * 60_000;
+/** Hand-made station board, the shape /api/transit/arrivals serves. */
+const BOARD = {
+  feedId: 'fgc-geotren',
+  stationId: 'PC',
+  fetchedAt: at(-1),
+  arrivals: [
+    {
+      tripId: 'a',
+      at: at(0),
+      line: 'L7',
+      destination: null,
+      origin: 'Av. Tibidabo',
+      platform: '4',
+      delaySec: null,
+      onTime: true,
+      terminates: true,
+      running: true,
+    },
+    {
+      tripId: 'b',
+      at: at(3),
+      line: 'S1',
+      destination: 'Terrassa Nacions Unides',
+      origin: null,
+      platform: '2',
+      delaySec: null,
+      onTime: false,
+      terminates: false,
+      running: true,
+    },
+    {
+      tripId: 'c',
+      at: at(12),
+      line: null,
+      destination: 'Sabadell Parc Nord',
+      origin: null,
+      platform: null,
+      delaySec: 180,
+      onTime: null,
+      terminates: false,
+      running: false,
+    },
+  ],
+};
+
+test('a station card lists its next trains: departures, arrivals and lateness', () => {
+  assert.deepEqual(
+    spainRailArrivalLines({ status: 'ready', data: BOARD }, BOARD_NOW),
+    [
+      'L7 from Av. Tibidabo · arr. 11:40 (now) · platform 4',
+      'S1 → Terrassa Nacions Unides · 11:43 (3 min) · platform 2 · late',
+      'FGC → Sabadell Parc Nord · 11:52 (12 min) · +3 min',
+    ],
+  );
+  assert.deepEqual(
+    buildSpainRailCopy(
+      'station',
+      { network: 'fgc', code: 'PC', name: 'Pl. Catalunya' },
+      { status: 'ready', data: BOARD },
+      BOARD_NOW,
+    ).details.at(-1),
+    'Source: FGC open data · 11:39',
+  );
+});
+
+test('a station card says when it is asking, failing or has nothing', () => {
+  assert.deepEqual(spainRailArrivalLines({ status: 'loading' }, BOARD_NOW), [
+    'Asking for the next trains…',
+  ]);
+  assert.deepEqual(
+    spainRailArrivalLines(
+      { status: 'error', error: 'Network error' },
+      BOARD_NOW,
+    ),
+    ['Network error'],
+  );
+  assert.deepEqual(
+    spainRailArrivalLines(
+      { status: 'ready', data: { arrivals: [] } },
+      BOARD_NOW,
+    ),
+    ['No trains reported right now'],
+  );
+  assert.deepEqual(
+    spainRailArrivalLines(
+      { status: 'error', error: 'Network error', data: BOARD },
+      at(20),
+    ),
+    ['No trains reported right now', 'Network error · showing last answer'],
+    'trains already gone drop off the last answer',
+  );
+  assert.deepEqual(spainRailArrivalLines(null, BOARD_NOW), []);
+});
+
+test('an FGC station card asks for its trains, refreshes while open and stops on close', async () => {
+  const entries = [];
+  const asked = [];
+  const intervals = new Set();
+  let clock = BOARD_NOW;
+  let tick = null;
+  const layer = createSpainRailNetworkLayer({
+    overlayHost: {
+      setEntries: (_id, list) => entries.push(list),
+      setVisible() {},
+      clearSource() {},
+    },
+    loadJson: async (url) => {
+      const name = url.pathname.split('/').pop();
+      if (name === 'ign_rail.json') return { paths: [] };
+      return name === 'lines.json' ? LINES : STATIONS;
+    },
+    fetchImpl: async (url) => {
+      asked.push(url);
+      return new Response(JSON.stringify(BOARD), { status: 200 });
+    },
+    now: () => clock,
+    setIntervalImpl: (fn) => {
+      tick = fn;
+      intervals.add(fn);
+      return fn;
+    },
+    clearIntervalImpl: (handle) => intervals.delete(handle),
+  });
+  const viewer = fakeViewer();
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  try {
+    layer.init(viewer);
+    layer.enable(viewer);
+    await layer.update();
+    layer._selectForTest('spain-rail-network:station:fgc:PC');
+    assert.deepEqual(asked, ['/api/transit/arrivals/fgc-geotren/PC']);
+    assert.ok(
+      entries.at(-1)[0].details.includes('Asking for the next trains…'),
+    );
+    await settle();
+    assert.ok(
+      entries
+        .at(-1)[0]
+        .details.includes(
+          'S1 → Terrassa Nacions Unides · 11:43 (3 min) · platform 2 · late',
+        ),
+    );
+    clock += 5_000;
+    tick();
+    assert.equal(asked.length, 1, 'repaints without asking again');
+    clock += SPAIN_RAIL_CARD_REFRESH_MS;
+    tick();
+    await settle();
+    assert.equal(asked.length, 2, 'asks again once the answer is old');
+
+    layer._selectForTest('spain-rail-network:station:renfe-cercanias:71801');
+    assert.equal(intervals.size, 0, 'a Renfe station has no board yet');
+    assert.equal(asked.length, 2);
+    assert.ok(
+      !entries.at(-1)[0].details.some((line) => line.startsWith('Asking')),
+    );
+  } finally {
+    layer.destroy(viewer);
+  }
+  assert.equal(intervals.size, 0);
 });
