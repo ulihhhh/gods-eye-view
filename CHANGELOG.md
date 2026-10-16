@@ -363,6 +363,18 @@
   Mapillary only and hide while GOOGLE STREET VIEW is lit; its globe marker
   is a Google-blue view cone.
 
+- Service alerts, as each operator words them (`⚠ …`, two per card, the
+  rest counted): Renfe Cercanías' on the train card and on Rail network's
+  line and station cards (by static GTFS route and station: works, lifts
+  out of service), FGC's on the train card (per trip: cars reserved for
+  schools, connections), TMB's metro and bus alerts and AMB's on Barcelona
+  Arrivals' station and stop cards. A new GTFS-Realtime Alerts decoder
+  (`gtfsAlerts.js`; Renfe sends only a description, read as the header)
+  serves a registry hook, `alerts: {url, minIntervalMs}`, fetched beside
+  the positions like `tripUpdates`, and `/api/transit/alerts/<feedId>`.
+  TMB's and AMB's arrivals answers carry the place's alerts. Every list is
+  read at most every two minutes; text is plain and bounded.
+
 - AV/LD/MD stations in Rail network (Spain) list their next trains as well
   (`AVE 3123 → Figueres-Vilafant · 12:27 (5 min)`), from Renfe's AV/LD/MD
   timetable for the day (`calendar_dates.txt` exceptions included, stops a

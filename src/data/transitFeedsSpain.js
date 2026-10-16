@@ -182,6 +182,17 @@ const RENFE_LD_TRIP_DETAILS = Object.freeze({
 const FGC_TRIP_UPDATES_URL =
   'https://dadesobertes.fgc.cat/api/explore/v2.1/catalog/datasets/trip-updates-gtfs_realtime/files/735985017f62fd33b2fe46e31ce53829';
 
+/**
+ * FGC's GTFS-Realtime Alerts, on the same portal as its trip updates: one
+ * alert per trip and stop, mostly cars reserved for schools and the
+ * Montserrat rack-railway connection.
+ */
+const FGC_ALERTS_URL =
+  'https://dadesobertes.fgc.cat/api/explore/v2.1/catalog/datasets/alerts-gtfs_realtime/files/02f92ddc6d2712788903e54468542936';
+
+/** Service alerts change slowly; every operator's are asked at most this often. */
+const ALERTS_MIN_INTERVAL_MS = 120_000;
+
 /** FGC trip-update stops are a station code plus a platform digit ("PC1"). */
 export function fgcTripStopKey(stopId) {
   return /^[A-Z0-9]{2,6}$/.test(stopId) ? stopId.slice(0, -1) : stopId;
@@ -224,6 +235,11 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
       url: 'https://gtfsrt.renfe.com/trip_updates.pb',
     }),
     tripDetails: RENFE_CERCANIAS_TRIP_DETAILS,
+    // Service alerts by static GTFS route (Cercanías only; text in Spanish).
+    alerts: Object.freeze({
+      url: 'https://gtfsrt.renfe.com/alerts.pb',
+      minIntervalMs: ALERTS_MIN_INTERVAL_MS,
+    }),
     stopNames: () => spainStationNames('renfe-cercanias'),
     stopPlaces: () => spainStationPlaces('renfe-cercanias'),
     trackGeometry: () => spainTrackLines('renfe-cercanias'),
@@ -292,6 +308,10 @@ export const SPAIN_TRANSIT_FEEDS = Object.freeze([
       minIntervalMs: 60_000,
       stopKey: fgcTripStopKey,
       stopPlatform: fgcTripStopPlatform,
+    }),
+    alerts: Object.freeze({
+      url: FGC_ALERTS_URL,
+      minIntervalMs: ALERTS_MIN_INTERVAL_MS,
     }),
     stopNames: () => spainStationNames('fgc'),
     stopPlaces: () => spainStationPlaces('fgc'),

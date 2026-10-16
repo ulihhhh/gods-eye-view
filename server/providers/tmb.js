@@ -10,6 +10,12 @@ import {
   normalizeTmbBusArrivals,
   normalizeTmbMetroArrivals,
 } from '../../src/data/tmbArrivals.js';
+import {
+  normalizeTmbBusAlerts,
+  normalizeTmbMetroAlerts,
+  tmbBusStopAlerts,
+  tmbMetroStationAlerts,
+} from '../../src/data/barcelonaAlerts.js';
 
 /**
  * TMB (Transports Metropolitans de Barcelona) developer API — key handling.
@@ -31,7 +37,9 @@ import {
  *     Bus line geometry, cached for a day; asked for apart from the
  *     stations because it is larger and only drawn at street scale.
  *   GET /api/tmb/arrivals/metro/<group> and /api/tmb/arrivals/bus/<code>
- *     → {kind, id, fetchedAt, routes: [...]}: next arrivals, cached 15 s.
+ *     → {kind, id, fetchedAt, routes: [...], alerts: [{header}]}: next
+ *     arrivals, cached 15 s, and the place's active service alerts (TMB's
+ *     alerts lists, cached two minutes).
  *     The id must name a station or stop in the catalogue; the server
  *     builds the TMB URL, so the browser never chooses what is fetched.
  *   Errors: 503 {error:'no_key'}, 502 {error:'rejected'|'unavailable'},
@@ -256,6 +264,15 @@ export function tmbMetroArrivalsUrl(codes, credentials) {
   });
 }
 
+/** Service alerts as TMB's website shows them, metro or bus. */
+export function tmbAlertsUrl(kind, credentials) {
+  return tmbApiUrl(`/alerts/${kind}/channels/WEB`, credentials);
+}
+
+/** How long one alerts list answers every card. */
+export const TMB_ALERTS_TTL_MS = 120_000;
+const TMB_ALERTS_MAX_BYTES = 2 * 1024 * 1024;
+
 /** iBus URL for one stop. */
 export function tmbBusArrivalsUrl(code, credentials) {
   return tmbApiUrl(
@@ -370,6 +387,10 @@ export function createTmbCatalogService({
     async metroCodes(group) {
       return (await current()).metroById.get(group)?.codes ?? null;
     },
+    /** @returns {Promise<object|null>} one station group (codes, lines) */
+    async metroStation(group) {
+      return (await current()).metroById.get(group) ?? null;
+    },
     /** @returns {Promise<boolean>} */
     async hasBusStop(code) {
       return (await current()).busIds.has(code);
@@ -432,8 +453,77 @@ export function createTmbBusLinesService({
 }
 
 /**
+ * TMB's metro and bus alerts: one request per kind every two minutes at
+ * most, single-flight, the last good list kept when a refresh fails (never
+ * when TMB refused the key). Never rejects: a card without alerts is better
+ * than no card.
+ * @param {{env?: Record<string, string|undefined>, fetchImpl?: typeof fetch,
+ *   now?: () => number}} [options]
+ */
+export function createTmbAlertsService({
+  env = process.env,
+  fetchImpl = fetch,
+  now = Date.now,
+} = {}) {
+  /** @type {Map<string, {pair: string, alerts: object[], at: number}>} */
+  const last = new Map();
+  /** @type {Map<string, {pair: string, promise: Promise<object[]|null>}>} */
+  const inflight = new Map();
+  const normalize = {
+    metro: normalizeTmbMetroAlerts,
+    bus: normalizeTmbBusAlerts,
+  };
+
+  async function load(kind, credentials, pair) {
+    try {
+      const body = await fetchTmbJson(
+        fetchImpl,
+        tmbAlertsUrl(kind, credentials),
+        TMB_ALERTS_MAX_BYTES,
+      );
+      const alerts = normalize[kind](body);
+      last.set(kind, { pair, alerts, at: now() });
+      return alerts;
+    } catch (error) {
+      const known = last.get(kind);
+      if (error?.code === 'rejected') last.delete(kind);
+      else if (known?.pair === pair) {
+        // Not asked again before the interval passes.
+        known.at = now();
+        return known.alerts;
+      }
+      return null;
+    }
+  }
+
+  return {
+    /**
+     * @param {'metro'|'bus'} kind
+     * @returns {Promise<object[]|null>}
+     */
+    async list(kind) {
+      if (!normalize[kind]) return null;
+      const credentials = tmbCredentials(env);
+      if (!credentials) return null;
+      const pair = `${credentials.appId}\u0000${credentials.appKey}`;
+      const known = last.get(kind);
+      if (known?.pair === pair && now() - known.at < TMB_ALERTS_TTL_MS)
+        return known.alerts;
+      const pending = inflight.get(kind);
+      if (pending?.pair === pair) return pending.promise;
+      const promise = load(kind, credentials, pair).finally(() => {
+        if (inflight.get(kind)?.promise === promise) inflight.delete(kind);
+      });
+      inflight.set(kind, { pair, promise });
+      return promise;
+    },
+  };
+}
+
+/**
  * Next arrivals at one station group or bus stop: cached per id, one
  * request in flight per id, and a per-minute ceiling on upstream calls.
+ * Each answer carries the place's active alerts (`alerts: [{header}]`).
  * @param {{env?: Record<string, string|undefined>, fetchImpl?: typeof fetch,
  *   now?: () => number, catalog?: ReturnType<typeof createTmbCatalogService>}} [options]
  */
@@ -442,9 +532,32 @@ export function createTmbArrivalsService({
   fetchImpl = fetch,
   now = Date.now,
   catalog = createTmbCatalogService({ env, fetchImpl, now }),
+  alerts = createTmbAlertsService({ env, fetchImpl, now }),
 } = {}) {
   /** @type {Map<string, {at: number, value: object}>} */
   const cache = new Map();
+
+  /** The place's active alerts; none when TMB's lists are unavailable. */
+  async function placeAlerts(kind, id, value) {
+    try {
+      const list = await alerts.list(kind);
+      if (!list) return [];
+      if (kind === 'metro')
+        return tmbMetroStationAlerts(
+          list,
+          await catalog.metroStation(id),
+          now(),
+        );
+      return tmbBusStopAlerts(
+        list,
+        id,
+        (value.routes || []).map((route) => route.line),
+        now(),
+      );
+    } catch {
+      return [];
+    }
+  }
   /** @type {Map<string, Promise<object>>} */
   const inflight = new Map();
   /** @type {number[]} upstream call times in the last minute */
@@ -499,14 +612,18 @@ export function createTmbArrivalsService({
       if (!credentials) throw new TmbError('no_key');
       const key = `${kind}:${id}`;
       const hit = cache.get(key);
-      if (hit && now() - hit.at < TMB_ARRIVALS_TTL_MS) return hit.value;
-      if (!inflight.has(key)) {
-        const promise = fetchArrivals(kind, String(id), credentials).finally(
-          () => inflight.delete(key),
-        );
-        inflight.set(key, promise);
+      let value;
+      if (hit && now() - hit.at < TMB_ARRIVALS_TTL_MS) value = hit.value;
+      else {
+        if (!inflight.has(key)) {
+          const promise = fetchArrivals(kind, String(id), credentials).finally(
+            () => inflight.delete(key),
+          );
+          inflight.set(key, promise);
+        }
+        value = await inflight.get(key);
       }
-      return inflight.get(key);
+      return { ...value, alerts: await placeAlerts(kind, String(id), value) };
     },
   };
 }

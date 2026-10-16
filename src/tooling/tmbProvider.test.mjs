@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  TMB_ALERTS_TTL_MS,
   TMB_ARRIVALS_PER_MINUTE,
   TMB_ARRIVALS_TTL_MS,
   TMB_CATALOG_TTL_MS,
@@ -398,7 +399,7 @@ test('metro arrivals ask once for every code of the station group', async () => 
     service.arrivals('metro', '6660100'),
     service.arrivals('metro', '6660100'),
   ]);
-  assert.equal(a, b);
+  assert.deepEqual(a, b);
   const imetro = calls.filter((c) => c.path === '/v1/itransit/metro/estacions');
   assert.equal(imetro.length, 1, 'concurrent clicks share one request');
   assert.equal(imetro[0].params.get('estacions'), '100,300');
@@ -416,6 +417,7 @@ test('metro arrivals ask once for every code of the station group', async () => 
         arrivals: [61_000],
       },
     ],
+    alerts: [],
   });
   clock += TMB_ARRIVALS_TTL_MS - 1;
   await service.arrivals('metro', '6660100');
@@ -664,4 +666,117 @@ test('the bus route list is served on its exact path, GET only', async () => {
   assert.doesNotMatch(ok.body, /fixture-secret/);
   assert.equal((await call('/x')).code, 404);
   assert.equal((await call('/', 'POST')).code, 405);
+});
+
+// Hand-made TMB alerts in the API's two shapes. Not TMB data.
+const METRO_ALERTS_BODY = {
+  status: 'success',
+  data: [
+    {
+      id: 1,
+      entities: [
+        { line_name: 'L1', station_code: '100', entrance_code: '10001' },
+      ],
+      publications: [
+        {
+          textEn: 'The north entrance is closed for works.',
+          textEs: 'El acceso norte está cerrado por obras.',
+          begin_date: 1,
+          end_date: 9e15,
+        },
+      ],
+    },
+    {
+      id: 2,
+      entities: [{ line_name: 'L1', station_code: '' }],
+      publications: [{ textCa: 'Freqüència reduïda a la L1.', begin_date: 1 }],
+    },
+    {
+      id: 3,
+      entities: [{ line_name: 'L5', station_code: '510' }],
+      publications: [{ textEn: 'Elsewhere.', begin_date: 1 }],
+    },
+    {
+      id: 4,
+      entities: [{ line_name: 'L1', station_code: '100' }],
+      publications: [{ textEn: 'Over.', begin_date: 1, end_date: 2 }],
+    },
+  ],
+};
+const BUS_ALERTS_BODY = {
+  status: 'success',
+  data: {
+    alerts: [
+      {
+        id: 10,
+        channelInfoTO: {
+          publish: true,
+          begin: 1,
+          end: 9e15,
+          textEn: 'Stop 108 moves 50 m during works.',
+          textEs: 'La parada 108 se traslada 50 m por obras.',
+        },
+        linesAffected: [
+          { commercialLineId: 'H16', ways: [{ stops: [{ stopId: 108 }] }] },
+        ],
+      },
+      {
+        id: 11,
+        channelInfoTO: { publish: false, textEn: 'Not published.' },
+        linesAffected: [{ commercialLineId: 'H16', ways: [] }],
+      },
+    ],
+  },
+};
+
+test('arrivals carry the station’s or stop’s active TMB alerts, read every two minutes', async () => {
+  let clock = 50_000;
+  const { fetchImpl, calls } = tmbApi((path) =>
+    path === '/v1/alerts/metro/channels/WEB'
+      ? { body: METRO_ALERTS_BODY }
+      : path === '/v1/alerts/bus/channels/WEB'
+        ? { body: BUS_ALERTS_BODY }
+        : null,
+  );
+  const service = createTmbArrivalsService({
+    env: PAIR,
+    fetchImpl,
+    now: () => clock,
+  });
+  const metro = await service.arrivals('metro', '6660100');
+  assert.deepEqual(
+    metro.alerts.map((alert) => alert.header.en ?? alert.header.ca),
+    ['The north entrance is closed for works.', 'Freqüència reduïda a la L1.'],
+    'its own station first, then its line; other stations and ended ones left out',
+  );
+  const bus = await service.arrivals('bus', '108');
+  assert.deepEqual(bus.alerts, [
+    {
+      header: {
+        en: 'Stop 108 moves 50 m during works.',
+        es: 'La parada 108 se traslada 50 m por obras.',
+      },
+    },
+  ]);
+  const alertCalls = () =>
+    calls.filter((c) => c.path.startsWith('/v1/alerts/')).length;
+  assert.equal(alertCalls(), 2, 'one per kind');
+  clock += TMB_ARRIVALS_TTL_MS;
+  await service.arrivals('metro', '6660100');
+  assert.equal(alertCalls(), 2, 'kept for two minutes');
+  clock += TMB_ALERTS_TTL_MS;
+  await service.arrivals('metro', '6660100');
+  assert.equal(alertCalls(), 3);
+  for (const call of calls.filter((c) => c.path.startsWith('/v1/alerts/')))
+    assert.equal(call.init.redirect, 'error');
+});
+
+test('arrivals still answer when TMB’s alerts do not', async () => {
+  const { fetchImpl } = tmbApi((path) =>
+    path.startsWith('/v1/alerts/') ? { status: 500 } : null,
+  );
+  const service = createTmbArrivalsService({ env: PAIR, fetchImpl });
+  const metro = await service.arrivals('metro', '6660100');
+  assert.equal(metro.routes.length, 1);
+  assert.deepEqual(metro.alerts, []);
 });

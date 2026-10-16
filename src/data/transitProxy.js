@@ -77,19 +77,22 @@ export const TRANSIT_BACKOFF_LADDER_MS = Object.freeze([
  * registered feed. Anything else — a different route, an unknown id, path
  * tricks, a query string — resolves to null and the caller 404s.
  * @param {string} url Request URL relative to the mount point.
- * `/trail/<feedId>/<vehicleId>` and `/arrivals/<feedId>/<stationId>` resolve
- * only for feeds that keep history or have a TripUpdates companion.
+ * `/trail/<feedId>/<vehicleId>`, `/arrivals/<feedId>/<stationId>` and
+ * `/alerts/<feedId>` resolve only for feeds that keep history, have a
+ * TripUpdates companion or an Alerts companion.
  * @returns {{ route: 'feeds' } | { route: 'vehicles', feed: object } |
  *   { route: 'trail', feed: object, vehicleId: string } |
- *   { route: 'arrivals', feed: object, stationId: string } | null}
+ *   { route: 'arrivals', feed: object, stationId: string } |
+ *   { route: 'alerts', feed: object } | null}
  */
 export function resolveTransitRoute(url) {
   const pathname = String(url || '').split('?')[0];
   if (pathname === '/feeds' || pathname === '/feeds/')
     return { route: 'feeds' };
-  const match = /^\/(vehicles|trail|arrivals)\/([^/]+)(?:\/([^/]+))?\/?$/.exec(
-    pathname,
-  );
+  const match =
+    /^\/(vehicles|trail|arrivals|alerts)\/([^/]+)(?:\/([^/]+))?\/?$/.exec(
+      pathname,
+    );
   if (!match) return null;
   let id, vehicleId;
   try {
@@ -102,6 +105,10 @@ export function resolveTransitRoute(url) {
   if (!feed) return null;
   if (match[1] === 'vehicles')
     return vehicleId === null ? { route: 'vehicles', feed } : null;
+  if (match[1] === 'alerts')
+    return vehicleId === null && feed.alerts?.url
+      ? { route: 'alerts', feed }
+      : null;
   // A station's next trains, for feeds with a TripUpdates companion.
   if (match[1] === 'arrivals')
     return feed.tripUpdates?.url && validTransitIdentifier(vehicleId)
@@ -336,6 +343,7 @@ export function buildTransitSnapshot(
     stopPlaces = null,
     tripUpdates = null,
     tripDetails = null,
+    alerts = null,
   } = {},
 ) {
   const decoded = transitFormatFor(feed).decode(bytes);
@@ -368,6 +376,7 @@ export function buildTransitSnapshot(
             stopNames,
             tripUpdates,
             tripDetails,
+            alerts,
             stopKey: feed.tripUpdates?.stopKey ?? null,
             now,
           },

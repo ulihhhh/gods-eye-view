@@ -8,14 +8,13 @@ investigación.
 
 ## Cómo retomar (estado al 2026-10-16)
 
-- **Hecho y en `mi-main`**: fases 1–5f, 6a–6c, 7a y 7b. **7c** (paneles de AV/LD y
-  paneles combinados) en la rama `feat/transit-es-ld-boards`. Siguiente: **Fase 8**
-  (incidencias).
-- Los paneles: ruta `/api/transit/arrivals/<feed>/<estación>` (`arrivals()` en
-  `src/sources/transitService.js`), constructores en `src/data/transitArrivals.js`,
-  horarios en `src/data/renfeTimetable.js` (`buildGtfsTimetable` + adaptadores) y la
-  ficha en `src/data/spainRailNetworkLayer.js` (`spainRailBoardFeeds`,
-  `mergeSpainRailBoards`, `spainRailArrivalLines`).
+- **Hecho y en `mi-main`**: fases 1–5f, 6a–6c y 7a–7c. **Fase 8** (incidencias) en la
+  rama `feat/transit-es-alerts`. Siguiente: **Fase 9** (opcional, metro TMB estimado)
+  o la **Fase 10** (PR conjunto a upstream).
+- Avisos: decodificador `src/data/gtfsAlerts.js`, enganche `alerts` del registro
+  (`companionFor` en `src/sources/transitService.js`), ruta
+  `/api/transit/alerts/<feed>`, texto de ficha en `src/data/transitAlertText.js`;
+  Barcelona en `src/data/barcelonaAlerts.js` (TMB y AMB).
 - **Entorno:**
   - Tests con Node 24 de nvm (`source ~/.nvm/nvm.sh && nvm use 24`); el Node 21 del
     sistema cuelga un test.
@@ -1089,6 +1088,32 @@ Así que la fase se parte en tres:
 - Posible pill nueva AVISOS (marcar en el mapa las estaciones y líneas con aviso).
 
 **Hecho cuando** un aviso activo de cada operador aparece en su ficha.
+
+**Resultado** (✅ 2026-10-16, rama `feat/transit-es-alerts`):
+
+- Medido en vivo (12:30): Renfe `alerts.pb` 52 avisos activos, solo castellano, **sin
+  `header_text`** (solo descripción: se lee como cabecera), por `route_id` del GTFS
+  (432 rutas, prefijo de núcleo) o por estación (20, casi todo ascensores); FGC 332,
+  sin idioma, todos por viaje + parada (escolares, enlace con el Cremallera; el mismo
+  aviso una vez por parada → se deduplica por texto); AMB 116 (ca/es, por ruta y
+  paradas, alguno con inicio futuro); TMB metro 10 (entidades línea/estación/acceso,
+  texto en ca/es/en en `publications`) y bus 54 (`channelInfoTO`, paradas por línea y
+  sentido en `linesAffected`).
+- Servidor: `alerts: {url, minIntervalMs: 120 s}` en las filas de Renfe Cercanías y
+  FGC; `tripUpdatesFor` pasa a ser un caso de `companionFor(feed, hook)`. Cada
+  vehículo lleva `alerts` (≤ 3, `alertsMore`) por `tripId` o por `gtfsRouteId` (nuevo
+  campo de los detalles de viaje de Renfe). `/api/transit/alerts/<feed>` sirve los
+  activos por ruta o estación (sin los de viaje).
+- TMB: `createTmbAlertsService` (2 min por tipo, se queda la última lista buena) y las
+  llegadas de cada estación o parada traen `alerts`: estación por código, luego los de
+  línea entera; parada por código, luego los de línea sin paradas. AMB igual con
+  `alerts.bin`: parada, luego los de una ruta que pasa por ella sin paradas.
+- Fichas: `⚠ texto` (inglés > castellano > catalán; sin los `#MadC3` de Renfe;
+  140 caracteres), dos por ficha y "+N more alerts".
+- Licencia de AMB ("no alterar el contenido"): el texto se muestra tal cual, solo
+  acortado con "…" en la ficha.
+- Pendiente (opcional): pill AVISOS para marcar en el mapa estaciones y líneas con
+  aviso.
 
 ### Fase 9 — (Opcional) Experimento: metro TMB "estimado" — `solo fork`
 

@@ -1,12 +1,17 @@
 /**
  * Card lines for the optional service fields of a transit record
  * (`serviceName`, `destination`, `origin`, `delaySec`, `onTime`,
- * `nextStops`, `carLoads`, `vehicleType`; see src/data/transitServiceFields.js). A record without
+ * `nextStops`, `alerts`, `carLoads`, `vehicleType`; see
+ * src/data/transitServiceFields.js). A record without
  * them gets nothing, so feeds that never set them keep their card as it was.
  */
 
+import { transitAlertText } from '../../data/transitAlertText.js';
+
 /** Next stops named on the card; the rest are counted. */
 export const TRANSIT_CARD_NEXT_STOPS = 4;
+/** Alerts written out on the card; the rest are counted. */
+export const TRANSIT_CARD_ALERTS = 2;
 
 /** Within this, a delay reads as on time (operators round to the minute). */
 const ON_TIME_S = 60;
@@ -72,6 +77,19 @@ export function transitServiceCopy(feed, record) {
       (Number.isFinite(record.nextStopsMore) ? record.nextStopsMore : 0);
     lines.push(`Next: ${shown.join(' · ')}${more > 0 ? ` · +${more}` : ''}`);
   }
+  // Service alerts on the train's trip or line, as the operator words them.
+  const alerts = Array.isArray(record.alerts) ? record.alerts : [];
+  const shown = alerts
+    .map((alert) => transitAlertText(alert?.header))
+    .filter(Boolean)
+    .slice(0, TRANSIT_CARD_ALERTS);
+  for (const text of shown) lines.push(`⚠ ${text}`);
+  const moreAlerts =
+    alerts.length -
+    shown.length +
+    (Number.isFinite(record.alertsMore) ? record.alertsMore : 0);
+  if (shown.length && moreAlerts > 0)
+    lines.push(`+${moreAlerts} more alert${moreAlerts === 1 ? '' : 's'}`);
   if (Array.isArray(record.carLoads) && record.carLoads.length)
     lines.push(
       `Load by car: ${record.carLoads.map((pct) => `${pct}%`).join(' · ')}`,

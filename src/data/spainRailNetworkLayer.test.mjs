@@ -20,6 +20,8 @@ import {
   SPAIN_RAIL_DEFAULT_PARAMS,
   SPAIN_RAIL_CARD_REFRESH_MS,
   mergeSpainRailBoards,
+  spainRailAlertLines,
+  spainRailAlertsFor,
   spainRailArrivalLines,
   spainRailBoardFeeds,
 } from './spainRailNetworkLayer.js';
@@ -617,7 +619,7 @@ test('an FGC station card asks for its trains, refreshes while open and stops on
 
     layer._selectForTest('spain-rail-network:station:renfe-cercanias:71801');
     assert.deepEqual(
-      asked.slice(2),
+      asked.slice(2).filter((url) => url.includes('/arrivals/')),
       [
         '/api/transit/arrivals/renfe-cercanias/71801',
         '/api/transit/arrivals/renfe-ld/71801',
@@ -721,4 +723,121 @@ test('a station shared with AV/LD asks both feeds and lists each train once', ()
     ['c1', 'l2', 'c2', 'l3'],
   );
   assert.equal(merged.fetchedAt, at(-1));
+});
+
+/** Hand-made alerts, the shape /api/transit/alerts serves. Not Renfe data. */
+const ALERTS = [
+  {
+    id: 'line',
+    header: { es: '#BcnR2 Obras entre Sants y El Prat.' },
+    routes: ['51T0010R2', '51T0011R2'],
+    stops: [],
+  },
+  {
+    id: 'madrid-r2',
+    header: { es: 'Otra red: no es la R2 de Rodalies.' },
+    routes: ['10T0010R2'],
+    stops: [],
+  },
+  {
+    id: 'lift',
+    header: { es: 'Ascensor de Sants fuera de servicio.' },
+    routes: [],
+    stops: ['71801'],
+  },
+  {
+    id: 'repeat',
+    header: { es: '#BcnR2 Obras entre Sants y El Prat.' },
+    routes: ['51T0012R2'],
+    stops: [],
+  },
+];
+
+test('a Cercanías line card shows its own network’s alerts; a station its own first', () => {
+  const r2 = { network: 'renfe-cercanias', group: '51', line: 'R2' };
+  assert.deepEqual(
+    spainRailAlertsFor('line', r2, ALERTS).map((alert) => alert.id),
+    ['line'],
+    'same line elsewhere and repeated text left out',
+  );
+  const sants = {
+    network: 'renfe-cercanias',
+    code: '71801',
+    lines: [{ name: 'R2', group: '51' }],
+  };
+  assert.deepEqual(
+    spainRailAlertsFor('station', sants, ALERTS).map((alert) => alert.id),
+    ['lift', 'line'],
+  );
+  assert.deepEqual(
+    spainRailAlertsFor(
+      'line',
+      { network: 'fgc', group: 'fgc', line: 'S1' },
+      ALERTS,
+    ),
+    [],
+  );
+  assert.deepEqual(spainRailAlertsFor('ign', null, ALERTS), []);
+  assert.deepEqual(
+    spainRailAlertLines([...ALERTS, { header: { es: 'Tercero' } }]),
+    [
+      '⚠ Obras entre Sants y El Prat.',
+      '⚠ Otra red: no es la R2 de Rodalies.',
+      '+3 more alerts',
+    ],
+  );
+});
+
+test('line and station cards ask for alerts once, then repaint with them', async () => {
+  const entries = [];
+  const asked = [];
+  let clock = BOARD_NOW;
+  const layer = createSpainRailNetworkLayer({
+    overlayHost: {
+      setEntries: (_id, list) => entries.push(list),
+      setVisible() {},
+      clearSource() {},
+    },
+    loadJson: async (url) => {
+      const name = url.pathname.split('/').pop();
+      if (name === 'ign_rail.json') return { paths: [] };
+      return name === 'lines.json' ? LINES : STATIONS;
+    },
+    fetchImpl: async (url) => {
+      asked.push(url);
+      return new Response(
+        JSON.stringify(
+          url.includes('/alerts/') ? { alerts: ALERTS } : { arrivals: [] },
+        ),
+        { status: 200 },
+      );
+    },
+    now: () => clock,
+    setIntervalImpl: () => 1,
+    clearIntervalImpl() {},
+  });
+  const viewer = fakeViewer();
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  try {
+    layer.init(viewer);
+    layer.enable(viewer);
+    await layer.update();
+    layer._selectForTest('spain-rail-network:line:0');
+    assert.deepEqual(asked, ['/api/transit/alerts/renfe-cercanias']);
+    await settle();
+    assert.ok(
+      entries.at(-1)[0].details.includes('⚠ Obras entre Sants y El Prat.'),
+      entries.at(-1)[0].details,
+    );
+    layer._selectForTest('spain-rail-network:line:1');
+    assert.equal(asked.length, 1, 'an FGC line asks for no alerts');
+    clock += 60_000;
+    layer._selectForTest('spain-rail-network:line:0');
+    assert.equal(asked.length, 1, 'kept for two minutes');
+    clock += 61_000;
+    layer._selectForTest('spain-rail-network:line:0');
+    assert.equal(asked.length, 2);
+  } finally {
+    layer.destroy(viewer);
+  }
 });

@@ -10,6 +10,7 @@ import {
   setOverlaySourceVisible,
 } from '../overlays/worldOverlay.js';
 import { loadBundledJson } from './bundledJson.js';
+import { transitAlertText } from './transitAlertText.js';
 
 /**
  * Rail network (Spain, fork-local) — the Cercanías / Rodalies and FGC lines
@@ -145,6 +146,79 @@ export function mergeSpainRailBoards(answers) {
     arrivals,
     fetchedAt: times.length ? Math.max(...times) : null,
   };
+}
+
+/** Feeds whose alerts the line and station cards show (Renfe's, by route). */
+export const SPAIN_RAIL_ALERT_FEEDS = Object.freeze({
+  'renfe-cercanias': 'renfe-cercanias',
+});
+/** How long the card keeps a feed's alerts before asking again. */
+export const SPAIN_RAIL_ALERTS_REFRESH_MS = 120_000;
+/** Alerts written out on a card; the rest are counted. */
+export const SPAIN_RAIL_CARD_ALERTS = 2;
+
+/** A Cercanías GTFS route id: network (`10`), `T`, a number, the line. */
+const CERCANIAS_ROUTE = /^(\d{2})T\d{4}([A-Z][A-Za-z0-9]*)$/;
+
+/**
+ * The alerts a line or station card shows: a line's own (by network and
+ * line), a station's own (by stop), then those of the lines serving it.
+ * Each text once.
+ * @param {'line'|'station'|'ign'} kind
+ * @param {object} item
+ * @param {Array<{header: object, routes?: string[], stops?: string[]}>} alerts
+ * @returns {object[]}
+ */
+export function spainRailAlertsFor(kind, item, alerts) {
+  if (!Array.isArray(alerts) || !item || kind === 'ign') return [];
+  const onLine = (alert, group, line) =>
+    (alert.routes || []).some((route) => {
+      const match = CERCANIAS_ROUTE.exec(route);
+      return match && match[1] === group && match[2] === line;
+    });
+  let found;
+  if (kind === 'line') {
+    if (item.network !== 'renfe-cercanias') return [];
+    found = alerts.filter((alert) =>
+      onLine(alert, String(item.group), item.line),
+    );
+  } else {
+    const own = alerts.filter((alert) =>
+      (alert.stops || []).includes(item.code),
+    );
+    const lines = alerts.filter(
+      (alert) =>
+        !own.includes(alert) &&
+        (item.lines || []).some(
+          (line) => line.group && onLine(alert, line.group, line.name),
+        ),
+    );
+    found = [...own, ...lines];
+  }
+  const texts = new Set();
+  return found.filter((alert) => {
+    const text = JSON.stringify(alert.header);
+    if (texts.has(text)) return false;
+    texts.add(text);
+    return true;
+  });
+}
+
+/**
+ * Card lines for alerts.
+ * @param {object[]} alerts
+ * @returns {string[]}
+ */
+export function spainRailAlertLines(alerts) {
+  const texts = (alerts || [])
+    .map((alert) => transitAlertText(alert.header))
+    .filter(Boolean);
+  const lines = texts
+    .slice(0, SPAIN_RAIL_CARD_ALERTS)
+    .map((text) => `⚠ ${text}`);
+  const more = texts.length - lines.length;
+  if (more > 0) lines.push(`+${more} more alert${more === 1 ? '' : 's'}`);
+  return lines;
 }
 /** Card repaint (countdown) and the age at which it asks again. */
 export const SPAIN_RAIL_CARD_TICK_MS = 5_000;
@@ -325,6 +399,7 @@ export function spainRailStationsFromPack(pack, linesPack = null) {
             color: /^[0-9A-Fa-f]{6}$/.test(String(line.color || ''))
               ? line.color
               : null,
+            ...(line.group ? { group: String(line.group) } : {}),
           });
       }
       // Drawn once, as Cercanías, where AV/LD/MD trains call too.
@@ -437,9 +512,16 @@ export function parseSpainRailPickId(pickedId) {
 
 /**
  * Card copy for a line, a national-network track or a station; a station
- * with a `board` lists its next trains.
+ * with a `board` lists its next trains, and `alerts` (already matched,
+ * spainRailAlertsFor) go under the header lines.
  */
-export function buildSpainRailCopy(kind, item, board = null, now = Date.now()) {
+export function buildSpainRailCopy(
+  kind,
+  item,
+  board = null,
+  now = Date.now(),
+  alerts = [],
+) {
   if (kind === 'ign') {
     return {
       title: '🛤 Railway',
@@ -454,6 +536,7 @@ export function buildSpainRailCopy(kind, item, board = null, now = Date.now()) {
       title: `🛤 ${item.line}`,
       details: [
         `${spainRailNetworkLabel(item)} · line`,
+        ...spainRailAlertLines(alerts),
         `Source: ${item.network === 'fgc' ? 'FGC' : 'Renfe Operadora'} open data`,
       ],
     };
@@ -470,6 +553,7 @@ export function buildSpainRailCopy(kind, item, board = null, now = Date.now()) {
     details: [
       `${kindLabel} · ${item.code}`,
       ...(lines ? [`Lines: ${lines}`] : []),
+      ...spainRailAlertLines(alerts),
       ...spainRailArrivalLines(board, now, fgc ? 'FGC' : 'Renfe'),
       `Source: ${fgc ? 'FGC' : 'Renfe Operadora'} open data` +
         (Number.isFinite(board?.data?.fetchedAt)
@@ -529,6 +613,14 @@ export function createSpainRailNetworkLayer({
   let _board = null;
   let _generation = 0;
   let _tick = null;
+  /**
+   * Alerts per feed, shared by every card, and the open card to repaint
+   * when they arrive.
+   * @type {Map<string, {at: number, alerts: object[]|null, inFlight: boolean}>}
+   */
+  const _alerts = new Map();
+  /** @type {{key: string, kind: string, item: object, position: Cesium.Cartesian3}|null} */
+  let _card = null;
   /** @type {Cesium.ScreenSpaceEventHandler|null} */
   let _clickHandler = null;
 
@@ -540,8 +632,50 @@ export function createSpainRailNetworkLayer({
     );
   }
 
+  /** The feed whose alerts a line or station card shows, if any. */
+  function _alertFeed(kind, item) {
+    if (kind === 'ign' || !item) return null;
+    return SPAIN_RAIL_ALERT_FEEDS[item.network] ?? null;
+  }
+
+  /** The cached alerts a card shows, asking for them when old or missing. */
+  function _alertsFor(kind, item) {
+    const feedId = _alertFeed(kind, item);
+    if (!feedId) return [];
+    const known = _alerts.get(feedId);
+    if (
+      !known ||
+      (!known.inFlight && now() - known.at >= SPAIN_RAIL_ALERTS_REFRESH_MS)
+    )
+      void _askAlerts(feedId);
+    return spainRailAlertsFor(kind, item, known?.alerts || []);
+  }
+
+  async function _askAlerts(feedId) {
+    const known = _alerts.get(feedId);
+    const load = {
+      at: now(),
+      alerts: known?.alerts ?? null,
+      inFlight: true,
+    };
+    _alerts.set(feedId, load);
+    try {
+      const response = await fetchImpl(
+        `/api/transit/alerts/${encodeURIComponent(feedId)}`,
+      );
+      const data = response.ok ? await response.json() : null;
+      if (Array.isArray(data?.alerts)) load.alerts = data.alerts;
+    } catch {
+      /* the card shows what it had */
+    }
+    load.inFlight = false;
+    if (_card && _alertFeed(_card.kind, _card.item) === feedId)
+      _showCard(_card.key, _card.kind, _card.item, _card.position);
+  }
+
   function _clearSelection() {
     _selectedKey = null;
+    _card = null;
     if (_tick !== null) clearIntervalImpl(_tick);
     _tick = null;
     _board = null;
@@ -624,11 +758,13 @@ export function createSpainRailNetworkLayer({
   function _showCard(key, kind, item, position) {
     if (!position) return;
     _selectedKey = key;
+    _card = { key, kind, item, position };
     const { title, details } = buildSpainRailCopy(
       kind,
       item,
       kind === 'station' ? _board : null,
       now(),
+      _alertsFor(kind, item),
     );
     const rgb =
       kind === 'line'
@@ -972,6 +1108,7 @@ export function createSpainRailNetworkLayer({
 
     destroy(viewer) {
       _clearSelection();
+      _alerts.clear();
       _removeClickHandler();
       unregisterPickOwner(LAYER_ID);
       overlayHost.setVisible(SPAIN_RAIL_SELECTED_OVERLAY_SOURCE_ID, false);
