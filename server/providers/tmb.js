@@ -13,6 +13,7 @@ import {
 import {
   normalizeTmbBusAlerts,
   normalizeTmbMetroAlerts,
+  tmbAlertMarks,
   tmbBusStopAlerts,
   tmbMetroStationAlerts,
 } from '../../src/data/barcelonaAlerts.js';
@@ -36,6 +37,9 @@ import {
  *   GET /api/tmb/bus-lines → {lines: [{name, desc, color, paths}], fetchedAt}
  *     Bus line geometry, cached for a day; asked for apart from the
  *     stations because it is larger and only drawn at street scale.
+ *   GET /api/tmb/alerts → {metro: [group], bus: [code], lines: [name],
+ *     fetchedAt}: the stations and stops with an active alert of their
+ *     own, and the metro lines with a line-wide one (the ALERTS pill).
  *   GET /api/tmb/arrivals/metro/<group> and /api/tmb/arrivals/bus/<code>
  *     → {kind, id, fetchedAt, routes: [...], alerts: [{header}]}: next
  *     arrivals, cached 15 s, and the place's active service alerts (TMB's
@@ -655,7 +659,8 @@ function sendTmbError(res, error) {
 export function tmbProxy(options = {}) {
   const service = createTmbStatusService(options);
   const catalog = createTmbCatalogService(options);
-  const arrivals = createTmbArrivalsService({ ...options, catalog });
+  const alerts = createTmbAlertsService(options);
+  const arrivals = createTmbArrivalsService({ ...options, catalog, alerts });
   const busLines = createTmbBusLinesService(options);
   function install(server) {
     server.middlewares.use(
@@ -694,6 +699,35 @@ export function tmbProxy(options = {}) {
           return sendJson(res, 405, { error: 'Method not allowed' });
         try {
           return sendJson(res, 200, await busLines.lines());
+        } catch (error) {
+          return sendTmbError(res, error);
+        }
+      }),
+    );
+    server.middlewares.use(
+      '/api/tmb/alerts',
+      sameSiteGated(async (req, res) => {
+        const rest = String(req.url || '/').split('?')[0];
+        if (rest !== '/' && rest !== '')
+          return sendJson(res, 404, { error: 'not_found' });
+        if (req.method !== 'GET')
+          return sendJson(res, 405, { error: 'Method not allowed' });
+        try {
+          const places = await catalog.catalog();
+          const [metro, bus] = await Promise.all([
+            alerts.list('metro'),
+            alerts.list('bus'),
+          ]);
+          return sendJson(res, 200, {
+            ...tmbAlertMarks({
+              metro,
+              bus,
+              stations: places.metro,
+              stops: places.bus,
+              now: Date.now(),
+            }),
+            fetchedAt: Date.now(),
+          });
         } catch (error) {
           return sendTmbError(res, error);
         }

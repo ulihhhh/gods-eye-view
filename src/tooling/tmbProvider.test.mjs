@@ -780,3 +780,23 @@ test('arrivals still answer when TMB’s alerts do not', async () => {
   assert.equal(metro.routes.length, 1);
   assert.deepEqual(metro.alerts, []);
 });
+
+test('the ALERTS marks name stations and stops with their own alert, and lines with a line-wide one', async () => {
+  const { tmbAlertMarks, normalizeTmbMetroAlerts, normalizeTmbBusAlerts } =
+    await import('../data/barcelonaAlerts.js');
+  const marks = tmbAlertMarks({
+    metro: normalizeTmbMetroAlerts(METRO_ALERTS_BODY),
+    bus: normalizeTmbBusAlerts(BUS_ALERTS_BODY),
+    stations: [
+      { id: '6660100', codes: [100, 300] },
+      { id: '6660200', codes: [200] },
+    ],
+    stops: [{ id: '108' }, { id: '109' }],
+    now: 50_000,
+  });
+  assert.deepEqual(marks, {
+    metro: ['6660100'],
+    bus: ['108'],
+    lines: ['L1'],
+  });
+});

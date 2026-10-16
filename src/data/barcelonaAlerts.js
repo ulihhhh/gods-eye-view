@@ -195,3 +195,52 @@ export function ambStopAlerts(alerts, stopId, routeIds, now) {
     ),
   ]);
 }
+
+/**
+ * What Barcelona Arrivals' ALERTS pill marks from TMB's lists: the metro
+ * station groups with an alert of their own, the bus stops one names, and
+ * the metro lines with a line-wide alert (no station).
+ * @param {{metro?: object[]|null, bus?: object[]|null,
+ *   stations: Array<{id: string, codes: Array<number|string>}>,
+ *   stops: Array<{id: string}>, now: number}} options
+ * @returns {{metro: string[], bus: string[], lines: string[]}}
+ */
+export function tmbAlertMarks({ metro, bus, stations, stops, now }) {
+  const metroActive = (metro || []).filter((a) => alertActive(a, now));
+  const busActive = (bus || []).filter((a) => alertActive(a, now));
+  const codes = new Set(metroActive.flatMap((alert) => alert.stations));
+  const named = new Set(busActive.flatMap((alert) => alert.stops));
+  return {
+    metro: (stations || [])
+      .filter((station) =>
+        (station.codes || []).some((c) => codes.has(String(c))),
+      )
+      .map((station) => station.id),
+    bus: (stops || [])
+      .filter((stop) => named.has(String(stop.id)))
+      .map((stop) => stop.id),
+    lines: [
+      ...new Set(
+        metroActive
+          .filter((alert) => !alert.stations.length)
+          .flatMap((alert) => alert.lines),
+      ),
+    ],
+  };
+}
+
+/**
+ * The AMB stops with an active alert naming them.
+ * @param {object[]|null} alerts decodeAlerts
+ * @param {Set<string>} stopIds the stops AMB serves
+ * @param {number} now
+ * @returns {string[]}
+ */
+export function ambAlertMarks(alerts, stopIds, now) {
+  const marked = new Set();
+  for (const alert of alerts || []) {
+    if (!alertActive(alert, now)) continue;
+    for (const stop of alert.stops) if (stopIds.has(stop)) marked.add(stop);
+  }
+  return [...marked].sort();
+}

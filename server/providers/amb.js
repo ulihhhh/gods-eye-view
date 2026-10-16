@@ -11,7 +11,10 @@ import {
   decodeTripUpdates,
 } from '../../src/data/ambArrivals.js';
 import { decodeAlerts } from '../../src/data/gtfsAlerts.js';
-import { ambStopAlerts } from '../../src/data/barcelonaAlerts.js';
+import {
+  ambAlertMarks,
+  ambStopAlerts,
+} from '../../src/data/barcelonaAlerts.js';
 
 /**
  * AMB (Àrea Metropolitana de Barcelona) bus arrivals — keyless.
@@ -29,6 +32,8 @@ import { ambStopAlerts } from '../../src/data/barcelonaAlerts.js';
  *   GET /api/amb/stops → {stops: [{id, code, name, lat, lon}], fetchedAt}
  *   GET /api/amb/lines → {lines: [{name, desc, color, paths}], fetchedAt}
  *     Each line's route as AMB publishes it, from the same daily GTFS.
+ *   GET /api/amb/alerts → {stops: [stopId], fetchedAt}: the stops with an
+ *     active alert of their own (the ALERTS pill).
  *   GET /api/amb/arrivals/<stopId> → {kind: 'amb', id, fetchedAt, routes,
  *     alerts: [{header}]} (the stop's active alerts, from alerts.bin)
  *     `fetchedAt` is the feed's own timestamp (the licence asks for the date
@@ -287,6 +292,15 @@ export function createAmbArrivalsService({
       const current = await currentSchedule();
       return { stops: current.stops, fetchedAt: current.fetchedAt };
     },
+    /** @returns {Promise<{stops: string[], fetchedAt: number}>} the stops with an active alert of their own */
+    async alertedStops() {
+      const current = await currentSchedule();
+      const alerts = await currentAlerts();
+      return {
+        stops: alerts ? ambAlertMarks(alerts, current.stopIds, now()) : [],
+        fetchedAt: alertsLoad?.at ?? now(),
+      };
+    },
     /** @returns {Promise<{lines: object[], fetchedAt: number}>} */
     async lines() {
       const current = await currentSchedule();
@@ -370,6 +384,21 @@ export function ambProxy(options = {}) {
           return sendJson(res, 405, { error: 'Method not allowed' });
         try {
           return sendJson(res, 200, await service.lines());
+        } catch (error) {
+          return sendAmbError(res, error);
+        }
+      }),
+    );
+    server.middlewares.use(
+      '/api/amb/alerts',
+      sameSiteGated(async (req, res) => {
+        const rest = String(req.url || '/').split('?')[0];
+        if (rest !== '/' && rest !== '')
+          return sendJson(res, 404, { error: 'not_found' });
+        if (req.method !== 'GET')
+          return sendJson(res, 405, { error: 'Method not allowed' });
+        try {
+          return sendJson(res, 200, await service.alertedStops());
         } catch (error) {
           return sendAmbError(res, error);
         }

@@ -21,6 +21,7 @@ import {
   SPAIN_RAIL_CARD_REFRESH_MS,
   mergeSpainRailBoards,
   spainRailAlertLines,
+  spainRailAlertMarks,
   spainRailAlertsFor,
   spainRailArrivalLines,
   spainRailBoardFeeds,
@@ -332,6 +333,7 @@ test('the pills switch Cercanías, FGC, the national network and the stations on
         ['FGC', true],
         ['AV/LD', true],
         ['STATIONS', true],
+        ['ALERTS', false],
       ],
     );
     const shown = () =>
@@ -837,6 +839,65 @@ test('line and station cards ask for alerts once, then repaint with them', async
     clock += 61_000;
     layer._selectForTest('spain-rail-network:line:0');
     assert.equal(asked.length, 2);
+  } finally {
+    layer.destroy(viewer);
+  }
+});
+
+test('the ALERTS pill marks lines with alerts and stations with their own', () => {
+  const lines = normalizeSpainRailLines(LINES);
+  const stations = spainRailStationsFromPack(STATIONS, LINES);
+  const marks = spainRailAlertMarks(lines, stations, ALERTS);
+  assert.deepEqual([...marks.lines], [0], 'the Rodalies R2');
+  assert.deepEqual(
+    [...marks.stations],
+    ['renfe-cercanias:71801'],
+    'Sants, for its lift; not for its line',
+  );
+  assert.deepEqual(spainRailAlertMarks(lines, stations, []).lines.size, 0);
+});
+
+test('the ALERTS pill asks for alerts while on and outlines the stations they name', async () => {
+  const asked = [];
+  const timers = [];
+  const layer = createSpainRailNetworkLayer({
+    overlayHost: { setEntries() {}, setVisible() {}, clearSource() {} },
+    loadJson: async (url) => {
+      const name = url.pathname.split('/').pop();
+      if (name === 'ign_rail.json') return { paths: [] };
+      return name === 'lines.json' ? LINES : STATIONS;
+    },
+    fetchImpl: async (url) => {
+      asked.push(url);
+      return new Response(JSON.stringify({ alerts: ALERTS }), { status: 200 });
+    },
+    now: () => BOARD_NOW,
+    setIntervalImpl: (fn, ms) => timers.push({ fn, ms }) - 1,
+    clearIntervalImpl: (id) => {
+      timers[id] = null;
+    },
+  });
+  const viewer = fakeViewer();
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  try {
+    layer.init(viewer);
+    layer.enable(viewer);
+    await layer.update();
+    const sants = viewer._dataSources[0].entities.getById(
+      'spain-rail-network:station:renfe-cercanias:71801',
+    );
+    const width = () =>
+      sants.point.outlineWidth.getValue(Cesium.JulianDate.now());
+    assert.equal(width(), 1);
+    assert.deepEqual(asked, [], 'off by default');
+    layer.setParams({ alerts: true });
+    assert.deepEqual(asked, ['/api/transit/alerts/renfe-cercanias']);
+    await settle();
+    assert.equal(width(), 3);
+    assert.equal(timers.filter(Boolean).length, 1);
+    layer.setParams({ alerts: false });
+    assert.equal(width(), 1);
+    assert.equal(timers.filter(Boolean).length, 0);
   } finally {
     layer.destroy(viewer);
   }

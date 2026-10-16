@@ -373,7 +373,11 @@
   serves a registry hook, `alerts: {url, minIntervalMs}`, fetched beside
   the positions like `tripUpdates`, and `/api/transit/alerts/<feedId>`.
   TMB's and AMB's arrivals answers carry the place's alerts. Every list is
-  read at most every two minutes; text is plain and bounded.
+  read at most every two minutes; text is plain and bounded. A new ALERTS
+  pill (off by default, kept in share links) on Rail network and Barcelona
+  Arrivals marks in amber the lines with an alert (a halo under Cercanías
+  and metro lines) and the stations and stops with one of their own (a
+  thicker outline); `/api/tmb/alerts` and `/api/amb/alerts` name them.
 
 - AV/LD/MD stations in Rail network (Spain) list their next trains as well
   (`AVE 3123 → Figueres-Vilafant · 12:27 (5 min)`), from Renfe's AV/LD/MD

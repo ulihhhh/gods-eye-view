@@ -478,12 +478,14 @@ const OPTION_GROUPS = Object.freeze({
     booleanOption('fgc', 'f', true),
     booleanOption('national', 'n', true),
     booleanOption('stations', 's', true),
+    booleanOption('alerts', 'w', false),
   ]),
   'tmb-arrivals': Object.freeze([
     booleanOption('metro', 'm', true),
     booleanOption('tmbBus', 'b', true),
     booleanOption('ambBus', 'a', true),
     booleanOption('lines', 'l', true),
+    booleanOption('alerts', 'w', false),
   ]),
 });
 

@@ -304,3 +304,19 @@ test('AMB arrivals still answer when its alerts do not', async () => {
   assert.equal(arrivals.routes.length, 1);
   assert.deepEqual(arrivals.alerts, []);
 });
+
+test('the alerted-stops list names only AMB stops with an active alert of their own', async () => {
+  const { fetchImpl } = ambApi({
+    alerts: () =>
+      encodeAlerts([
+        {
+          id: 'a',
+          header: { es: 'Parada movida' },
+          stops: ['100005', '999999'],
+        },
+        { id: 'b', header: { es: 'Línea' }, routes: ['129'] },
+      ]),
+  });
+  const service = createAmbArrivalsService({ fetchImpl, now: () => NOW });
+  assert.deepEqual((await service.alertedStops()).stops, ['100005']);
+});

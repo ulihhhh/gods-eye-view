@@ -1112,8 +1112,15 @@ Así que la fase se parte en tres:
   140 caracteres), dos por ficha y "+N more alerts".
 - Licencia de AMB ("no alterar el contenido"): el texto se muestra tal cual, solo
   acortado con "…" en la ficha.
-- Pendiente (opcional): pill AVISOS para marcar en el mapa estaciones y líneas con
-  aviso.
+- Pill **ALERTS** (apagada por defecto; opción `alerts`, letra `w`, en los enlaces
+  de `zi` y `zh`): marca en ámbar las líneas con aviso (halo de 9 px bajo las líneas
+  de Cercanías y de metro) y las estaciones y paradas con un aviso **propio** (borde
+  grueso; no todas las de una línea con aviso). Pregunta cada 2 min mientras está
+  encendida. Rail network usa `/api/transit/alerts/renfe-cercanias`
+  (`spainRailAlertMarks`); Barcelona Arrivals, `/api/tmb/alerts` (`tmbAlertMarks`:
+  grupos de estación, paradas, líneas con aviso de línea entera) y `/api/amb/alerts`
+  (paradas; una parada de AMB que también es de TMB se marca como la de TMB). Las
+  líneas de bus no llevan halo: los avisos de bus ya nombran sus paradas.
 
 ### Fase 9 — (Opcional) Experimento: metro TMB "estimado" — `solo fork`
 
