@@ -363,6 +363,17 @@
   Mapillary only and hide while GOOGLE STREET VIEW is lit; its globe marker
   is a Google-blue view cone.
 
+- Clicking a Cercanías / Rodalies station in Rail network (Spain) lists its
+  next trains too (`C1 → Aeropuerto-T4 · 12:08 (8 min) · platform 3 · +3
+  min`). Renfe's trip updates time one stop per train, so the times come
+  from Renfe's timetable for the day, moved by each train's live delay;
+  a train with no live delay reads `scheduled`. The timetable is read with
+  the trip details, from the same daily zip: `calendar.txt` and
+  `stop_times.txt` (≈280 MB unpacked) are streamed line by line
+  (`zipEntryLines`) and only yesterday's, today's and tomorrow's calls are
+  kept (≈10 MB). The registry's `tripDetails` may name a `timetable`
+  builder.
+
 - Clicking an FGC station in Rail network (Spain) lists its next trains:
   line, destination and FGC's predicted time with a countdown, the platform
   (`S1 → Terrassa Nacions Unides · 11:43 (3 min) · platform 2`), trains

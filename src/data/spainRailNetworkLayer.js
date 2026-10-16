@@ -96,7 +96,10 @@ const DEFAULT_OVERLAY_HOST = Object.freeze({
  * that has them (`/api/transit/arrivals/<feed>/<code>`, built from the
  * feed's trip updates).
  */
-export const SPAIN_RAIL_ARRIVAL_FEEDS = Object.freeze({ fgc: 'fgc-geotren' });
+export const SPAIN_RAIL_ARRIVAL_FEEDS = Object.freeze({
+  fgc: 'fgc-geotren',
+  'renfe-cercanias': 'renfe-cercanias',
+});
 /** Card repaint (countdown) and the age at which it asks again. */
 export const SPAIN_RAIL_CARD_TICK_MS = 5_000;
 export const SPAIN_RAIL_CARD_REFRESH_MS = 20_000;
@@ -109,10 +112,10 @@ const madridClock = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'Europe/Madrid',
 });
 
-function trainRow(train, now) {
+function trainRow(train, now, operator) {
   const minutes = Math.round((train.at - now) / 60_000);
   const when = `${madridClock.format(train.at)} (${minutes <= 0 ? 'now' : `${minutes} min`})`;
-  const line = train.line || 'FGC';
+  const line = train.line || operator;
   const route = train.terminates
     ? `${line}${train.origin ? ` from ${train.origin}` : ''} · arr. ${when}`
     : `${line} → ${train.destination || '?'} · ${when}`;
@@ -121,18 +124,22 @@ function trainRow(train, now) {
       ? ` · +${Math.round(train.delaySec / 60)} min`
       : train.onTime === false
         ? ' · late'
-        : '';
+        : train.realtime === false
+          ? ' · scheduled'
+          : '';
   return `${route}${train.platform ? ` · platform ${train.platform}` : ''}${late}`;
 }
 
 /**
- * Card lines for a station's next trains.
+ * Card lines for a station's next trains. A time with no live delay behind
+ * it (Renfe's timetable alone) reads "scheduled".
  * @param {{status: 'loading'|'ready'|'error', error?: string|null,
  *   data?: {arrivals: object[], fetchedAt: number|null}|null}} board
  * @param {number} now
+ * @param {string} [operator] Named when a train has no line.
  * @returns {string[]}
  */
-export function spainRailArrivalLines(board, now) {
+export function spainRailArrivalLines(board, now, operator = 'FGC') {
   if (!board) return [];
   const trains = (board.data?.arrivals || []).filter(
     (train) => Number.isFinite(train?.at) && train.at >= now - 30_000,
@@ -147,7 +154,7 @@ export function spainRailArrivalLines(board, now) {
   const lines = trains.length
     ? trains
         .slice(0, SPAIN_RAIL_CARD_MAX_TRAINS)
-        .map((train) => trainRow(train, now))
+        .map((train) => trainRow(train, now, operator))
     : ['No trains reported right now'];
   if (trains.length > SPAIN_RAIL_CARD_MAX_TRAINS)
     lines.push(`+${trains.length - SPAIN_RAIL_CARD_MAX_TRAINS} more`);
@@ -410,7 +417,7 @@ export function buildSpainRailCopy(kind, item, board = null, now = Date.now()) {
     details: [
       `${kindLabel} · ${item.code}`,
       ...(lines ? [`Lines: ${lines}`] : []),
-      ...spainRailArrivalLines(board, now),
+      ...spainRailArrivalLines(board, now, fgc ? 'FGC' : 'Renfe'),
       `Source: ${fgc ? 'FGC' : 'Renfe Operadora'} open data` +
         (Number.isFinite(board?.data?.fetchedAt)
           ? ` · ${madridClock.format(board.data.fetchedAt)}`
@@ -463,7 +470,8 @@ export function createSpainRailNetworkLayer({
    * whether a request is out. `generation` drops answers for a closed card.
    * @type {{station: object, feedId: string, data: object|null,
    *   status: 'loading'|'ready'|'error', error: string|null, askedAt: number,
-   *   inFlight: boolean, generation: number, position: Cesium.Cartesian3}|null}
+   *   inFlight: boolean, retrySoon?: boolean, generation: number,
+   *   position: Cesium.Cartesian3}|null}
    */
   let _board = null;
   let _generation = 0;
@@ -509,7 +517,11 @@ export function createSpainRailNetworkLayer({
         error =
           response.status === 404
             ? 'No train times for this station'
-            : 'Next trains unavailable';
+            : response.status === 503 && station.network !== 'fgc'
+              ? 'Loading the Renfe timetable…'
+              : 'Next trains unavailable';
+        // The timetable takes seconds to load: ask again on the next tick.
+        board.retrySoon = response.status === 503;
       }
     } catch {
       error = 'Network error';
@@ -520,6 +532,7 @@ export function createSpainRailNetworkLayer({
       board.data = data;
       board.status = 'ready';
       board.error = null;
+      board.retrySoon = false;
     } else {
       board.status = 'error';
       board.error = error;
@@ -529,8 +542,11 @@ export function createSpainRailNetworkLayer({
 
   function _onTick() {
     if (!_board) return;
-    if (now() - _board.askedAt >= SPAIN_RAIL_CARD_REFRESH_MS)
-      void _askArrivals();
+    const wait =
+      _board.status === 'error' && _board.retrySoon
+        ? SPAIN_RAIL_CARD_TICK_MS
+        : SPAIN_RAIL_CARD_REFRESH_MS;
+    if (now() - _board.askedAt >= wait) void _askArrivals();
     _showCard(_selectedKey, 'station', _board.station, _board.position);
   }
 

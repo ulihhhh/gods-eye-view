@@ -8,18 +8,16 @@ investigación.
 
 ## Cómo retomar (estado al 2026-10-16)
 
-- **Hecho y en `mi-main`**: fases 1–5f y 6a–6c. **7a** (paneles de FGC) en la rama
-  `feat/transit-es-arrivals`. Siguiente: **7b** (paneles de Renfe Cercanías a partir
-  del horario estático; ver Fase 7).
-- Punto de partida de la 7b:
-  - Ruta y panel genéricos ya hechos: `src/data/transitArrivals.js`
-    (`buildTransitArrivals`), `arrivals()` en `src/sources/transitService.js` y la
-    ficha en `src/data/spainRailNetworkLayer.js` (`SPAIN_RAIL_ARRIVAL_FEEDS`,
-    `spainRailArrivalLines`). Para Renfe basta con que el índice por estación tenga
-    horas: añadir `renfe-cercanias` a `SPAIN_RAIL_ARRIVAL_FEEDS` cuando las tenga.
-  - El TU de Renfe da **una sola parada por tren** (medido el 2026-10-16): las horas
-    por estación tienen que venir de `stop_times.txt` (≈247 MB descomprimido) más el
-    retraso del TU.
+- **Hecho y en `mi-main`**: fases 1–5f, 6a–6c y 7a. **7b** (paneles de Cercanías) en
+  la rama `feat/transit-es-cercanias-boards`. Siguiente: **7c** (AV/LD).
+- Punto de partida de la 7c:
+  - El horario de la 7b es un enganche genérico: `tripDetails.timetable` en la fila
+    del registro (`buildCercaniasTimetable` en `src/data/renfeTimetable.js`). Para
+    LD hay que medir su `stop_times.txt` y escribir su constructor (los `trip_id` de
+    LD llevan la fecha; su `calendar` puede ser distinto).
+  - La ficha: añadir `renfe-ld` a `SPAIN_RAIL_ARRIVAL_FEEDS`. Ojo: las estaciones que
+    están en Cercanías y LD (Sants, Atocha…) se dibujan una vez, como de Cercanías, así
+    que su panel tendría que juntar los dos feeds.
 - **Entorno:**
   - Tests con Node 24 de nvm (`source ~/.nvm/nvm.sh && nvm use 24`); el Node 21 del
     sistema cuelga un test.
@@ -993,7 +991,7 @@ cumple hoy:
 Así que la fase se parte en tres:
 
 - **7a — FGC** directo del TU. ✅ hecha 2026-10-16 (rama `feat/transit-es-arrivals`).
-- **7b — Renfe Cercanías**: horario estático diario (`stop_times.txt` en streaming,
+- **7b — Renfe Cercanías** ✅ 2026-10-16: horario estático diario (`stop_times.txt` en streaming,
   solo los viajes de hoy) más el retraso del TU; la hora se marca "programada +
   retraso" cuando el tren no informa esa parada.
 - **7c — AV/LD**: igual si su `stop_times` es razonable; si no, el panel dice que solo
@@ -1022,6 +1020,38 @@ Así que la fase se parte en tres:
   punta sin llamadas extra) y la ficha en `spainRailNetworkLayer.test.mjs`. El
   codificador de TU a mano pasa a `src/data/tripUpdatesFixtures.mjs` (lo usa también
   `transitServiceFields.test.mjs`).
+
+**Resultado 7b** (✅ 2026-10-16, rama `feat/transit-es-cercanias-boards`):
+
+- El GTFS de Cercanías (`fomento_transit.zip`, 16 MB, regenerado a diario) trae
+  `stop_times.txt` de **277 MB** (1,83 M filas, campos rellenos de espacios), y
+  `calendar.txt` con un `service_id` por núcleo y fecha (sin `calendar_dates`). Hoy:
+  15 servicios, 5.107 viajes, 69.218 filas.
+- `zipEntryLines` (`src/data/zipEntries.js`): lee una entrada línea a línea con
+  `DecompressionStream` + `TextDecoderStream`; 0,4 s y 140 MB de pico para todo
+  `stop_times.txt`. `readZipTextEntries` comparte el localizador de entradas.
+- `buildCercaniasTimetable` (`src/data/renfeTimetable.js`): días de servicio ayer, hoy y
+  mañana (los trenes de después de medianoche son `24:xx` del día anterior); hora =
+  mediodía local − 12 h + hora GTFS (bien en el cambio de hora); `last` marca la
+  última parada; línea (`route_short_name`), destino y parada de origen por viaje.
+  1,2 s de construcción, ~10 MB retenidos (122 k llamadas, 9 k viajes).
+- Enganche `tripDetails.timetable`: se construye en la misma carga diaria que los
+  detalles (un solo zip). Si el horario es de otro día, la petición no es
+  condicional. `timetableFor(feed)` en el servicio.
+- `buildTimetableArrivals` (`src/data/transitArrivals.js`): hora programada + retraso
+  del TU (o del vehículo); si el TU da hora para esa misma parada, se usa esa. Entran
+  llamadas de hasta 90 min atrás (trenes con retraso). `realtime: false` cuando no hay
+  dato en vivo → la ficha dice `scheduled`.
+- Andén: Renfe etiqueta el tren con el andén **en el que se va a posicionar** (el de la
+  parada que el TU da con hora); se muestra para esa parada o para la estación en la
+  que está parado (`stopRelation === 'at'`).
+- Ruta: la primera petición tras arrancar da 503 "Timetable not loaded yet"
+  (`Retry-After: 15`) mientras baja el zip; la ficha reintenta a los 5 s.
+- En vivo (12:00): Sants, Pl. Catalunya, El Clot y Atocha con 12 trenes, 9–10 con
+  retraso en vivo y algún andén.
+- Tests: `src/data/renfeTimetable.test.mjs`; fixtures de Renfe (zip y posiciones) en
+  `src/testSupport/renfeGtfsFixtures.mjs` (fuera de `src/data/` porque usan
+  `node:zlib`).
 
 ### Fase 8 — Incidencias
 
