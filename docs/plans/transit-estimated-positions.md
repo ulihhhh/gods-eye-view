@@ -1,7 +1,7 @@
 # Plan — Posiciones estimadas en la capa Transit: metro TMB y trenes suizos (`solo fork`)
 
 Estado: **E-0 y E-1 hechos (2026-10-17)**: motor genérico + metro TMB en línea recta, en
-`mi-main`. Siguiente: E-2 (tramos) o los pendientes de E-1 (sección 6). Creado el
+`mi-main`. Siguiente, por orden: E-1b (bug), E-2b (relleno y color) y E-2 (vía). Creado el
 2026-10-17 juntando dos ideas que eran la misma:
 
 - la antigua Fase 9 de `docs/plans/transit-spain-renfe-fgc.md` (metro TMB "estimado");
@@ -33,10 +33,19 @@ reales.
 ## 1. Reglas comunes
 
 - **Siempre etiquetado como estimado:**
-  - icono o estilo propio (por ejemplo, contorno en vez de relleno);
   - la ficha dice "posición estimada" y de qué sale (predicciones, o horario + retraso);
   - las estadísticas lo cuentan aparte;
-  - se puede desactivar.
+  - se puede desactivar (pastilla ESTIMADOS).
+- **El icono es el normal, relleno** (decisión del usuario del 2026-10-17, ver E-2b). El
+  icono hueco de E-1 se quita del dibujo; la opción `estimated` de `transitIcon` puede
+  quedarse para más adelante.
+- **Si algún día se vuelve a dibujar hueco o transparente**, la estela tiene que
+  empezar en la cola del tren, no en el centro del icono. Hoy la estela sale de la
+  posición del vehículo, que es el centro del sprite. Con el relleno no se ve; con el
+  hueco atraviesa el rectángulo.
+- **Color de la línea cuando la fuente lo da:** el tren y su estela llevan el color de
+  su línea (TMB `color_linia`). Sin color de línea, el del modo, como hasta ahora. Los
+  estilos monocromo (NVG, FLIR, noir) mandan sobre el color de línea.
 - **Nunca teletransportar:** cuando cambia una predicción, el vehículo se corrige
   suavemente.
 - Los registros llevan `estimated: true`; el resto de la capa (selección, ficha, seguir
@@ -191,8 +200,48 @@ cuando el motor ya funcione.
       `/api/transit/feeds`), recibe un 404 cada 15 s y la fila dice que el feed no
       está disponible. Arreglo propuesto: que la capa salte las filas `estimate` que
       el catálogo del servidor no ofrece.
-- **E-2 —** Metro TMB sobre los tramos (`trams`), servidos por el servidor como el resto
-  de la geometría de TMB (licencia ligada a la aplicación).
+- **Repaso del 2026-10-17 tras E-1:** las posiciones concuerdan con las llegadas (los
+  trenes llegan a su hora). Lo que queda para el metro de Barcelona, en el orden
+  recomendado:
+- **E-1b — Bug: la capa sondea la fila estimada aunque el servidor no la ofrezca.** Sin
+  clave o con `TRANSIT_ESTIMATED_POSITIONS=off`, 404 cada 15 s, la fila dice "no
+  disponible" y la pastilla sigue visible. Arreglo: que la capa se salte las filas
+  `estimate` que no estén en `/api/transit/feeds`. Es pequeño y va primero.
+- **E-2b — Icono relleno y color de línea** (puntos 2 y 3 del usuario):
+  - **Relleno:** `applySpriteStyle` (`src/layers/transit/rendering.js`) deja de pasar
+    `estimated` a `transitIcon`.
+  - **Color de línea:** hoy el sprite y la estela se pintan por modo
+    (`MODE_CESIUM_COLORS` en `rendering.js`, `MODE_COLOR` en `trails.js`). Hace falta
+    un campo genérico del registro de vehículo (por ejemplo `routeColor`, hex de 6
+    cifras validado). Lo rellenan:
+    - el adaptador de TMB, con `color_linia` de iMetro o, si falta, `COLOR_LINIA` del
+      catálogo;
+    - la capa, que lo usa en el sprite y en la estela salvo con estilo monocromo.
+  - Sirve también para cualquier feed real que traiga color de línea; los demás no
+    cambian.
+  - **Hecho cuando** sobre Barcelona cada tren se ve relleno y del color de su línea
+    (L1 roja, L2 lila, L3 verde, L4 amarilla, L5 azul, L11 verde claro), y la estela
+    también.
+- **E-2 — Seguir el trazado de la vía** (punto 1 del usuario). Tiene dos mitades, y
+  hacen falta las dos:
+  - **Servidor:** que cada posición estimada caiga sobre la vía. El motor ya acepta
+    `segmentPath(desde, hasta)`. Opciones:
+    - los tramos `trams` (`/transit/linies/metro/trams`: 181 tramos de estación a
+      estación, con `CODI_ESTACIO_INI` / `CODI_ESTACIO_FI`), casados por código de
+      estación;
+    - o la geometría de línea que el catálogo TMB ya descarga
+      (`/transit/linies/metro`, en `/api/tmb/stations` → `lines`), cortada entre las
+      dos estaciones con `pathBetween` de `src/data/trackFollow.js`, el mismo que usa
+      la capa. Así no hace falta otra descarga.
+    - Decidirlo al empezar, midiendo cuántos tramos casan con cada opción.
+  - **Navegador:** entre dos posiciones (cada 15 s) la capa dibuja una cuerda recta,
+    salvo que el feed tenga `trackGeometry()` (`src/layers/transit/trails.js`, como
+    Renfe y FGC). La fila estimada necesita su propio `trackGeometry`, que lea las
+    líneas de metro de `/api/tmb/stations`. La geometría de TMB no se empaqueta, por la
+    licencia. Cada línea va con `routes: [nombre]`, para que un tren de la L1 no se
+    pegue a la vía de la L3.
+  - **Hecho cuando** sobre Barcelona los trenes van por las curvas de la vía, también
+    entre dos sondeos, y la estela dibuja el trazado.
 - **E-3 —** Trenes suizos: CH-1 en adelante del plan de Suiza, sobre el mismo motor.
 - **E-4 — (Opcional)** buses AMB, si se decide (sección 5).
 
