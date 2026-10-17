@@ -117,6 +117,23 @@ test('one iMetro request for the whole network, reused for the TTL', async () =>
   assert.equal(imetroCalls().length, 2);
 });
 
+test('a lead places the trains ahead and keeps the time the estimate was made', async () => {
+  const clock = { t: T0 };
+  const make = () =>
+    createTmbMetroEstimator({
+      env: PAIR,
+      fetchImpl: fakeTmb({ clock }).fetchImpl,
+      now: () => clock.t,
+    });
+  const led = await make().estimate({ now: T0, leadMs: 20_000 });
+  const plain = await make().estimate({ now: T0 + 20_000 });
+  const [ahead] = led.vehicles;
+  assert.equal(ahead.lat, plain.vehicles[0].lat);
+  assert.equal(ahead.timestamp, Math.floor(T0 / 1000));
+  assert.equal(ahead.estimateLeadS, 20);
+  assert.equal(plain.vehicles[0].estimateLeadS, undefined);
+});
+
 test('a failed refresh keeps estimating from the last answer for a while', async () => {
   const clock = { t: T0 };
   let failing = false;
@@ -214,8 +231,13 @@ test('an estimated snapshot goes through the same cache and shape as a fetched o
   const service = serviceWith({
     available: () => true,
     host: 'api.tmb.cat',
-    estimate: async ({ now }) => {
+    estimate: async ({ now, leadMs }) => {
       calls += 1;
+      // The row's lead is passed on (registry `estimateLeadMs`).
+      assert.equal(
+        leadMs,
+        getTransitFeed('tmb-metro-estimated').estimateLeadMs,
+      );
       return {
         timestamp: Math.floor(now / 1000),
         sourceFetchedAt: now - 5_000,

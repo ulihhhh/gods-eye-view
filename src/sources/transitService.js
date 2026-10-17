@@ -155,7 +155,7 @@ export const TRANSIT_RECENT_MAX_FIXES = 8;
  *
  * @param {{fetchImpl?: typeof fetch, estimators?: Record<string, {
  *   available: () => boolean, host?: string,
- *   estimate: (options: {now: number, signal: AbortSignal}) => Promise<{
+ *   estimate: (options: {now: number, leadMs: number, signal: AbortSignal}) => Promise<{
  *     timestamp: number|null, sourceFetchedAt?: number|null,
  *     vehicles: object[]}>}>}} [options]
  * @returns {{handle: (request: Request) => Promise<Response>, close: () => void}}
@@ -545,6 +545,7 @@ export function createTransitService({
     try {
       const result = await estimator.estimate({
         now,
+        leadMs: Number.isFinite(feed.estimateLeadMs) ? feed.estimateLeadMs : 0,
         signal: controller.signal,
       });
       if (closed) throw new Error('Transit provider closed');

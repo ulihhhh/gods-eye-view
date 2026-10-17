@@ -77,6 +77,10 @@ export function createState({ services }) {
 
   /** @type {Map<string, object>} feedId → registry entry currently polled */
   state._activeFeeds = new Map();
+  /** Fork-only: whether estimated feeds (registry `estimate`) are shown. */
+  state._showEstimated = true;
+  /** Whether an estimated feed covers the view (the row shows its pill). */
+  state._estimatedInRange = false;
   /** @type {Map<string, {count:number, lastUpdate:number|null, error:string|null, stale:boolean, pollSeq:number, loading:boolean}>} */
   state._feedStatus = new Map();
   /** @type {Map<string, {controller: AbortController, promise: Promise<void>}>} */

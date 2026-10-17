@@ -81,8 +81,14 @@ export function createViewport({ state, services, parts }) {
     state._altitudeGateOpen = altitudeGateOpen(altitude);
     const center = state._altitudeGateOpen ? getCameraCenterLatLon() : null;
     const desired = new Map();
+    let estimatedInRange = false;
     if (center) {
       for (const feed of transitFeedsInRange(center.lat, center.lon)) {
+        // Fork-only: estimated feeds follow the row's ESTIMATED pill.
+        if (feed.estimate) {
+          estimatedInRange = true;
+          if (!state._showEstimated) continue;
+        }
         desired.set(feed.id, feed);
       }
       // Hysteresis: a feed already active stays active a little past its edge.
@@ -91,8 +97,15 @@ export function createViewport({ state, services, parts }) {
         center.lon,
         RANGE_SLACK_KM,
       )) {
-        if (state._activeFeeds.has(feed.id)) desired.set(feed.id, feed);
+        if (!state._activeFeeds.has(feed.id)) continue;
+        if (feed.estimate) estimatedInRange = true;
+        if (feed.estimate && !state._showEstimated) continue;
+        desired.set(feed.id, feed);
       }
+    }
+    if (estimatedInRange !== state._estimatedInRange) {
+      state._estimatedInRange = estimatedInRange;
+      state._dataManager?.refreshLayerStats?.();
     }
     for (const feedId of [...state._activeFeeds.keys()]) {
       if (!desired.has(feedId)) {

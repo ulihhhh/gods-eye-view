@@ -156,15 +156,41 @@ cuando el motor ya funcione.
     iMetro cada 15 s para toda la red.
   - **iMetro no predice L9, L10 ni el funicular** (listas `propers_trens` vacías en
     todas las respuestas del 2026-10-17): esas líneas no se dibujan.
-  - **Pendientes de E-1:**
-    - **Retraso de presentación:** la capa reproduce los vehículos con retraso (la
-      ficha decía "se muestra con 47 s de retraso"). Para un estimado, ese retraso no
-      aporta nada. Se podría calcular la posición en `t + retraso`, o decirle a la
-      capa que no lo aplique.
-    - **Desactivar desde la interfaz:** hoy solo con `TRANSIT_ESTIMATED_POSITIONS=off`
-      o quitando la clave. Falta un interruptor en la capa.
-    - **Revisar los 404 de la consola:** se vieron tres en la prueba en el navegador,
-      sin identificar. Todas las rutas de Transit y de TMB respondían 200.
+  - **Pendientes de E-1 — resueltos (2026-10-17):**
+    - **Retraso de presentación:** la capa reproduce cada feed con un retraso
+      aprendido de cuánto tardan los informes (mínimo 25 s; con las semillas del
+      historial salían 47 s). No se puede quitar: hace falta tener ya el siguiente
+      punto (un sondeo de 15 s más hasta 15 s de caché del servidor). Pero un
+      estimado sí se puede calcular por adelantado:
+      - la fila declara `estimateLeadMs: 35_000`;
+      - el servidor coloca cada tren 35 s por delante del momento en que estima
+        (`estimate({now, leadMs})` → `estimateVehicles(..., t + lead, {madeAt})`); el
+        registro guarda la hora en que se hizo y `estimateLeadS: 35`;
+      - la capa fija el retraso de ese feed en esos mismos 35 s
+        (`transitFeedTiming` → `fixedDelayMs`; no se reaprende ni se siembra), y la
+        ficha solo cuenta lo que pase de ahí.
+      - **Comprobado en vivo:** 72 trenes, 60 s muestreados cada segundo: siempre
+        reproduciendo (nunca parados esperando punto), retraso exacto de 35 s, ficha
+        "Estimado hace 7 s · se muestra con 0 s de retraso", velocidad máxima entre
+        muestras 28 m/s (sin saltos).
+    - **Interruptor en la interfaz:** pastilla ESTIMADOS en la fila de Transporte
+      público, visible solo cuando un feed estimado cubre la vista. Apagada, la capa
+      deja de sondear esos feeds y quita sus vehículos al momento. Es una opción de
+      la capa `transit` en el estado de capas (`lo=j.e.0`; la capa pasa de
+      `enabled-only` a `enabled+options`, mismo token `j`, sin token nuevo), así que
+      se guarda y viaja en el enlace. Comprobado en vivo: apagar, recargar y volver a
+      encender.
+    - **Los tres 404:** eran `GET /api/google/tiles-token`, uno por cada carga de la
+      página. Es la consulta de upstream que pregunta al servidor si ofrece
+      tokens de Google; el servidor de desarrollo no los ofrece y el 404 es la
+      respuesta esperada (`src/maps/googleTokens.js`: "any other answer means it
+      does not"). No hay nada que arreglar en el fork.
+    - **Encontrado de paso (pendiente):** sin clave de TMB o con
+      `TRANSIT_ESTIMATED_POSITIONS=off`, la capa sigue sondeando
+      `tmb-metro-estimated` (lee el registro empaquetado, no el catálogo
+      `/api/transit/feeds`), recibe un 404 cada 15 s y la fila dice que el feed no
+      está disponible. Arreglo propuesto: que la capa salte las filas `estimate` que
+      el catálogo del servidor no ofrece.
 - **E-2 —** Metro TMB sobre los tramos (`trams`), servidos por el servidor como el resto
   de la geometría de TMB (licencia ligada a la aplicación).
 - **E-3 —** Trenes suizos: CH-1 en adelante del plan de Suiza, sobre el mismo motor.

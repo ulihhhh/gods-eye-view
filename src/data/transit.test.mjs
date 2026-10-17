@@ -39,7 +39,9 @@ test('layer module declares the manager contract', () => {
 test('the layer is registered for share links and sprite stacking', () => {
   const entry = LAYER_STATE_REGISTRY.find((row) => row.id === 'transit');
   assert.ok(entry, 'transit has a share-link token');
-  assert.equal(entry.disposition, 'enabled-only');
+  // Fork-only: the row's ESTIMATED pill is a Transit option.
+  assert.equal(entry.disposition, 'enabled+options');
+  assert.equal(entry.optionOwner, 'transit');
   assert.equal(
     LAYER_STATE_REGISTRY.filter((row) => row.token === entry.token).length,
     1,

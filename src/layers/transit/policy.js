@@ -71,10 +71,22 @@ export const FEED_STALE_AFTER_MS = 90_000;
  * one poll, after it was made; held to the defaults, every such vehicle would
  * stall at its newest fix and read NO FIX for much of each cycle. Its limits
  * grow with that expected age, never beyond the age at which a fix is dropped.
+ *
+ * An estimated feed (fork-only, `estimate`) whose server places its vehicles
+ * `estimateLeadMs` ahead of the moment it estimates plays exactly that far
+ * behind (`fixedDelayMs`) instead of a delay learned from report lags, so the
+ * vehicle is drawn where the estimate puts it now.
  * @param {object|null} feed Registry entry.
- * @returns {{staleMs: number, maxDelayMs: number}}
+ * @returns {{staleMs: number, maxDelayMs: number, fixedDelayMs?: number}}
  */
 export function transitFeedTiming(feed) {
+  const lead = feed?.estimate ? Number(feed.estimateLeadMs) : NaN;
+  if (Number.isFinite(lead) && lead > 0)
+    return {
+      staleMs: MOTION_UNKNOWN_AFTER_MS,
+      maxDelayMs: PLAYBACK_MAX_DELAY_MS,
+      fixedDelayMs: Math.min(lead, PLAYBACK_MAX_DELAY_MS),
+    };
   const report = Number(feed?.reportIntervalMs);
   if (!Number.isFinite(report) || report <= 0)
     return {
@@ -545,8 +557,11 @@ export function buildTransitSelectionCopy(
     (!record.timestampSource || record.timestampSource === 'vehicle');
   // How far behind real time the display is running, said separately from
   // how old the newest report is: the two are different facts.
+  // An estimate placed ahead by the lead it is played behind is not behind
+  // by that lead (transitFeedTiming): only what is left over is said.
+  const leadMs = Number(entry?.track?.policy?.fixedDelayMs) || 0;
   const lagS = Number.isFinite(entry?.sample?.actualDelayMs)
-    ? Math.max(0, Math.round(entry.sample.actualDelayMs / 1000))
+    ? Math.max(0, Math.round((entry.sample.actualDelayMs - leadMs) / 1000))
     : null;
   const behind =
     lagS === null

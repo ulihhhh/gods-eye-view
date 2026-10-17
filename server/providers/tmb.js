@@ -774,11 +774,12 @@ export function createTmbMetroEstimator({
       return tmbCredentials(env) !== null;
     },
     /**
-     * @param {{now?: number}} [options]
+     * @param {{now?: number, leadMs?: number}} [options] `leadMs`: place the
+     *   trains this far ahead of `now` (registry `estimateLeadMs`).
      * @returns {Promise<{timestamp: number|null, sourceFetchedAt: number,
      *   vehicles: object[]}>}
      */
-    async estimate({ now: at = now() } = {}) {
+    async estimate({ now: at = now(), leadMs = 0 } = {}) {
       const credentials = tmbCredentials(env);
       if (!credentials) throw new TmbError('no_key');
       const pair = `${credentials.appId}\u0000${credentials.appKey}`;
@@ -786,10 +787,11 @@ export function createTmbMetroEstimator({
       return {
         timestamp: current.timestamp,
         sourceFetchedAt: current.fetchedAt,
-        vehicles: estimateVehicles(current.timelines, at, {
-          smoother,
-          source: 'predictions',
-        }),
+        vehicles: estimateVehicles(
+          current.timelines,
+          at + (Number.isFinite(leadMs) && leadMs > 0 ? leadMs : 0),
+          { smoother, source: 'predictions', madeAt: at },
+        ),
       };
     },
   };

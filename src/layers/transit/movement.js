@@ -144,8 +144,9 @@ export function displacementPlausible(mode, meters, seconds, inferred = false) {
  * @param {object} entry
  * @param {object|null} budget
  * @param {object} feedLag The feed's shared lag reservoir.
- * @param {{staleMs?: number, maxDelayMs?: number}} [timing] Per-feed limits
- *   (`transitFeedTiming`); omitted values keep the defaults.
+ * @param {{staleMs?: number, maxDelayMs?: number, fixedDelayMs?: number}} [timing]
+ *   Per-feed limits (`transitFeedTiming`); omitted values keep the defaults.
+ *   `fixedDelayMs` pins the playback delay instead of learning it.
  */
 export function initializePlayback(entry, budget, feedLag, timing = {}) {
   entry.track = createTrack({
@@ -155,6 +156,7 @@ export function initializePlayback(entry, budget, feedLag, timing = {}) {
       courseMinTravelM: COURSE_MIN_TRAVEL_M,
       staleMs: timing.staleMs ?? MOTION_UNKNOWN_AFTER_MS,
       ...(timing.maxDelayMs ? { maxDelayMs: timing.maxDelayMs } : {}),
+      ...(timing.fixedDelayMs > 0 ? { fixedDelayMs: timing.fixedDelayMs } : {}),
       accept: (a, b) =>
         displacementPlausible(
           b.admissionMode ?? entry.mode,
@@ -164,6 +166,8 @@ export function initializePlayback(entry, budget, feedLag, timing = {}) {
         ),
     },
   });
+  if (entry.track.policy.fixedDelayMs)
+    entry.track.targetDelayMs = entry.track.policy.fixedDelayMs;
   entry.sample = createSample();
   entry.segment = {
     from: createFixSample(),
@@ -213,6 +217,9 @@ export function recordFix(entry, fix, observation = {}) {
     observation,
   );
   if (result.accepted) {
+    // A pinned delay is not relearned from report lags (estimated feeds).
+    if (entry.track.policy.fixedDelayMs)
+      entry.track.targetDelayMs = entry.track.policy.fixedDelayMs;
     const latest = readFix(
       entry.track,
       entry.track.count - 1,

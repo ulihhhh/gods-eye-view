@@ -483,6 +483,8 @@ const OPTION_GROUPS = Object.freeze({
     booleanOption('stations', 's', true),
     booleanOption('alerts', 'w', false),
   ]),
+  // Fork-local: the Transit row's ESTIMATED pill (estimated positions).
+  transit: Object.freeze([booleanOption('estimated', 'e', true)]),
   'tmb-arrivals': Object.freeze([
     booleanOption('metro', 'm', true),
     booleanOption('tmbBus', 'b', true),
@@ -780,7 +782,12 @@ export const LAYER_STATE_REGISTRY = Object.freeze([
     disposition: 'enabled+options',
     optionOwner: 'traffic',
   }),
-  Object.freeze({ id: 'transit', token: 'j', disposition: 'enabled-only' }),
+  Object.freeze({
+    id: 'transit',
+    token: 'j',
+    disposition: 'enabled+options',
+    optionOwner: 'transit',
+  }),
   Object.freeze({
     id: 'weather-cyclones',
     token: 'y',

@@ -548,7 +548,7 @@ export function createIngestion({ state, services, parts, source }) {
             seedObservation,
           );
         if (seeds.length && !untrusted) recordFix(entry, fix, seedObservation);
-        if (seeds.length) {
+        if (seeds.length && !entry.track.policy.fixedDelayMs) {
           entry.track.targetDelayMs = transitSeededDelayMs(
             now,
             seeds[0].t,

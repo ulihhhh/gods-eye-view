@@ -46,6 +46,13 @@ const TMB_METRO_ESTIMATED = Object.freeze({
   // Estimates every 15 s are full fixes: the trail and the first sighting
   // can start from where the train was.
   historyRetention: true,
+  // The layer plays every feed some seconds behind real time, so it always
+  // has the next fix in hand (one poll, plus up to one server cache window).
+  // A report cannot be had early; an estimate can: the server places each
+  // train this far AHEAD of the moment it estimates, and the layer plays
+  // this feed exactly this far behind, so the train is drawn where the
+  // estimate puts it now. The record keeps the time it was made.
+  estimateLeadMs: 35_000,
 });
 
 /** Estimated rows, in presentation order. */

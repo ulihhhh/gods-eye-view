@@ -329,17 +329,22 @@ export function createEstimateSmoother({ maxSpeedMps = 25 } = {}) {
  * and `estimatedFrom` (what the estimate rests on, e.g. 'predictions' or
  * 'schedule'). Timelines with nothing to show at `t` are skipped.
  *
+ * `madeAt` is when the estimate is made, if not at `t`: the place is for `t`
+ * and the record's `timestamp` is `madeAt`, with `estimateLeadS` saying how
+ * far ahead of it the place is (registry `estimateLeadMs`).
+ *
  * @param {object[]} timelines
- * @param {number} t ms epoch.
+ * @param {number} t ms epoch the positions are for.
  * @param {{segmentPath?: Function, smoother?: ReturnType<typeof createEstimateSmoother>,
- *   source?: string}} [options]
+ *   source?: string, madeAt?: number}} [options]
  * @returns {object[]}
  */
 export function estimateVehicles(
   timelines,
   t,
-  { segmentPath, smoother = null, source = 'predictions' } = {},
+  { segmentPath, smoother = null, source = 'predictions', madeAt = t } = {},
 ) {
+  const leadS = Math.round((t - madeAt) / 1000);
   const vehicles = [];
   const seen = new Set();
   for (const timeline of Array.isArray(timelines) ? timelines : []) {
@@ -359,7 +364,7 @@ export function estimateVehicles(
       lon: Number(shown.lon.toFixed(6)),
       bearing: finite(shown.bearing) ? Math.round(shown.bearing) : null,
       speedMps: null,
-      timestamp: Math.floor(t / 1000),
+      timestamp: Math.floor(madeAt / 1000),
       routeId: timeline.routeId ?? null,
       tripId: timeline.tripId ?? null,
       directionId: null,
@@ -383,6 +388,7 @@ export function estimateVehicles(
         : {}),
       estimated: true,
       estimatedFrom: source,
+      ...(leadS > 0 ? { estimateLeadS: leadS } : {}),
     });
   }
   smoother?.prune(t);
