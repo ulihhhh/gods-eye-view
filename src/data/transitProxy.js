@@ -346,7 +346,38 @@ export function buildTransitSnapshot(
     alerts = null,
   } = {},
 ) {
-  const decoded = transitFormatFor(feed).decode(bytes);
+  return snapshotFromDecoded(feed, transitFormatFor(feed).decode(bytes), now, {
+    stopNames,
+    stopPlaces,
+    tripUpdates,
+    tripDetails,
+    alerts,
+  });
+}
+
+/**
+ * The snapshot for a feed whose vehicles are already decoded: by a format's
+ * decoder (buildTransitSnapshot), or by an estimator (registry `estimate`,
+ * see transitService) that computes positions instead of fetching them.
+ * @param {object} feed Registry entry.
+ * @param {{version: string|null, timestamp: number|null, incrementality: number,
+ *   entityCount: number, truncated: boolean, vehicles: object[]}} decoded
+ * @param {number} [now=Date.now()]
+ * @param {object} [options] As buildTransitSnapshot.
+ * @returns {object}
+ */
+export function snapshotFromDecoded(
+  feed,
+  decoded,
+  now = Date.now(),
+  {
+    stopNames = null,
+    stopPlaces = null,
+    tripUpdates = null,
+    tripDetails = null,
+    alerts = null,
+  } = {},
+) {
   if (decoded.incrementality !== GTFS_INCREMENTALITY_FULL_DATASET) {
     throw new TransitFeedShapeError(
       `feed is differential (incrementality ${decoded.incrementality})`,

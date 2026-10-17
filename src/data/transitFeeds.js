@@ -27,6 +27,7 @@
  */
 
 import { SPAIN_TRANSIT_FEEDS } from './transitFeedsSpain.js';
+import { ESTIMATED_TRANSIT_FEEDS } from './transitFeedsEstimated.js';
 
 /** Transit modes the layer colors. `routeMode` hints refine a feed's default. */
 export const TRANSIT_MODES = Object.freeze([
@@ -400,7 +401,7 @@ function burlingtonRouteLabel(routeId) {
  *     maxBytes?: number, maxEntryBytes?: number, refreshMs?: number,
  *     timetable?: (options: {files: Map<string, string>, lines: (name: string) => AsyncIterable<string>,
  *       now: number, timeZone?: string}) => Promise<object>},
- *   timeZone?: string,
+ *   timeZone?: string, estimate?: string,
  * }>>}
  */
 export const TRANSIT_FEED_REGISTRY = Object.freeze([
@@ -746,6 +747,7 @@ export const TRANSIT_FEED_REGISTRY = Object.freeze([
     routeLabel: burlingtonRouteLabel,
   }),
   ...SPAIN_TRANSIT_FEEDS,
+  ...ESTIMATED_TRANSIT_FEEDS,
 ]);
 
 /**

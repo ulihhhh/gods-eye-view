@@ -242,6 +242,9 @@ export function createQueries({ state, parts }) {
       const now = Date.now();
       const health = aggregateTransitFeedHealth(statuses, now);
       const count = state._vehicles.size;
+      let estimated = 0;
+      for (const entry of state._vehicles.values())
+        if (entry.record?.estimated === true) estimated += 1;
       if (state._enabled && active.length === 0) {
         return {
           count: 0,
@@ -290,6 +293,8 @@ export function createQueries({ state, parts }) {
         source: 'GTFS-RT',
         coverage,
         feeds: active.map((feed) => feed.id),
+        // Positions worked out from times, counted apart from reported ones.
+        ...(estimated ? { estimated } : {}),
       };
     },
   };

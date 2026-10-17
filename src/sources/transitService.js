@@ -9,7 +9,7 @@ import { createTransitHistory } from './transitHistoryStore.js';
 
 import { coalesceProxyRequest, readResponseBytesCapped } from './httpBody.js';
 import { makeRateLimiter } from './rateLimit.js';
-import { publicTransitCatalog } from '../data/transitFeeds.js';
+import { getTransitFeed, publicTransitCatalog } from '../data/transitFeeds.js';
 import {
   TRANSIT_ADMISSION_MAX_GLOBAL,
   TRANSIT_ADMISSION_MAX_PER_FEED,
@@ -24,6 +24,7 @@ import {
   isTransitRedirectStatus,
   nextTransitBackoffMs,
   resolveTransitRoute,
+  snapshotFromDecoded,
   transitCacheState,
   transitFeedTtlMs,
   transitRetryAfterMs,
@@ -31,6 +32,7 @@ import {
   transitResponseHeaders,
   transitUpstreamHeaders,
 } from '../data/transitProxy.js';
+import { GTFS_INCREMENTALITY_FULL_DATASET } from '../data/gtfsRealtime.js';
 import { indexTripUpdates } from '../data/transitServiceFields.js';
 import { decodeAlerts } from '../data/gtfsAlerts.js';
 import { publicTransitAlerts } from '../data/transitServiceFields.js';
@@ -144,10 +146,24 @@ export const TRANSIT_RECENT_MAX_FIXES = 8;
  * re-asked once per poll for a whole session: consecutive failures push the
  * next permitted attempt out to five minutes, and one success resets it.
  *
- * @param {{fetchImpl?: typeof fetch}} [options]
+ * A feed with `estimate` (registry) is not fetched at all: its vehicles come
+ * from the estimator of that name in `estimators`, which the server injects
+ * (estimated positions, docs/plans/transit-estimated-positions.md). The
+ * estimator keeps its own keys and upstream requests; everything after the
+ * decode (cache, history, backoff) is the same. A feed whose estimator is
+ * missing or not `available()` is left out of the catalog and not served.
+ *
+ * @param {{fetchImpl?: typeof fetch, estimators?: Record<string, {
+ *   available: () => boolean, host?: string,
+ *   estimate: (options: {now: number, signal: AbortSignal}) => Promise<{
+ *     timestamp: number|null, sourceFetchedAt?: number|null,
+ *     vehicles: object[]}>}>}} [options]
  * @returns {{handle: (request: Request) => Promise<Response>, close: () => void}}
  */
-export function createTransitService({ fetchImpl = fetch } = {}) {
+export function createTransitService({
+  fetchImpl = fetch,
+  estimators = {},
+} = {}) {
   /** @type {Map<string, {at:number, body:string, host:string}>} feedId → snapshot */
   const cache = new Map();
   const history = createTransitHistory();
@@ -176,6 +192,23 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
 
   function reply(status, body, headers) {
     return new Response(body, { status, headers });
+  }
+
+  /** The feed's estimator when it has one and it can run, else null. */
+  function estimatorFor(feed) {
+    if (!feed?.estimate || !Object.hasOwn(estimators, feed.estimate))
+      return null;
+    const estimator = estimators[feed.estimate];
+    try {
+      return estimator?.available?.() === true ? estimator : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Whether the feed can be served: fetched, or estimated right now. */
+  function servable(feed) {
+    return !feed?.estimate || estimatorFor(feed) !== null;
   }
 
   function noteFailure(feedId, reason, now, minWaitMs = 0) {
@@ -499,7 +532,64 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
     return excludeYieldedVehicles(snapshot, vehicles);
   }
 
+  /** A snapshot computed by the feed's estimator instead of fetched. */
+  async function refreshEstimated(feed, now) {
+    const estimator = estimatorFor(feed);
+    if (!estimator) throw new Error('estimator unavailable');
+    const controller = new AbortController();
+    controllers.add(controller);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      TRANSIT_PROXY_TIMEOUT_MS,
+    );
+    try {
+      const result = await estimator.estimate({
+        now,
+        signal: controller.signal,
+      });
+      if (closed) throw new Error('Transit provider closed');
+      const vehicles = Array.isArray(result?.vehicles) ? result.vehicles : [];
+      const snapshot = snapshotFromDecoded(
+        feed,
+        {
+          version: null,
+          timestamp: Number.isFinite(result?.timestamp)
+            ? result.timestamp
+            : null,
+          incrementality: GTFS_INCREMENTALITY_FULL_DATASET,
+          entityCount: vehicles.length,
+          truncated: false,
+          vehicles,
+        },
+        now,
+      );
+      history.ingest(feed, snapshot.vehicles, Date.now());
+      attachRecent(feed, snapshot, Date.now());
+      // The contact time is when the estimate's source last answered: an
+      // estimate run on old predictions must age like a quiet feed.
+      const contactedAt = Number.isFinite(result?.sourceFetchedAt)
+        ? result.sourceFetchedAt
+        : snapshot.fetchedAt;
+      const entry = {
+        at: snapshot.fetchedAt,
+        contactedAt,
+        body: JSON.stringify(snapshot),
+        host: estimator.host || 'estimate',
+        etag: null,
+        lastModified: null,
+      };
+      cache.set(feed.id, entry);
+      cooldown.delete(feed.id);
+      return entry;
+    } finally {
+      clearTimeout(timeout);
+      controller.abort();
+      controllers.delete(controller);
+    }
+  }
+
   async function refresh(feed, now) {
+    if (feed.estimate) return refreshEstimated(feed, now);
     const controller = new AbortController();
     controllers.add(controller);
     const timeout = setTimeout(
@@ -710,12 +800,23 @@ export function createTransitService({ fetchImpl = fetch } = {}) {
       });
     }
     if (route.route === 'feeds') {
-      return reply(200, JSON.stringify({ feeds: publicTransitCatalog() }), {
+      const feeds = publicTransitCatalog().filter((row) =>
+        servable(getTransitFeed(row.id)),
+      );
+      return reply(200, JSON.stringify({ feeds }), {
         'Content-Type': 'application/json; charset=utf-8',
-        'Cache-Control': 'public, max-age=3600',
+        // An estimated feed comes and goes with its key: not cached long.
+        'Cache-Control': Object.keys(estimators).length
+          ? 'no-cache'
+          : 'public, max-age=3600',
       });
     }
     const { feed } = route;
+    if (!servable(feed))
+      return reply(404, JSON.stringify({ error: 'Unknown transit feed' }), {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      });
     const now = Date.now();
     if (route.route === 'trail') {
       if (!admitHistory(feed.id)) {

@@ -238,6 +238,7 @@ export function createRendering({ state, services, parts }) {
       selected ? SELECTED_ICON_PX : undefined,
       {
         style,
+        estimated: entry.record?.estimated === true,
       },
     );
     marker.width = px;

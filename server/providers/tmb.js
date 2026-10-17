@@ -17,6 +17,15 @@ import {
   tmbBusStopAlerts,
   tmbMetroStationAlerts,
 } from '../../src/data/barcelonaAlerts.js';
+import {
+  createEstimateSmoother,
+  estimateVehicles,
+} from '../../src/data/estimatedPositions.js';
+import {
+  buildTmbMetroNetwork,
+  tmbMetroNetworkCodes,
+  tmbMetroTimelines,
+} from '../../src/data/tmbMetroTimelines.js';
 
 /**
  * TMB (Transports Metropolitans de Barcelona) developer API — key handling.
@@ -628,6 +637,160 @@ export function createTmbArrivalsService({
         value = await inflight.get(key);
       }
       return { ...value, alerts: await placeAlerts(kind, String(id), value) };
+    },
+  };
+}
+
+/** How long one iMetro answer for the whole network feeds the estimate. */
+export const TMB_METRO_ESTIMATE_TTL_MS = 15_000;
+
+/** Past this, a failed refresh no longer falls back to the last answer. */
+export const TMB_METRO_ESTIMATE_STALE_MS = 3 * 60_000;
+
+/** A train's top speed for easing a corrected estimate (L9 runs at 90 km/h). */
+const TMB_METRO_MAX_SPEED_MPS = 25;
+
+const TMB_METRO_NETWORK_FIELDS = [
+  'CODI_ESTACIO',
+  'NOM_ESTACIO',
+  'NOM_LINIA',
+  'ORDRE_ESTACIO',
+  'GEOMETRY',
+];
+
+/** Every metro station with its line order: the estimator's network. */
+export function tmbMetroNetworkUrl(credentials) {
+  return tmbApiUrl('/transit/linies/metro/estacions', credentials, {
+    propertyName: TMB_METRO_NETWORK_FIELDS.join(','),
+  });
+}
+
+/**
+ * Estimated metro positions for the Transit layer (registry row
+ * `tmb-metro-estimated`, `estimate: 'tmb-metro'`). TMB publishes no train
+ * positions; iMetro's predicted arrivals for every station, asked in ONE
+ * request (about 100 KB) at most every TMB_METRO_ESTIMATE_TTL_MS, become one
+ * timeline per train (tmbMetroTimelines.js), and the position engine places
+ * each train on it at the moment of the call (estimatedPositions.js).
+ *
+ * Learned segment running times and the smoother live as long as the
+ * process. A failed iMetro refresh keeps estimating from the last answer for
+ * TMB_METRO_ESTIMATE_STALE_MS, so a short outage does not freeze the trains;
+ * a refused key is never papered over.
+ *
+ * @param {{env?: Record<string, string|undefined>, fetchImpl?: typeof fetch,
+ *   now?: () => number}} [options]
+ */
+export function createTmbMetroEstimator({
+  env = process.env,
+  fetchImpl = fetch,
+  now = Date.now,
+} = {}) {
+  /** @type {{pair: string, value: object, fetchedAt: number}|null} */
+  let network = null;
+  /** @type {{pair: string, timelines: object[], timestamp: number|null, fetchedAt: number}|null} */
+  let predictions = null;
+  /** @type {Map<string, Promise<object>>} */
+  const inflight = new Map();
+  const runtimes = new Map();
+  const smoother = createEstimateSmoother({
+    maxSpeedMps: TMB_METRO_MAX_SPEED_MPS,
+  });
+
+  function once(key, load) {
+    if (!inflight.has(key)) {
+      const promise = load().finally(() => inflight.delete(key));
+      inflight.set(key, promise);
+    }
+    return inflight.get(key);
+  }
+
+  async function networkFor(credentials, pair) {
+    if (
+      network?.pair === pair &&
+      now() - network.fetchedAt < TMB_CATALOG_TTL_MS
+    )
+      return network.value;
+    try {
+      return await once(`network:${pair}`, async () => {
+        const body = await fetchTmbJson(
+          fetchImpl,
+          tmbMetroNetworkUrl(credentials),
+          TMB_CATALOG_MAX_BYTES,
+        );
+        const value = buildTmbMetroNetwork(body);
+        if (!value) throw new TmbError('unavailable');
+        network = { pair, value, fetchedAt: now() };
+        return value;
+      });
+    } catch (error) {
+      if (network?.pair === pair && error?.code !== 'rejected')
+        return network.value;
+      throw error;
+    }
+  }
+
+  async function predictionsFor(credentials, pair) {
+    if (
+      predictions?.pair === pair &&
+      now() - predictions.fetchedAt < TMB_METRO_ESTIMATE_TTL_MS
+    )
+      return predictions;
+    const net = await networkFor(credentials, pair);
+    try {
+      return await once(`predictions:${pair}`, async () => {
+        const body = await fetchTmbJson(
+          fetchImpl,
+          tmbMetroArrivalsUrl(tmbMetroNetworkCodes(net), credentials),
+          TMB_ARRIVALS_MAX_BYTES,
+        );
+        if (!Array.isArray(body?.linies)) throw new TmbError('unavailable');
+        const fetchedAt = now();
+        const stamp = Number(body.timestamp);
+        // Running times are learned once per answer, not once per estimate.
+        predictions = {
+          pair,
+          timelines: tmbMetroTimelines(body, net, { runtimes }),
+          timestamp: Number.isFinite(stamp) ? Math.floor(stamp / 1000) : null,
+          fetchedAt,
+        };
+        return predictions;
+      });
+    } catch (error) {
+      if (
+        predictions?.pair === pair &&
+        error?.code !== 'rejected' &&
+        now() - predictions.fetchedAt < TMB_METRO_ESTIMATE_STALE_MS
+      )
+        return predictions;
+      throw error;
+    }
+  }
+
+  return {
+    host: 'api.tmb.cat',
+    /** Whether the key pair is configured. */
+    available() {
+      return tmbCredentials(env) !== null;
+    },
+    /**
+     * @param {{now?: number}} [options]
+     * @returns {Promise<{timestamp: number|null, sourceFetchedAt: number,
+     *   vehicles: object[]}>}
+     */
+    async estimate({ now: at = now() } = {}) {
+      const credentials = tmbCredentials(env);
+      if (!credentials) throw new TmbError('no_key');
+      const pair = `${credentials.appId}\u0000${credentials.appKey}`;
+      const current = await predictionsFor(credentials, pair);
+      return {
+        timestamp: current.timestamp,
+        sourceFetchedAt: current.fetchedAt,
+        vehicles: estimateVehicles(current.timelines, at, {
+          smoother,
+          source: 'predictions',
+        }),
+      };
     },
   };
 }

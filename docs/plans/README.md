@@ -8,7 +8,7 @@ su propia sección "Cómo retomar".
 | Línea                                     | Plan                                                             | Destino            | Estado                                                                                                      |
 | ----------------------------------------- | ---------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------- |
 | 1. Bicis compartidas en España (abiertas) | [bikeshare-spain-packs.md](bikeshare-spain-packs.md)             | PRs a upstream     | Listo para empezar: pack 1 (grandes ciudades) y pack 2 (nextbike CC0)                                       |
-| 2. Posiciones estimadas (metro TMB y SBB) | [transit-estimated-positions.md](transit-estimated-positions.md) | `solo fork`        | Listo para E-1 (TMB comprobado en vivo el 2026-10-17). Motor genérico; primero TMB, después Suiza           |
+| 2. Posiciones estimadas (metro TMB y SBB) | [transit-estimated-positions.md](transit-estimated-positions.md) | `solo fork`        | E-0/E-1 hechos (2026-10-17): metro TMB estimado en la capa Transit. Siguiente: E-2 o pendientes de E-1      |
 | 3. Datos abiertos de Suiza (SBB y otras)  | [switzerland-open-data.md](switzerland-open-data.md)             | `solo fork` (tren) | Sin empezar. Trenes bloqueados en CH-0 (clave de opentransportdata.swiss); otras plataformas por investigar |
 
 ## Otros planes

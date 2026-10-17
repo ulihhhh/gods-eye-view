@@ -166,7 +166,11 @@ export function transitIconCacheSize() {
  *
  * @param {string} kind One of TRANSIT_ICON_KINDS; anything else draws `unknown`.
  * @param {number} [px] Raster size.
- * @param {{haloScreenPx?: number, screenPx?: number}} [options]
+ * An `estimated` vehicle (a position worked out from times, not reported)
+ * is drawn hollow: the same silhouette as a thick outline over a faint fill,
+ * so it reads as the same mode and, at a glance, as not a real fix.
+ *
+ * @param {{haloScreenPx?: number, screenPx?: number, estimated?: boolean}} [options]
  * @returns {string} `data:image/svg+xml;base64,...`
  */
 export function transitIcon(kind, px = FLEET_RASTER_PX, options = {}) {
@@ -185,14 +189,16 @@ export function transitIcon(kind, px = FLEET_RASTER_PX, options = {}) {
     profile === 'mono' ? 'thermal' : profile === 'crt' ? 'retro' : 'normal';
   const displayPx = (selected ? 30 : 20) * presetSpriteScale(style, selected);
   const frame = haloFrame(presetSpriteOutlinePx(style, selected), displayPx);
-  const key = `${k}:${selected ? 1 : 0}:${profile}`;
+  const hollow = options.estimated === true;
+  const key = `${k}:${selected ? 1 : 0}:${profile}${hollow ? ':est' : ''}`;
   let uri = _iconCache.get(key);
   if (!uri) {
     const size = VIEW + 2 * frame.pad;
     // Reuse the exact outer path. Sensors fill its interior without panel ink.
     const silhouette = BODIES[k].match(/<path d="([^"]+)"/)[1];
-    const body =
-      profile === 'mono'
+    const body = hollow
+      ? `<path d="${silhouette}" fill="white" fill-opacity="${profile === 'mono' ? 0 : 0.2}" stroke="white" stroke-width="5" stroke-linejoin="round"/>`
+      : profile === 'mono'
         ? `<path d="${silhouette}" fill="white" />`
         : BODIES[k];
     const halo =

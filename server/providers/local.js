@@ -23,7 +23,7 @@ import { googlePlacesContextProxy } from './places.js';
 import { mapillaryProxy } from './mapillary.js';
 import { keySetupEndpoint } from '../standalone/key-setup.js';
 import { liveuamapProxy } from './liveuamap.js';
-import { tmbProxy } from './tmb.js';
+import { createTmbMetroEstimator, tmbProxy } from './tmb.js';
 import { ambProxy } from './amb.js';
 import {
   aemetBeachesProxy,
@@ -74,7 +74,9 @@ function localProviderPlugins({ realtime } = {}) {
     radioBrowserProxy(),
     gbfsProxy(),
     localReceiversProxy(),
-    transitProxy(),
+    transitProxy({
+      estimators: { 'tmb-metro': createTmbMetroEstimator() },
+    }),
     tmbProxy(),
     ambProxy(),
     adsbLolProxy(),

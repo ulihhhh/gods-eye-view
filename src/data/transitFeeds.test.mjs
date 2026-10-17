@@ -194,12 +194,18 @@ test('a mode the route id established is resolved; a feed default is only a gues
   );
 });
 
-test('only MBTA and the Spanish rail feeds retain proxy history while every other registered feed stays live-enabled', () => {
+test('only MBTA, the Spanish rail feeds and the estimated TMB metro retain proxy history while every other registered feed stays live-enabled', () => {
   assert.deepEqual(
     publicTransitCatalog()
       .filter((feed) => feed.historyRetention)
       .map((feed) => feed.id),
-    ['mbta', 'renfe-cercanias', 'renfe-ld', 'fgc-geotren'],
+    [
+      'mbta',
+      'renfe-cercanias',
+      'renfe-ld',
+      'fgc-geotren',
+      'tmb-metro-estimated',
+    ],
   );
   assert.equal(getTransitFeed('capmetro-austin').defaultEnabled, true);
   assert.equal(getTransitFeed('mbta').attribution, 'MBTA / MassDOT');
@@ -211,7 +217,13 @@ test('published transit history scope agrees with the catalog capability', () =>
   );
   assert.deepEqual(
     retained.map((feed) => feed.id),
-    ['mbta', 'renfe-cercanias', 'renfe-ld', 'fgc-geotren'],
+    [
+      'mbta',
+      'renfe-cercanias',
+      'renfe-ld',
+      'fgc-geotren',
+      'tmb-metro-estimated',
+    ],
   );
   const sources = readFileSync(
     new URL('../../DATA_SOURCES.md', import.meta.url),

@@ -1,7 +1,8 @@
 # Plan — Posiciones estimadas en la capa Transit: metro TMB y trenes suizos (`solo fork`)
 
-Estado: **planificado, sin empezar**. Creado el 2026-10-17 juntando dos ideas que eran la
-misma:
+Estado: **E-0 y E-1 hechos (2026-10-17)**: motor genérico + metro TMB en línea recta, en
+`mi-main`. Siguiente: E-2 (tramos) o los pendientes de E-1 (sección 6). Creado el
+2026-10-17 juntando dos ideas que eran la misma:
 
 - la antigua Fase 9 de `docs/plans/transit-spain-renfe-fgc.md` (metro TMB "estimado");
 - el motor de posición de `docs/plans/switzerland-open-data.md` (trenes de Suiza).
@@ -133,10 +134,37 @@ cuando el motor ya funcione.
 
 ## 6. Fases
 
-- **E-0 —** Decidir el enganche (A o B) contra el código de ese momento.
-- **E-1 —** Motor + metro TMB en línea recta, detrás de la clave de TMB.
-  - **Hecho cuando** sobre Barcelona se ven los trenes de metro moviéndose entre
-    estaciones de acuerdo con iMetro, y la ficha dice que son estimados.
+- **E-0 — Hecho (2026-10-17):** opción B.
+  - El registro nombra el estimador (`estimate: 'tmb-metro'`).
+  - `createTransitService({estimators})` lo llama en vez de hacer fetch, y sigue por
+    `snapshotFromDecoded` (separado de `buildTransitSnapshot` en `transitProxy.js`).
+  - Sin estimador disponible (sin clave, otro servidor o
+    `TRANSIT_ESTIMATED_POSITIONS=off`), la fila no sale en el catálogo y su ruta da 404.
+- **E-1 — Hecho (2026-10-17):** motor + metro TMB en línea recta, detrás de la clave.
+  - **Módulos:**
+    - `src/data/estimatedPositions.js`: motor, suavizado y registros;
+    - `src/data/tmbMetroTimelines.js`: iMetro → líneas de tiempo;
+    - `createTmbMetroEstimator` en `server/providers/tmb.js`;
+    - fila `tmb-metro-estimated` en `src/data/transitFeedsEstimated.js`.
+  - **En la capa:**
+    - icono hueco (contorno del color del modo);
+    - la ficha dice "Estimated position · from arrival predictions", "Estimated N s
+      ago" y "Estimated next stop …", y no presenta el rumbo como reportado;
+    - `getStats().estimated` cuenta los estimados aparte.
+  - **Comprobado en vivo:** 72 trenes (L1 18, L2 9, L3 12, L4 14, L5 18, L11 1). En
+    15 s se mueven una mediana de 135 m y como mucho 186 m, sin saltos. Una petición a
+    iMetro cada 15 s para toda la red.
+  - **iMetro no predice L9, L10 ni el funicular** (listas `propers_trens` vacías en
+    todas las respuestas del 2026-10-17): esas líneas no se dibujan.
+  - **Pendientes de E-1:**
+    - **Retraso de presentación:** la capa reproduce los vehículos con retraso (la
+      ficha decía "se muestra con 47 s de retraso"). Para un estimado, ese retraso no
+      aporta nada. Se podría calcular la posición en `t + retraso`, o decirle a la
+      capa que no lo aplique.
+    - **Desactivar desde la interfaz:** hoy solo con `TRANSIT_ESTIMATED_POSITIONS=off`
+      o quitando la clave. Falta un interruptor en la capa.
+    - **Revisar los 404 de la consola:** se vieron tres en la prueba en el navegador,
+      sin identificar. Todas las rutas de Transit y de TMB respondían 200.
 - **E-2 —** Metro TMB sobre los tramos (`trams`), servidos por el servidor como el resto
   de la geometría de TMB (licencia ligada a la aplicación).
 - **E-3 —** Trenes suizos: CH-1 en adelante del plan de Suiza, sobre el mismo motor.
@@ -169,4 +197,5 @@ cuando el motor ya funcione.
     rediseño.
   - Lo que sí conviene: en E-1, un test del motor con una línea de tiempo con forma
     suiza (horario completo, `arr ≠ dep`, horas más allá de las 24:00) para confirmar
-    que la interfaz aguanta sin tener el índice.
+    que la interfaz aguanta sin tener el índice. **Hecho:** está en
+    `src/data/estimatedPositions.test.mjs`.

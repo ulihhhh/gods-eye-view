@@ -439,6 +439,15 @@ export function buildTransitSelectionCopy(
     feed?.modeWords?.[mode]?.word ||
     t(TRANSIT_MODE_WORD[mode] || TRANSIT_MODE_WORD.unknown);
   const details = [`${kindWord} · ${feed.name} · ${feed.region}`];
+  // An estimate says so before anything else: the operator gave times, and
+  // the position is worked out from them (estimatedPositions.js).
+  const estimated = record.estimated === true;
+  if (estimated)
+    details.push(
+      record.estimatedFrom === 'schedule'
+        ? t('Estimated position · from timetable and delays')
+        : t('Estimated position · from arrival predictions'),
+    );
   const motion = [];
   // What the SCREEN is doing leads, because that is what the reader can check.
   const shown = entry ? displayMotion(entry, nowMs) : null;
@@ -450,11 +459,12 @@ export function buildTransitSelectionCopy(
   if (motion.length) details.push(motion.join(' · '));
   details.push(...service.lines);
   const reportedMotion = [];
-  if (Number.isFinite(record.speedMps))
+  // An estimate's heading is the segment's, not a report: not shown as one.
+  if (!estimated && Number.isFinite(record.speedMps))
     reportedMotion.push(
       t('reported {speed} km/h', { speed: Math.round(record.speedMps * 3.6) }),
     );
-  if (Number.isFinite(record.bearing))
+  if (!estimated && Number.isFinite(record.bearing))
     reportedMotion.push(
       t('reported hdg {heading}°', { heading: Math.round(record.bearing) }),
     );
@@ -468,7 +478,13 @@ export function buildTransitSelectionCopy(
   // name the station a train left where GTFS-Realtime means the next one.
   const named = record.stopName;
   const relation = transitStopRelation(record);
-  if (relation === 'at' && named)
+  if (estimated && relation === 'at' && (named || record.stopId))
+    state.push(t('Estimated at {stop}', { stop: named || record.stopId }));
+  else if (estimated && (named || record.stopId))
+    state.push(
+      t('Estimated next stop {stop}', { stop: named || record.stopId }),
+    );
+  else if (relation === 'at' && named)
     state.push(t('Last report: stopped at {stop}', { stop: named }));
   else if (relation === 'at' && record.stopId)
     state.push(
@@ -514,8 +530,11 @@ export function buildTransitSelectionCopy(
       ? entry.sample.latestReportAgeMs
       : vehicleFixAgeMs(record, nowMs, fetchedAtMs)) / 1000,
   );
-  const reported =
-    ageS < 90
+  const reported = estimated
+    ? ageS < 90
+      ? t('Estimated {seconds} s ago', { seconds: ageS })
+      : t('Estimated {minutes} min ago', { minutes: Math.round(ageS / 60) })
+    : ageS < 90
       ? t('Reported {seconds} s ago', { seconds: ageS })
       : t('Reported {minutes} min ago', { minutes: Math.round(ageS / 60) });
   // A time the feed did not give for THIS vehicle is labelled, so the card
@@ -534,7 +553,7 @@ export function buildTransitSelectionCopy(
       ? ''
       : ` · ${t('shown {seconds} s behind', { seconds: lagS })}`;
   details.splice(
-    motion.length ? 2 : 1,
+    (motion.length ? 2 : 1) + (estimated ? 1 : 0),
     0,
     (ownTime ? reported : t('{reported} (feed time)', { reported })) + behind,
   );

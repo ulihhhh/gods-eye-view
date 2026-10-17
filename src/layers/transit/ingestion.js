@@ -570,6 +570,8 @@ export function createIngestion({ state, services, parts, source }) {
         entry.from = entry.segment.from;
         entry.to = entry.segment.to;
         parts.rendering.refreshEndpoints(entry);
+        // The sprite reads the record (an estimate is drawn hollow).
+        entry.record = record;
         entry.marker = parts.rendering.addMarker(key, entry);
         state._vehicles.set(key, entry);
         parts.rendering.schedulePlayback(entry);
