@@ -26,6 +26,7 @@ import {
   VISIBILITY_REFRESH_MS,
   SELECTED_PIXEL_SIZE,
   TRANSIT_MODE_COLORS,
+  transitRouteColorCss,
   vehicleNearView,
 } from './policy.js';
 
@@ -233,12 +234,14 @@ export function createRendering({ state, services, parts }) {
     const displayPx = basePx * presetSpriteScale(style, selected);
     const frame = haloFrame(halo, displayPx);
     const px = displayPx * frame.ratio;
+    // Estimated vehicles use the solid sprite too (the card and the
+    // ESTIMATED pill say what they are). Drawn hollow, the trail would show
+    // through from the sprite's centre: it would have to start at the tail.
     marker.image = transitIcon(
       entry.mode,
       selected ? SELECTED_ICON_PX : undefined,
       {
         style,
-        estimated: entry.record?.estimated === true,
       },
     );
     marker.width = px;
@@ -251,7 +254,22 @@ export function createRendering({ state, services, parts }) {
     if (preset) marker.color = preset;
     else
       marker.color =
-        MODE_CESIUM_COLORS[entry.mode] || MODE_CESIUM_COLORS.unknown;
+        routeCesiumColor(entry.record) ||
+        MODE_CESIUM_COLORS[entry.mode] ||
+        MODE_CESIUM_COLORS.unknown;
+  }
+
+  /** Cesium colour of a record's line colour, cached per colour. */
+  const _routeColors = new Map();
+  function routeCesiumColor(record) {
+    const css = transitRouteColorCss(record);
+    if (!css) return null;
+    let color = _routeColors.get(css);
+    if (!color) {
+      color = Cesium.Color.fromCssColorString(css);
+      _routeColors.set(css, color);
+    }
+    return color;
   }
 
   function addMarker(key, entry) {

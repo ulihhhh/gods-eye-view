@@ -596,7 +596,27 @@ export function buildTransitSelectionCopy(
  * @param {string} mode
  * @returns {object|null}
  */
-export function createTransitSelectedOverlayEntry(key, position, copy, mode) {
+/**
+ * A vehicle's line colour as CSS (`#1EB53A`) when its record carries one
+ * (`routeColor`, six hex digits: TMB's `color_linia`, GTFS `route_color`),
+ * else null and the mode colour is used. Fork-only, for the estimated metro.
+ * @param {object|null|undefined} record
+ * @returns {string|null}
+ */
+export function transitRouteColorCss(record) {
+  const hex = record?.routeColor;
+  return typeof hex === 'string' && /^[0-9A-Fa-f]{6}$/.test(hex)
+    ? `#${hex.toUpperCase()}`
+    : null;
+}
+
+export function createTransitSelectedOverlayEntry(
+  key,
+  position,
+  copy,
+  mode,
+  accent = null,
+) {
   if (!key || !position) return null;
   return {
     id: String(key),
@@ -609,7 +629,7 @@ export function createTransitSelectedOverlayEntry(key, position, copy, mode) {
     priority: Number.MAX_SAFE_INTEGER,
     title: copy.title,
     details: copy.details,
-    accent: TRANSIT_MODE_COLORS[mode] || TRANSIT_MODE_COLORS.unknown,
+    accent: accent || TRANSIT_MODE_COLORS[mode] || TRANSIT_MODE_COLORS.unknown,
     interactive: false,
     anchorRadiusPx: 9,
     minAnchorGapPx: 11,

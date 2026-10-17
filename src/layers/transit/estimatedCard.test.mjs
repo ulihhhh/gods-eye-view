@@ -1,9 +1,15 @@
 // An estimated vehicle (a position worked out from times, not reported) is
-// said to be one on its card and drawn hollow (estimatedPositions.js).
+// said to be one on its card (estimatedPositions.js). It is drawn with the
+// solid sprite in its line colour; the hollow sprite stays available.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setLocale, t } from '../../i18n/index.js';
-import { buildTransitSelectionCopy } from './policy.js';
+import {
+  TRANSIT_MODE_COLORS,
+  buildTransitSelectionCopy,
+  createTransitSelectedOverlayEntry,
+  transitRouteColorCss,
+} from './policy.js';
 import { transitIcon } from '../../data/transitIcons.js';
 
 const feed = {
@@ -89,7 +95,7 @@ test('the estimate lines are translated', () => {
   }
 });
 
-test('an estimated vehicle is drawn hollow, with its own cached sprite', () => {
+test('the hollow sprite is still available, with its own cached entry', () => {
   for (const style of ['normal', 'thermal', 'retro']) {
     const solid = transitIcon('subway', undefined, { style });
     const hollow = transitIcon('subway', undefined, { style, estimated: true });
@@ -97,4 +103,26 @@ test('an estimated vehicle is drawn hollow, with its own cached sprite', () => {
     const svg = Buffer.from(hollow.split(',')[1], 'base64').toString();
     assert.match(svg, /stroke="white" stroke-width="5"/);
   }
+});
+
+test('a line colour paints the card accent; without one the mode colour stays', () => {
+  assert.equal(transitRouteColorCss({ routeColor: '1eb53a' }), '#1EB53A');
+  for (const bad of [undefined, null, 'red', '#1EB53A', 'GGGGGG', 123456])
+    assert.equal(transitRouteColorCss({ routeColor: bad }), null, String(bad));
+  const copy = { title: 'x', details: [] };
+  const lined = createTransitSelectedOverlayEntry(
+    'k',
+    { x: 1 },
+    copy,
+    'subway',
+    '#1EB53A',
+  );
+  assert.equal(lined.accent, '#1EB53A');
+  const plain = createTransitSelectedOverlayEntry(
+    'k',
+    { x: 1 },
+    copy,
+    'subway',
+  );
+  assert.equal(plain.accent, TRANSIT_MODE_COLORS.subway);
 });

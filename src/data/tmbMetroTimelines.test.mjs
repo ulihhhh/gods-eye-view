@@ -228,3 +228,25 @@ test('malformed answers give no timelines', () => {
   assert.deepEqual(tmbMetroTimelines({ linies: 'x' }, NETWORK), []);
   assert.deepEqual(tmbMetroTimelines(imetro([]), null), []);
 });
+
+test('a train carries its line colour from iMetro', () => {
+  const body = imetro([
+    [302, 1, '350', s(40), 'Cinco'],
+    [303, 1, '350', s(130), 'Cinco'],
+  ]);
+  for (const station of body.linies[0].estacions)
+    station.linies_trajectes[0].color_linia = '1eb53a';
+  const [timeline] = tmbMetroTimelines(body, NETWORK);
+  assert.equal(timeline.routeColor, '1EB53A');
+  const [record] = estimateVehicles([timeline], T0);
+  assert.equal(record.routeColor, '1EB53A');
+  // Without a colour the record has none, and the layer uses the mode's.
+  const [plain] = tmbMetroTimelines(
+    imetro([
+      [302, 1, '351', s(40), 'Cinco'],
+      [303, 1, '351', s(130), 'Cinco'],
+    ]),
+    NETWORK,
+  );
+  assert.equal('routeColor' in plain, false);
+});

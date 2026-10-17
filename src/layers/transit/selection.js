@@ -5,6 +5,7 @@ import {
   TRANSIT_SELECTED_OVERLAY_SOURCE_OPTIONS,
   buildTransitSelectionCopy,
   createTransitSelectedOverlayEntry,
+  transitRouteColorCss,
 } from './policy.js';
 import { getRegisteredTransitFeed } from '../../data/transitFeeds.js';
 import { isPointerFree } from '../../data/inputOwnership.js';
@@ -74,6 +75,7 @@ export function createSelection({ state, services, parts }) {
       anchorFor(entry),
       copy,
       entry.mode,
+      transitRouteColorCss(entry.record),
     );
     if (card) {
       // Clickable: a click on the card toggles following (follow.js).

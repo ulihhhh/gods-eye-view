@@ -5,7 +5,7 @@
  * (timetable plus delay). Each source builds one TIMELINE per vehicle, and
  * this module places the vehicle on it at an instant:
  *
- *   {id, routeId, tripId, label, destination?, stops: [{stopId, name?, lat,
+ *   {id, routeId, tripId, label, destination?, routeColor?, stops: [{stopId, name?, lat,
  *     lon, arr, dep}]}
  *
  * with absolute times in ms and the stops in running order. Between two
@@ -34,6 +34,9 @@ export const ESTIMATE_RESET_M = 3_000;
 
 /** A vehicle not estimated for this long is forgotten by the smoother. */
 export const ESTIMATE_FORGET_MS = 5 * 60_000;
+
+/** A line colour as six hex digits, without `#` (GTFS `route_color`). */
+const ROUTE_COLOR = /^[0-9A-Fa-f]{6}$/;
 
 const EARTH_M = 6_371_000;
 const toRad = (deg) => (deg * Math.PI) / 180;
@@ -374,6 +377,10 @@ export function estimateVehicles(
       occupancy: null,
       ...(shown.stopName ? { stopName: shown.stopName } : {}),
       ...(timeline.destination ? { destination: timeline.destination } : {}),
+      ...(typeof timeline.routeColor === 'string' &&
+      ROUTE_COLOR.test(timeline.routeColor)
+        ? { routeColor: timeline.routeColor.toUpperCase() }
+        : {}),
       ...(ahead.length
         ? {
             nextStops: ahead.slice(0, ESTIMATE_NEXT_STOPS).map((stop) => ({

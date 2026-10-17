@@ -43,6 +43,12 @@ function text(value) {
   return typeof value === 'string' ? value.trim().slice(0, MAX_TEXT) : '';
 }
 
+/** A line's colour as TMB gives it (`1EB53A`), upper-case, or null. */
+function lineColor(value) {
+  const hex = text(value).replace(/^#/, '');
+  return /^[0-9A-Fa-f]{6}$/.test(hex) ? hex.toUpperCase() : null;
+}
+
 /**
  * Every metro station by its per-line code, from TMB's station list
  * (`/transit/linies/metro/estacions` with `CODI_ESTACIO`, `NOM_ESTACIO`,
@@ -96,7 +102,7 @@ export function tmbMetroNetworkCodes(network) {
  * destination}]>}.
  * @param {unknown} body Parsed iMetro JSON.
  * @param {{byCode: Map<number, object>}} network
- * @returns {Map<string, {line: string, service: string, tracks: Map<number, Array<{code: number, at: number, destination: string}>>}>}
+ * @returns {Map<string, {line: string, service: string, color: string|null, tracks: Map<number, Array<{code: number, at: number, destination: string}>>}>}
  */
 export function tmbMetroTrains(body, network) {
   const trains = new Map();
@@ -113,6 +119,8 @@ export function tmbMetroTrains(body, network) {
         const lineName = text(trip?.nom_linia) || text(line?.nom_linia);
         if (!lineName) continue;
         const destination = text(trip?.desti_trajecte);
+        const color =
+          lineColor(trip?.color_linia) || lineColor(line?.color_linia);
         for (const next of Array.isArray(trip?.propers_trens)
           ? trip.propers_trens
           : []) {
@@ -123,11 +131,12 @@ export function tmbMetroTrains(body, network) {
           const key = `${lineName}|${service}`;
           let train = trains.get(key);
           if (!train) {
-            train = { line: lineName, service, tracks: new Map() };
+            train = { line: lineName, service, color, tracks: new Map() };
             trains.set(key, train);
           }
           if (!train.tracks.has(track)) train.tracks.set(track, []);
           train.tracks.get(track).push({ code, at, destination });
+          train.color ||= color;
         }
       }
     }
@@ -286,6 +295,7 @@ export function tmbMetroTimelines(
       tripId: train.service,
       label: train.service,
       ...(calls[0].destination ? { destination: calls[0].destination } : {}),
+      ...(train.color ? { routeColor: train.color } : {}),
       stops,
     });
   }

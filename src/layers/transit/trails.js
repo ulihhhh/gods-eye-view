@@ -10,6 +10,7 @@ import { createContactTrailRenderer } from '../../data/contactTrailRenderer.js';
 import { fixDistanceM } from './movement.js';
 import { createTrackIndex, pathBetween } from '../../data/trackFollow.js';
 import { transitStyleProfile } from '../../data/transitPresetStyle.js';
+import { transitRouteColorCss } from './policy.js';
 
 const MODE_COLOR = {
   bus: '#5EF08A',
@@ -95,7 +96,9 @@ export function createTrails({ state, services, parts, source }) {
     renderer?.setStyle(
       transitStyleProfile(state._stylePreset) === 'mono'
         ? '#FFFFFF'
-        : MODE_COLOR[selected?.mode] || MODE_COLOR.unknown,
+        : transitRouteColorCss(selected?.record) ||
+            MODE_COLOR[selected?.mode] ||
+            MODE_COLOR.unknown,
     );
   }
   function releaseSelectionGeometry(entry) {
