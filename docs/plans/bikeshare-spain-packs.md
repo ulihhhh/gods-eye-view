@@ -161,10 +161,22 @@ huérfana).
    como Lillestrøm. El `gbfs.json` anuncia `/gbfs/v2/…`, y las dos formas devuelven lo
    mismo.
 
-**Pendiente:**
+5. **Capacidad geovallada de PBSC** (encontrado al probar en la app, 2026-10-17). PBSC
+   suma a `capacity` las plazas de la zona geovallada y las publica aparte en
+   `geofenced_capacity`, que no es un campo GBFS. Bilbao: 839 = 39 anclajes + 800.
+   También BiciMAD (671 de 678 estaciones) y Dbizi (11 de 70). Ninguno de los 52 de
+   upstream lo publica por encima de 0. **Arreglo:** `dockCapacity()` en
+   `gbfsStations.js` toma `capacity − geofenced_capacity`.
 
-- Repetir Bilbao Bizi de día para confirmar que el `is_renting: false` es el cierre
-  nocturno.
+**Estado (2026-10-17):** implementado en la rama `feat/bikeshare-spain-cities`
+(worktree `../gev-bikeshare-es`), con 4 commits sobre `upstream/main` 3e5a18f6. El
+usuario lo probó en la app en las 9 ciudades. Falta abrir la PR, que necesita su visto
+bueno.
+
+**Pendiente (antes de la implementación):**
+
+- ~~Repetir Bilbao Bizi de día~~: confirmado con la FAQ oficial (alquiler de 05:00 a
+  00:00 y devolución hasta las 00:30).
 - Volver a sondear justo antes de abrir el PR. El script era desechable: bajar
   `gbfs.json` → `system_information` / `station_information` / `station_status` y pasar
   la información y el estado por los parsers de GEV.
