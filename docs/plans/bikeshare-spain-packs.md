@@ -1,9 +1,10 @@
 # Plan — Bicis compartidas en España: packs 1 y 2 (PRs a upstream)
 
-Estado: **planificado, sin empezar**. Escrito el 2026-10-16. Todos los feeds se han
-probado en vivo ese día (rutas v2, nº de estaciones, licencia y frescura < 1 min). Pack 1
-revisado a fondo el 2026-10-17 contra los parsers de GEV (sección "Revisión de los feeds
-del pack 1").
+Estado: pack 1 en PR (bilawalsidhu/gods-eye-view#1190, aprobada, falta el merge); pack 2
+con plan de implementación desde el 2026-10-17, sin empezar. Escrito el 2026-10-16. Todos
+los feeds se han probado en vivo ese día (rutas v2, nº de estaciones, licencia y frescura
+< 1 min). Pack 1 revisado a fondo el 2026-10-17 contra los parsers de GEV (sección
+"Revisión de los feeds del pack 1").
 
 ## Cómo retomar
 
@@ -325,40 +326,172 @@ Toronto y en la misma PR arregló un fallo genérico que había destapado. Rama
 
 ## Pack 2 — nextbike (CC0)
 
-**Proxy:** sin cambios una vez mergeado #1176 (`gbfs.nextbike.net` como host exacto,
-con test). Todos los sistemas declaran `license_id: CC0-1.0` en `system_information`.
-Base de las URLs: `https://gbfs.nextbike.net/maps/gbfs/v2/nextbike_<xx>/en/`.
+**Proxy:** sin cambios. `gbfs.nextbike.net` es host exacto desde #1176, sin prefijo de
+ruta, y vale cualquier `/maps/gbfs/v2/nextbike_<xx>/en/station_{information,status}.json`.
+Todos los sistemas declaran `license_id: CC0-1.0` en `system_information`. El
+`gbfs.json` está un nivel más arriba (`/nextbike_<xx>/gbfs.json`) y anuncia sus idiomas
+(`eu/es/en` en Bizkaia, `es/ca/en` en Palma…). `en` responde en los 10.
 
-| id                     | city                              | provider      | xx   | centro (lat, lon) | est. | más alejada (test)                                               |
-| ---------------------- | --------------------------------- | ------------- | ---- | ----------------- | ---- | ---------------------------------------------------------------- |
-| `bizkaia-bizkaibizi`   | Bizkaia, Spain                    | Bizkaibizi    | `bw` | 43.317, -2.9866   | 109  | `-ABANDO` 43.260921, -2.927116 · `-AZKORRI` 43.378208, -3.011364 |
-| `palma-bicipalma`      | Palma, Spain                      | BiciPalma     | `ea` | 39.5911, 2.664    | 106  | `109 CAN PASTILLA 88` 39.539412, 2.713285                        |
-| `las-palmas-moxsi`     | Las Palmas de Gran Canaria, Spain | moxsi         | `el` | 28.1128, -15.446  | 66   | `El Sebadal (eléc.)` 28.156534, -15.421658                       |
-| `leon-nextbike`        | León, Spain                       | nextbike León | `sl` | 42.5984, -5.5762  | 51   | `JUSTINO AZCÁRATE- OLÍMPICO DE LEÓN` 42.63409, -5.60005          |
-| `santander-tuebici`    | Santander, Spain                  | TUeBICI       | `ek` | 43.4607, -3.8237  | 42   | `Magdalena` 43.468583, -3.775917                                 |
-| `boadilla-bibo`        | Boadilla del Monte, Spain         | bibo          | `by` | 40.4219, -3.8925  | 39   | `LOS FRESNOS` 40.4434, -3.8769                                   |
-| `logrono-bicilog`      | Logroño, Spain                    | BiciLOG       | `ej` | 42.4625, -2.445   | 35   | `EL ARCO` 42.457194, -2.481917                                   |
-| `mislata-bicimislata`  | Mislata, Spain                    | BiciMislata   | `ad` | 39.4678, -0.3871  | 21   | `Rectorado UPV` 39.481454, -0.346754                             |
-| `torrent-torrentbici`  | Torrent, Spain                    | TorrentBici   | `en` | 39.4299, -0.4744  | 20   | `El Vedat - Av. Sant Llorenç` 39.4186, -0.489237                 |
-| `arteixo-biciarteixo`  | Arteixo, Spain                    | biciArteixo   | `aa` | 43.3211, -8.498   | 15   | `MEICENDE N°229` 43.34808, -8.444225                             |
-| `canarias-lovesharing` | Canary Islands, Spain             | Lovesharing   | `ls` | ver abajo         | 14   | —                                                                |
+**Lovesharing se queda fuera** (decidido el 2026-10-17): son 14 estaciones de hotel en
+tres islas, y la más lejana está a 130 km del centro.
 
-Notas:
+| id                    | city                              | provider      | xx   | centro (lat, lon) | est. | más alejada (test)                                                |
+| --------------------- | --------------------------------- | ------------- | ---- | ----------------- | ---- | ----------------------------------------------------------------- |
+| `bizkaia-bizkaibizi`  | Bizkaia, Spain                    | Bizkaibizi    | `bw` | 43.317, -2.9866   | 109  | `-ABANDO` 43.260921, -2.927116 · `-AZKORRI` 43.378208, -3.011364  |
+| `palma-bicipalma`     | Palma, Spain                      | BiciPalma     | `ea` | 39.5911, 2.664    | 106  | `109 CAN PASTILLA 88` 39.539412, 2.713285                         |
+| `las-palmas-moxsi`    | Las Palmas de Gran Canaria, Spain | moxsi         | `el` | 28.1128, -15.446  | 66   | `El Sebadal (eléc.)` 28.156534, -15.421658                        |
+| `leon-nextbike`       | León, Spain                       | nextbike León | `sl` | 42.5984, -5.5762  | 51   | `JUSTINO AZCÁRATE- OLÍMPICO DE LEÓN` 42.63409, -5.60005           |
+| `santander-tuebici`   | Santander, Spain                  | TUeBICI       | `ek` | 43.4607, -3.8237  | 42   | `PTCAN 1` 43.452868, -3.871395 · `Magdalena` 43.468583, -3.775917 |
+| `boadilla-bibo`       | Boadilla del Monte, Spain         | bibo          | `by` | 40.4219, -3.8925  | 39   | `LOS FRESNOS` 40.4434, -3.8769                                    |
+| `logrono-bicilog`     | Logroño, Spain                    | BiciLOG       | `ej` | 42.4625, -2.445   | 35   | `EL ARCO` 42.457194, -2.481917                                    |
+| `mislata-bicimislata` | Mislata, Spain                    | BiciMislata   | `ad` | 39.4678, -0.3871  | 21   | `Rectorado UPV` 39.481454, -0.346754                              |
+| `torrent-torrentbici` | Torrent, Spain                    | TorrentBici   | `en` | 39.4299, -0.4744  | 20   | `El Vedat - Av. Sant Llorenç` 39.4186, -0.489237                  |
+| `arteixo-biciarteixo` | Arteixo, Spain                    | biciArteixo   | `aa` | 43.3211, -8.498   | 15   | `MEICENDE N°229` 43.34808, -8.444225                              |
 
-- **Lovesharing:** son 14 estaciones en hoteles (Lopesan, Barceló, R2…) repartidas por
-  Gran Canaria (sur), Fuerteventura y Lanzarote. Desde el centro del rectángulo
-  (28.36, -14.63, en el mar) la más lejana está a 130 km, por encima del suelo de
-  100 km. Opciones:
-  - (a) **Recomendada:** dejarlo fuera del pack. Es un servicio de hotel, aporta poco
-    y obliga a un caso especial.
-  - (b) Ponerle `loadRadiusKm: 150`.
-- **BiciMislata** incluye estaciones fuera de Mislata (`Rectorado UPV`, `313 - Alaquàs`).
-  Es la red MiBisi del área de Valencia, y está bien.
-- Créditos: el operador de cada sistema viene en `system_information.operator` (por
-  ejemplo, BiciPalma: SMAP, Ayuntamiento de Palma; TUeBICI: UTE Bicis Santander;
-  León: Leonbici nextbike y Autobuses Urbanos de León). CC0 no exige atribución, pero se
-  da igual que en AMBici. Una sola fila en `DATA_SOURCES.md` del tipo
-  "nextbike España (CC0)" con la lista de sistemas.
+El centro es el del rectángulo que envuelve las estaciones (sin cambios desde el
+2026-10-16). En Santander, `PTCAN 1` (4,0 km) es ahora la más lejana, junto a `Magdalena`.
+
+### Revisión de los feeds del pack 2 (2026-10-17)
+
+Los 10 feeds descargados en vivo y pasados por `parseStationInformation` /
+`parseStationStatus`. Todos son GBFS 2.3, todas las URLs responden 200, cada estación
+tiene información y estado, y el estado tiene menos de 1 min (`last_reported` también:
+mediana 0 h, a diferencia de JCDecaux). Los ficheros son pequeños (el mayor, 36 KB).
+
+| Sistema     | Estac. | Bicis | Más lejana | Virtuales (cap. 0) | Bicis > capacidad | Rarezas                                          |
+| ----------- | ------ | ----- | ---------- | ------------------ | ----------------- | ------------------------------------------------ |
+| Bizkaibizi  | 109    | 604   | 7,9 km     | 0                  | 11                | **Los 109 nombres empiezan por `-`** (`-ABANDO`) |
+| BiciPalma   | 106    | 580   | 7,1 km     | 1                  | 2                 | 1 que no alquila                                 |
+| moxsi       | 66     | 277   | 5,4 km     | 42                 | 3                 | —                                                |
+| León        | 51     | 377   | 4,4 km     | 0                  | 22                | —                                                |
+| TUeBICI     | 42     | 154   | 4,0 km     | 0                  | 1                 | Un nombre con doble espacio                      |
+| bibo        | 39     | 97    | 2,7 km     | 27                 | 0                 | Un nombre con doble espacio                      |
+| BiciLOG     | 35     | 262   | 3,1 km     | 9                  | 1                 | —                                                |
+| BiciMislata | 21     | 32    | 3,8 km     | 3                  | 0                 | Estaciones en Alaquàs y en la UPV (red MiBisi)   |
+| TorrentBici | 20     | 67    | 1,8 km     | 8                  | 0                 | —                                                |
+| biciArteixo | 15     | 113   | 5,3 km     | 0                  | 0                 | —                                                |
+
+**Resuelto sin código:**
+
+- **Estaciones virtuales** (`is_virtual_station`, sin `capacity`): upstream ya las tiene
+  (Skien, 54 de 54) y muchos BCycle/Lyft publican capacidad 0. Se muestran igual.
+- **Bicis por encima de la capacidad** (León 22): es la nota P3 de #1190 en
+  `dockCapacity`. No se toca.
+- **Bicis sueltas** (`free_bike_status` sin `station_id`, como mucho 5 en TorrentBici): la
+  capa es de estaciones y no las lee. Igual que AMBici.
+- **Dobles espacios** en dos nombres: se dejan, como decidió el pack 1 ("otra separación
+  es la del operador").
+- **Solapes:** Bizkaibizi y Bilbao Bizi (pack 1); BiciMislata, TorrentBici y Valenbisi;
+  bibo, BiciMAD y BicinRivas; biciArteixo y BiciCoruña. No hay tope de sistemas activos.
+
+**Por decidir (propuesta en el plan de implementación):** el `-` delante de los nombres de
+Bizkaibizi. En los 52 sistemas de upstream solo hay un nombre así: `- Verkstedet`
+(Stavanger, el taller).
+
+### Licencias y atribución (pack 2)
+
+CC0 en los 10 (`system_information.license_id`), así que no hace falta revisar más. CC0 no
+exige atribución, pero se da, como en AMBici. Operadores según `system_information.operator`:
+
+| Sistema     | Operador                                                   |
+| ----------- | ---------------------------------------------------------- |
+| Bizkaibizi  | UTE Bizkaiabizi (Leioa)                                    |
+| BiciPalma   | SMAP, Societat Municipal d'Aparcaments i Projectes (Palma) |
+| moxsi       | solo dirección (Las Palmas de Gran Canaria)                |
+| León        | Leonbici nextbike y Autobuses Urbanos de León, UTE         |
+| TUeBICI     | UTE Bicis Santander                                        |
+| bibo        | MOVUS, Movilidad Urbana Sostenible                         |
+| BiciLOG     | Exterior Plus (Logroño)                                    |
+| BiciMislata | MOVUS, Movilidad Urbana Sostenible                         |
+| TorrentBici | solo dirección (la de MOVUS en Paterna)                    |
+| biciArteixo | SUMARTE (Arteixo)                                          |
+
+## Pack 2 — Plan de implementación (2026-10-17)
+
+Una sola PR a upstream, `feat(bikeshare): add ten Spanish nextbike systems`, con el
+mismo formato que #1190. Rama `feat/bikeshare-spain-nextbike` en un worktree aparte
+(`../gev-bikeshare-nextbike`, con `node_modules` y `.env` enlazados al repo principal,
+como en el pack 1).
+
+### Paso 0 — Antes de escribir código
+
+1. **Esperar a que se fusione #1190** y sacar la rama del `upstream/main` que lo
+   contenga. Dos motivos:
+   - las filas de los dos packs van al mismo sitio (al final de
+     `RAW_GBFS_CITY_REGISTRY`, después de AMBici), así que dos PRs abiertas a la vez
+     chocan;
+   - el commit 1 amplía `tidyStationName()`, que llega con #1190.
+
+   Si #1190 tarda, la alternativa es apilar la rama sobre `feat/bikeshare-spain-cities`
+   y abrir la PR cuando se fusione, rebasando antes.
+
+2. **Volver a sondear los 10 feeds** con un script desechable: `gbfs.json` en
+   `/nextbike_<xx>/`, el resto en `/en/`, pasados por los parsers de GEV. Actualizar las estaciones del test si han cambiado.
+
+### Commit 1 — `fix(gbfs): drop leading hyphens from station names`
+
+**Propuesta (a confirmar):** ampliar `tidyStationName()` de `src/sources/gbfsStations.js`
+para quitar los guiones del principio (`^\s*-+\s*`), además de los `_`.
+
+- Bizkaibizi pone `-` delante de los 109 nombres (`-ABANDO`, `-METRO LUTXANA-ERANDIO`).
+  Sin el arreglo, la tarjeta y `get_bike_share` dicen "-ABANDO".
+- Solo se toca el principio del nombre: los guiones interiores (`JUSTINO AZCÁRATE-
+OLÍMPICO`, `El Vedat - Av. Sant Llorenç`, `313 - Alaquàs`) se quedan.
+- Efecto en upstream: un solo nombre, `- Verkstedet` → `Verkstedet` (Stavanger). Se dice
+  en la PR.
+- Casos nuevos en `src/sources/gbfsStations.test.mjs`: `-ABANDO` → `ABANDO`,
+  `- Verkstedet` → `Verkstedet`, un nombre que es solo `-` cae al `short_name`, y los
+  guiones interiores no cambian.
+- **Alternativa:** dejar los nombres como vienen. Más simple, pero se lee peor.
+- **Prueba en la descripción de la PR:** pasar los feeds del registro por el parser con y
+  sin el cambio. El 2026-10-17 solo cambiaba `- Verkstedet`.
+
+### Commit 2 — `feat(bikeshare): add ten Spanish nextbike systems`
+
+- **`src/layers/bikeshare/registry.js`:** las 10 filas de la tabla, después de las del
+  pack 1, con `loadRadiusKm: 40` (la más lejana está a 7,9 km).
+  - **Propuesta:** un ayudante `nextbikeEntry({ id, city, centerLat, centerLon, domain,
+provider, loadRadiusKm = 40 })` que monta
+    `https://gbfs.nextbike.net/maps/gbfs/v2/nextbike_${domain}/en/station_{information,status}.json`,
+    como ya hacen `bcycleEntry`, `urbanSharingEntry` y `enturEntry`. La fila de AMBici
+    se queda escrita a mano para no tocar código ajeno.
+  - Un comentario corto encima, como el de AMBici: BiciMislata cubre la red MiBisi
+    (Alaquàs, la UPV) y Bizkaibizi varios municipios de la margen derecha e izquierda.
+- **`src/layers/bikeshare/spainNextbikeSystems.test.mjs`**, calcado de
+  `spainCitiesSystems.test.mjs`:
+  1. Los 10 están registrados, con su `provider` y `hosts: ['gbfs.nextbike.net']`, y el
+     proxy acepta el host y la ruta de cada feed.
+  2. La cámara sobre cada estación más lejana activa su sistema.
+  3. El `loadRadiusKm` de cada sistema alcanza sus estaciones más lejanas.
+  4. Solapes: una cámara en el centro de Valencia activa Valenbisi, BiciMislata y
+     TorrentBici; una en Bilbao, Bilbao Bizi y Bizkaibizi.
+  5. Los nombres de Bizkaibizi llegan sin `-` a la capa (si se acepta el commit 1).
+
+### Commit 3 — `docs: credit and document the Spanish nextbike systems`
+
+- **`src/data/dataCredits.js`**, clave `gbfs`: después de AMBici, algo como "nextbike
+  systems in Spain (Bizkaibizi; BiciPalma, SMAP; moxsi, Las Palmas de Gran Canaria; León;
+  TUeBICI, Santander; bibo, Boadilla; BiciLOG, Logroño; BiciMislata; TorrentBici;
+  biciArteixo)". Texto final al escribirlo.
+- **`DATA_SOURCES.md`:** una fila "nextbike, Spain" (`gbfs.nextbike.net`) como la de
+  AMBici: feeds del operador, sin clave, `license_id` CC0-1.0, atribución dada igualmente.
+- **`docs/CURRENT-STATE.md`**, fila Bikeshare: "nextbike (AMBici)" pasa a "nextbike
+  (AMBici and ten other Spanish systems)".
+
+### Después de abrir la PR
+
+- Commit con `changelog.d/<n>-bikeshare-spain-nextbike.md` (formato de
+  `changelog.d/README.md`).
+- **Validación**, la misma que #1190: `npm run format:check`, `npm run check:boundaries`,
+  `npm run build`, `npm test` (Node 24) y `npm run test:track` (necesita servidor en
+  4173), más la comprobación en vivo por `/api/gbfs`: 20 feeds con 200 y cada estación
+  con su estado.
+- **Prueba en la app** antes de abrir la PR, con la entrada temporal de
+  `.claude/launch.json` apuntando al worktree (y revertirla después).
+- **Descripción de la PR:** Summary con tabla (sistema, área, estaciones: 504 en total el
+  2026-10-17), Changes por commit, Notes (Lovesharing fuera y por qué, estaciones
+  virtuales, el `-` de Bizkaibizi y `- Verkstedet`) y Testing. Sin detalles del fork.
+- **Cuando se fusione:** sincronizar `mi-main` con el proceso normal.
 
 ## Fuera de alcance (por ahora)
 
@@ -366,8 +499,15 @@ Notas:
   (`gbfs.ganxeta.cat`, 24 estaciones, sin licencia) y MugiBIKE Vitoria
   (`gbfs.partners.fifteen.eu`, 12 estaciones, **ODbL**).
 - **Descartados:**
-  - bizkaibizi 4.0 (`nextbike_bk`, 1 estación) y Roquebike (`nextbike_ra`, 1 estación)
-  - MálagaBici (`nextbike_xp`, 4 estaciones, fuera del catálogo de MobilityData)
+  - Lovesharing (`nextbike_ls`, 14 estaciones de hotel en Gran Canaria, Fuerteventura y
+    Lanzarote, a 130 km del centro). Decidido el 2026-10-17.
+  - bizkaibizi 4.0 (`nextbike_bk`, 1 estación)
+  - Roquebike (`nextbike_ra`, Roquetas de Mar): el 2026-10-17 tiene 173 bicis en un
+    único punto `OUTGOING BIKES`, que parece un almacén antes de abrir. **Volver a
+    mirar** más adelante.
+  - MálagaBici (`nextbike_xp`, 3 estaciones, una de ellas en Leipzig: es una demo)
+  - Dominios nextbike vacíos (0 estaciones, sin GBFS): Bilbaobizi (`bo`, hoy en PBSC,
+    pack 1) y BBK Klimabizi (`ey`)
   - Donkey Republic Barcelona (1.522 puntos virtuales para unas 200 bicis)
   - Getaround (coches), Bird (patinetes) y Cooltra (motos), porque la capa es de
     estaciones de bici
