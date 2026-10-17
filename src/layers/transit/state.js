@@ -81,6 +81,16 @@ export function createState({ services }) {
   state._showEstimated = true;
   /** Whether an estimated feed covers the view (the row shows its pill). */
   state._estimatedInRange = false;
+  /**
+   * Estimated feeds the server's catalog offers (`/api/transit/feeds`), or
+   * null until it has been read. An estimated row needs a key the server may
+   * not have, so the bundled registry alone cannot say it is servable.
+   * @type {Set<string>|null}
+   */
+  state._offeredEstimates = null;
+  /** When the catalog was last asked for (ms), and whether it is in flight. */
+  state._offeredEstimatesAt = -Infinity;
+  state._offeredEstimatesLoading = false;
   /** @type {Map<string, {count:number, lastUpdate:number|null, error:string|null, stale:boolean, pollSeq:number, loading:boolean}>} */
   state._feedStatus = new Map();
   /** @type {Map<string, {controller: AbortController, promise: Promise<void>}>} */

@@ -761,6 +761,7 @@
   "src/data/tmbMetroTimelines.test.mjs",
   "src/tooling/transitEstimates.test.mjs",
   "src/layers/transit/estimatedCard.test.mjs",
+  "src/layers/transit/offeredEstimates.test.mjs",
   "src/layers/transit/estimatedFeeds.test.mjs",
   "src/data/transitFeedHooks.test.mjs",
   "src/data/fgcGeotren.test.mjs",

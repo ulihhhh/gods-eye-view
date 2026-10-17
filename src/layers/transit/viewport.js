@@ -6,7 +6,15 @@ import {
   RANGE_SLACK_KM,
   inflateViewBounds,
 } from './policy.js';
-import { transitFeedsInRange } from '../../data/transitFeeds.js';
+import {
+  getRegisteredTransitFeed,
+  transitFeedsInRange,
+} from '../../data/transitFeeds.js';
+
+/** How often the server's catalog is re-read while an estimated row is near. */
+export const OFFERED_ESTIMATES_REFRESH_MS = 5 * 60_000;
+/** How soon a failed catalog read is retried. */
+export const OFFERED_ESTIMATES_RETRY_MS = 60_000;
 
 /**
  * Camera-driven feed activation: only the feeds whose coverage circle contains
@@ -14,8 +22,51 @@ import { transitFeedsInRange } from '../../data/transitFeeds.js';
  * @param {object} context
  * @returns {object}
  */
-export function createViewport({ state, services, parts }) {
+export function createViewport({ state, services, parts, source }) {
   const { governorRequestRender } = services.render;
+
+  /**
+   * Fork-only: which estimated feeds the server actually serves. Asked only
+   * once an estimated row covers the view, again every
+   * OFFERED_ESTIMATES_REFRESH_MS (a key added from POWER UP shows up without
+   * a reload), and after OFFERED_ESTIMATES_RETRY_MS when the read failed.
+   * Until it answers, estimated rows are not polled: polling one the server
+   * does not offer is a 404 every poll and a row saying "unavailable".
+   */
+  function refreshOfferedEstimates(now = Date.now()) {
+    if (state._offeredEstimatesLoading) return;
+    if (typeof source?.getFeeds !== 'function') return;
+    const wait =
+      state._offeredEstimates === null
+        ? OFFERED_ESTIMATES_RETRY_MS
+        : OFFERED_ESTIMATES_REFRESH_MS;
+    if (now - state._offeredEstimatesAt < wait) return;
+    state._offeredEstimatesAt = now;
+    state._offeredEstimatesLoading = true;
+    const generation = state._generation;
+    Promise.resolve()
+      .then(() => source.getFeeds())
+      .then((rows) => {
+        state._offeredEstimates = new Set(
+          rows
+            .map((row) => row?.id)
+            .filter((id) => getRegisteredTransitFeed(id)?.estimate),
+        );
+      })
+      .catch(() => {
+        // Keep what was known; the next check asks again after the retry wait.
+      })
+      .finally(() => {
+        state._offeredEstimatesLoading = false;
+        if (state._enabled && generation === state._generation)
+          runProximityCheck();
+      });
+  }
+
+  /** Whether an estimated feed may be polled now (pill on, server offers it). */
+  function estimateServed(feed) {
+    return state._offeredEstimates?.has(feed.id) === true;
+  }
 
   function getCameraAltitude(viewer = state._viewer) {
     const carto = viewer?.camera?.positionCartographic;
@@ -83,14 +134,19 @@ export function createViewport({ state, services, parts }) {
     const desired = new Map();
     let estimatedInRange = false;
     if (center) {
+      let estimatedNearby = false;
       for (const feed of transitFeedsInRange(center.lat, center.lon)) {
-        // Fork-only: estimated feeds follow the row's ESTIMATED pill.
+        // Fork-only: estimated feeds follow the row's ESTIMATED pill, and
+        // only those the server offers are polled.
         if (feed.estimate) {
+          estimatedNearby = true;
+          if (!estimateServed(feed)) continue;
           estimatedInRange = true;
           if (!state._showEstimated) continue;
         }
         desired.set(feed.id, feed);
       }
+      if (estimatedNearby) refreshOfferedEstimates();
       // Hysteresis: a feed already active stays active a little past its edge.
       for (const feed of transitFeedsInRange(
         center.lat,
@@ -98,6 +154,7 @@ export function createViewport({ state, services, parts }) {
         RANGE_SLACK_KM,
       )) {
         if (!state._activeFeeds.has(feed.id)) continue;
+        if (feed.estimate && !estimateServed(feed)) continue;
         if (feed.estimate) estimatedInRange = true;
         if (feed.estimate && !state._showEstimated) continue;
         desired.set(feed.id, feed);
