@@ -53,7 +53,34 @@ const TMB_METRO_ESTIMATED = Object.freeze({
   // this feed exactly this far behind, so the train is drawn where the
   // estimate puts it now. The record keeps the time it was made.
   estimateLeadMs: 35_000,
+  // Between two fixes the layer follows the metro track, not the chord.
+  trackGeometry: () => tmbMetroTrackLines(),
 });
+
+/**
+ * The metro track for the Transit layer to follow between two estimated
+ * fixes, from the server (`/api/tmb/metro-lines`): TMB's licence binds its
+ * geometry to the application, so it is not bundled. Each line names itself,
+ * so an L1 train never snaps to L3 track. Browser only (the layer calls it);
+ * the server puts the fixes on the same geometry (tmbMetroSegmentPaths).
+ * @returns {Promise<Array<{routes: string[], paths: number[][]}>>}
+ */
+export async function tmbMetroTrackLines(fetchImpl = globalThis.fetch) {
+  const response = await fetchImpl('/api/tmb/metro-lines', {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error(`TMB metro lines HTTP ${response.status}`);
+  const body = await response.json();
+  const lines = (Array.isArray(body?.lines) ? body.lines : []).filter(
+    (line) =>
+      typeof line?.name === 'string' &&
+      line.name &&
+      Array.isArray(line.paths) &&
+      line.paths.length,
+  );
+  if (!lines.length) throw new Error('TMB metro lines empty');
+  return lines.map((line) => ({ routes: [line.name], paths: line.paths }));
+}
 
 /** Estimated rows, in presentation order. */
 export const ESTIMATED_TRANSIT_FEEDS = Object.freeze([TMB_METRO_ESTIMATED]);

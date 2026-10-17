@@ -19,6 +19,7 @@
  */
 
 import { distanceM } from './estimatedPositions.js';
+import { createTrackIndex, pathBetween } from './trackFollow.js';
 
 /** Assumed stand at a station, inside the measured station-to-station gap. */
 export const TMB_METRO_DWELL_MS = 20_000;
@@ -300,4 +301,49 @@ export function tmbMetroTimelines(
     });
   }
   return timelines.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** Spacing of the points a track path is sampled at, in metres. */
+const TRACK_SAMPLE_M = 20;
+
+/**
+ * The engine's `segmentPath` over TMB's metro line geometry
+ * (`/transit/linies/metro`, as buildTmbMetroLines returns it): the stretch
+ * of the train's own line between two stations, as [[lon, lat], …], or null
+ * (the engine then draws the straight line). Measured on 2026-10-17, every
+ * station pair of L1–L5 and L11 (122) is found, with the length TMB gives
+ * its station-to-station `trams` (median ratio 1.000). The Transit layer
+ * follows the same geometry between two fixes (registry `trackGeometry`),
+ * so the fixes and the path drawn between them agree.
+ *
+ * Paths are cached per line and station pair: there are a few hundred.
+ * @param {Array<{name: string, paths: number[][]}>|null} lines
+ * @returns {((from: object, to: object, timeline: object) => number[][]|null)|null}
+ */
+export function tmbMetroSegmentPaths(lines) {
+  const usable = (Array.isArray(lines) ? lines : []).filter(
+    (line) => line?.name && Array.isArray(line.paths) && line.paths.length,
+  );
+  if (!usable.length) return null;
+  const index = createTrackIndex(
+    usable.map((line) => ({ routes: [line.name], paths: line.paths })),
+  );
+  const cache = new Map();
+  return (from, to, timeline) => {
+    const route = timeline?.routeId ?? null;
+    const key = `${route}|${from.stopId}>${to.stopId}`;
+    if (cache.has(key)) return cache.get(key);
+    const path = route ? pathBetween(index, from, to, route) : null;
+    let points = null;
+    if (path) {
+      const steps = Math.max(1, Math.ceil(path.lengthM / TRACK_SAMPLE_M));
+      points = [];
+      for (let i = 0; i <= steps; i++) {
+        const point = path.at(i / steps);
+        points.push([point.lon, point.lat]);
+      }
+    }
+    cache.set(key, points);
+    return points;
+  };
 }

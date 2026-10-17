@@ -252,3 +252,16 @@ test('the smoother forgets vehicles it has not seen for a while', () => {
   estimateVehicles([], s(60) + 6 * 60_000, { smoother });
   assert.equal(smoother.size, 0);
 });
+
+test('segmentPath is told which timeline it serves', () => {
+  const seen = [];
+  positionOnTimeline(metroTimeline(), s(60), {
+    segmentPath: (from, to, timeline) => {
+      seen.push([from.stopId, to.stopId, timeline.routeId]);
+      return null;
+    },
+  });
+  assert.ok(
+    seen.some(([a, b, route]) => a === 'A' && b === 'B' && route === 'L3'),
+  );
+});

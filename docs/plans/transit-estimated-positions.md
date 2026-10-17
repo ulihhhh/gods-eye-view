@@ -1,8 +1,8 @@
 # Plan — Posiciones estimadas en la capa Transit: metro TMB y trenes suizos (`solo fork`)
 
-Estado: **E-0 y E-1 hechos (2026-10-17)**: motor genérico + metro TMB en línea recta, en
-`mi-main`. Siguiente, por orden: E-1b (bug), E-2b (relleno y color) y E-2 (vía). Creado el
-2026-10-17 juntando dos ideas que eran la misma:
+Estado: **metro TMB hecho (2026-10-17)**: E-0, E-1, E-1b, E-2b y E-2 en `mi-main`. Los
+trenes van sobre la vía, rellenos y del color de su línea. Siguiente: E-3 (Suiza, bloqueado
+en la clave). Creado el 2026-10-17 juntando dos ideas que eran la misma:
 
 - la antigua Fase 9 de `docs/plans/transit-spain-renfe-fgc.md` (metro TMB "estimado");
 - el motor de posición de `docs/plans/switzerland-open-data.md` (trenes de Suiza).
@@ -203,11 +203,18 @@ cuando el motor ya funcione.
 - **Repaso del 2026-10-17 tras E-1:** las posiciones concuerdan con las llegadas (los
   trenes llegan a su hora). Lo que queda para el metro de Barcelona, en el orden
   recomendado:
-- **E-1b — Bug: la capa sondea la fila estimada aunque el servidor no la ofrezca.** Sin
+- **E-1b — Hecho (2026-10-17). Bug: la capa sondeaba la fila estimada aunque el servidor no la ofreciera.** Sin
   clave o con `TRANSIT_ESTIMATED_POSITIONS=off`, 404 cada 15 s, la fila dice "no
   disponible" y la pastilla sigue visible. Arreglo: que la capa se salte las filas
   `estimate` que no estén en `/api/transit/feeds`. Es pequeño y va primero.
-- **E-2b — Icono relleno y color de línea** (puntos 2 y 3 del usuario):
+  - **Hecho así:** `src/layers/transit/viewport.js` lee `/api/transit/feeds` cuando una
+    fila estimada cubre la vista. Lo vuelve a leer cada 5 minutos, o al minuto si
+    falló. Solo sondea las filas estimadas que el catálogo lista, y la pastilla solo
+    sale para esas. Comprobado en vivo con clave: se lee el catálogo una vez y luego
+    la fila responde 200. El caso sin clave está cubierto en
+    `src/layers/transit/offeredEstimates.test.mjs`, no probado en vivo.
+- **E-2b — Hecho (2026-10-17). Icono relleno y color de línea** (puntos 2 y 3 del
+  usuario):
   - **Relleno:** `applySpriteStyle` (`src/layers/transit/rendering.js`) deja de pasar
     `estimated` a `transitIcon`.
   - **Color de línea:** hoy el sprite y la estela se pintan por modo
@@ -222,7 +229,16 @@ cuando el motor ya funcione.
   - **Hecho cuando** sobre Barcelona cada tren se ve relleno y del color de su línea
     (L1 roja, L2 lila, L3 verde, L4 amarilla, L5 azul, L11 verde claro), y la estela
     también.
-- **E-2 — Seguir el trazado de la vía** (punto 1 del usuario). Tiene dos mitades, y
+  - **Hecho así:**
+    - el registro lleva `routeColor` (`color_linia` de iMetro);
+    - `transitRouteColorCss` (en `policy.js`) lo usan el sprite, la estela del tren
+      seleccionado y el acento de la ficha;
+    - los estilos NVG/FLIR/noir y CRT siguen mandando;
+    - el icono es el relleno.
+  - **Comprobado en vivo:** L1 `CE1126`, L2 `93248F`, L3 `1EB53A`, L4 `F7A30E`, L5
+    `005A97`, L11 `89B94C`. Los lila claro que se ven cerca son trenes de Rodalies (color
+    del modo tren), no metros.
+- **E-2 — Hecho (2026-10-17). Seguir el trazado de la vía** (punto 1 del usuario). Tiene dos mitades, y
   hacen falta las dos:
   - **Servidor:** que cada posición estimada caiga sobre la vía. El motor ya acepta
     `segmentPath(desde, hasta)`. Opciones:
@@ -242,6 +258,32 @@ cuando el motor ya funcione.
     pegue a la vía de la L3.
   - **Hecho cuando** sobre Barcelona los trenes van por las curvas de la vía, también
     entre dos sondeos, y la estela dibuja el trazado.
+  - **Decisión: geometría de línea + `pathBetween`.** Medido con los datos del
+    2026-10-17:
+    - las dos opciones casan los 122 pares de estaciones de L1–L5 y L11;
+    - la longitud por la línea coincide con el `LONGITUD` de los `trams` (mediana
+      1,000, p10 0,998, p90 1,001);
+    - la geometría de línea tiene 720 vértices, frente a 3.888 de los `trams`;
+    - no necesita otra descarga, y es la misma geometría que sigue la capa.
+  - **Servidor:**
+    - el estimador descarga `/transit/linies/metro` (`NOM_LINIA`, `GEOMETRY`) junto a
+      las estaciones, una vez al día;
+    - `tmbMetroSegmentPaths` (`src/data/tmbMetroTimelines.js`) da al motor el tramo de
+      la línea del tren, muestreado cada 20 m y guardado en caché por par;
+    - el motor pasa ahora la línea de tiempo a `segmentPath`;
+    - si la geometría falla, los trenes van en línea recta, y se reintenta a los 10
+      minutos.
+  - **Navegador:**
+    - la fila tiene `trackGeometry: tmbMetroTrackLines`, que lee
+      `/api/tmb/metro-lines`;
+    - es una ruta nueva que devuelve solo `{lines: [{name, paths}]}` del catálogo de
+      estaciones;
+    - cada línea va con `routes: [nombre]`.
+  - **Comprobado en vivo:** los 74 trenes quedan a 3 m o menos de la vía de su línea
+    (mediana 0 m, p90 2 m), y la capa carga `/api/tmb/metro-lines` (200) sin errores.
+    **No comprobado a ojo:** con el panel del navegador oculto, la página iba en
+    segundo plano y las capturas no se refrescaban, así que no se vio un tren
+    recorriendo una curva.
 - **E-3 —** Trenes suizos: CH-1 en adelante del plan de Suiza, sobre el mismo motor.
 - **E-4 — (Opcional)** buses AMB, si se decide (sección 5).
 

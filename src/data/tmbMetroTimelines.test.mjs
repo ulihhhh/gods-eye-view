@@ -5,6 +5,7 @@ import {
   buildTmbMetroNetwork,
   learnTmbMetroRuntimes,
   tmbMetroNetworkCodes,
+  tmbMetroSegmentPaths,
   tmbMetroTimelines,
   tmbMetroTrains,
 } from './tmbMetroTimelines.js';
@@ -249,4 +250,42 @@ test('a train carries its line colour from iMetro', () => {
     NETWORK,
   );
   assert.equal('routeColor' in plain, false);
+});
+
+test('a train runs along its own line between stations, not the chord', () => {
+  // L3 bends east between Dos (41.41) and Tres (41.40): the track goes out
+  // to 2.175 and back. An L1 track runs straight nearby and must not be used.
+  const lines = [
+    {
+      name: 'L3',
+      paths: [
+        [2.17, 41.42, 2.17, 41.41, 2.175, 41.405, 2.17, 41.4, 2.17, 41.39],
+      ],
+    },
+    { name: 'L1', paths: [[2.171, 41.42, 2.171, 41.39]] },
+  ];
+  const segmentPath = tmbMetroSegmentPaths(lines);
+  const body = imetro([
+    [302, 1, '360', s(-10), 'Cinco'],
+    [303, 1, '360', s(80), 'Cinco'],
+    [304, 1, '360', s(170), 'Cinco'],
+  ]);
+  const [timeline] = tmbMetroTimelines(body, NETWORK);
+  // Halfway between Dos's departure (−10 s + 20 s stand) and Tres (80 s).
+  const [record] = estimateVehicles([timeline], s(45), { segmentPath });
+  assert.equal(record.stopId, '303');
+  assert.ok(Math.abs(record.lon - 2.175) < 0.0005, `lon ${record.lon}`);
+  assert.ok(Math.abs(record.lat - 41.405) < 0.0005, `lat ${record.lat}`);
+  // The same pair is answered from the cache.
+  const from = timeline.stops[1];
+  const to = timeline.stops[2];
+  assert.equal(
+    segmentPath(from, to, timeline),
+    segmentPath(from, to, timeline),
+  );
+  // Stations away from any track run straight (null), as before.
+  const far = (stopId, lat) => ({ stopId, lat, lon: 2.3, arr: 0, dep: 0 });
+  assert.equal(segmentPath(far('a', 41.41), far('b', 41.4), timeline), null);
+  assert.equal(tmbMetroSegmentPaths(null), null);
+  assert.equal(tmbMetroSegmentPaths([{ name: 'L3', paths: [] }]), null);
 });

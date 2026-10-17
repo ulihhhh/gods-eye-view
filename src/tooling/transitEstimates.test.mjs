@@ -4,11 +4,13 @@ import {
   TMB_METRO_ESTIMATE_STALE_MS,
   TMB_METRO_ESTIMATE_TTL_MS,
   createTmbMetroEstimator,
+  tmbMetroLinesBody,
   tmbMetroNetworkUrl,
 } from '../../server/providers/tmb.js';
 import { transitEstimatesEnabled } from '../../server/providers/transit.js';
 import { createTransitService } from '../sources/transitService.js';
 import { getTransitFeed } from '../data/transitFeeds.js';
+import { tmbMetroTrackLines } from '../data/transitFeedsEstimated.js';
 
 const PAIR = { TMB_APP_ID: 'fixture-id', TMB_APP_KEY: 'fixture-secret' };
 const T0 = Date.UTC(2026, 9, 17, 10, 12, 0);
@@ -297,4 +299,109 @@ test('a failing estimator is an unavailable feed, with backoff', async () => {
     console.warn = warn;
     service.close();
   }
+});
+
+test('the estimator puts trains on the metro line geometry', async () => {
+  const clock = { t: T0 };
+  // Uno → Dos → Tres, with a bend east between Dos and Tres.
+  const lines = {
+    type: 'FeatureCollection',
+    features: [
+      {
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [2.17, 41.42],
+            [2.17, 41.41],
+            [2.175, 41.405],
+            [2.17, 41.4],
+          ],
+        },
+        properties: { NOM_LINIA: 'L3' },
+      },
+    ],
+  };
+  const fetchImpl = async (url) => {
+    const path = new URL(String(url)).pathname;
+    if (path.endsWith('/transit/linies/metro/estacions'))
+      return new Response(JSON.stringify(NETWORK), { status: 200 });
+    if (path.endsWith('/transit/linies/metro'))
+      return new Response(JSON.stringify(lines), { status: 200 });
+    // Train 307 left Dos and is due at Tres in 40 s.
+    const at = clock.t;
+    return new Response(
+      JSON.stringify({
+        timestamp: at,
+        linies: [
+          {
+            nom_linia: 'L3',
+            estacions: [302, 303].map((code, i) => ({
+              codi_via: 1,
+              codi_estacio: code,
+              linies_trajectes: [
+                {
+                  nom_linia: 'L3',
+                  propers_trens: [
+                    // Dos only for the other train that tells the direction.
+                    ...(code === 303
+                      ? [{ codi_servei: '307', temps_arribada: at + 40_000 }]
+                      : []),
+                    {
+                      codi_servei: '308',
+                      temps_arribada: at + 200_000 + i * 90_000,
+                    },
+                  ],
+                },
+              ],
+            })),
+          },
+        ],
+      }),
+      { status: 200 },
+    );
+  };
+  const estimator = createTmbMetroEstimator({
+    env: PAIR,
+    fetchImpl,
+    now: () => clock.t,
+  });
+  const { vehicles } = await estimator.estimate({ now: clock.t });
+  const train = vehicles.find((v) => v.id === 'L3-307');
+  assert.equal(train.stopId, '303');
+  // On the bend, east of the straight line between the two stations.
+  assert.ok(train.lon > 2.171, `lon ${train.lon}`);
+});
+
+test('the metro lines route serves the track alone', () => {
+  const body = tmbMetroLinesBody({
+    metro: [{ id: 'x' }],
+    bus: [{ id: 'y' }],
+    lines: [{ name: 'L3', color: '1EB53A', paths: [[2, 41, 2.1, 41.1]] }],
+    fetchedAt: 5,
+  });
+  assert.deepEqual(body, {
+    lines: [{ name: 'L3', paths: [[2, 41, 2.1, 41.1]] }],
+    fetchedAt: 5,
+  });
+});
+
+test('the estimated row follows the metro track the server serves', async () => {
+  const feed = getTransitFeed('tmb-metro-estimated');
+  assert.equal(typeof feed.trackGeometry, 'function');
+  const lines = await tmbMetroTrackLines(async (url) => {
+    assert.equal(url, '/api/tmb/metro-lines');
+    return new Response(
+      JSON.stringify({
+        lines: [
+          { name: 'L3', paths: [[2, 41, 2.1, 41.1]] },
+          { name: '', paths: [[2, 41, 2.1, 41.1]] },
+        ],
+      }),
+    );
+  });
+  assert.deepEqual(lines, [{ routes: ['L3'], paths: [[2, 41, 2.1, 41.1]] }]);
+  await assert.rejects(
+    tmbMetroTrackLines(async () => new Response('{}', { status: 503 })),
+  );
 });

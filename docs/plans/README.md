@@ -5,11 +5,11 @@ su propia sección "Cómo retomar".
 
 ## Líneas de trabajo
 
-| Línea                                     | Plan                                                             | Destino            | Estado                                                                                                      |
-| ----------------------------------------- | ---------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------- |
-| 1. Bicis compartidas en España (abiertas) | [bikeshare-spain-packs.md](bikeshare-spain-packs.md)             | PRs a upstream     | Listo para empezar: pack 1 (grandes ciudades) y pack 2 (nextbike CC0)                                       |
-| 2. Posiciones estimadas (metro TMB y SBB) | [transit-estimated-positions.md](transit-estimated-positions.md) | `solo fork`        | E-0/E-1 hechos (2026-10-17). Siguiente: E-1b (bug), E-2b (relleno y color de línea), E-2 (seguir la vía)    |
-| 3. Datos abiertos de Suiza (SBB y otras)  | [switzerland-open-data.md](switzerland-open-data.md)             | `solo fork` (tren) | Sin empezar. Trenes bloqueados en CH-0 (clave de opentransportdata.swiss); otras plataformas por investigar |
+| Línea                                     | Plan                                                             | Destino            | Estado                                                                                                       |
+| ----------------------------------------- | ---------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| 1. Bicis compartidas en España (abiertas) | [bikeshare-spain-packs.md](bikeshare-spain-packs.md)             | PRs a upstream     | Listo para empezar: pack 1 (grandes ciudades) y pack 2 (nextbike CC0)                                        |
+| 2. Posiciones estimadas (metro TMB y SBB) | [transit-estimated-positions.md](transit-estimated-positions.md) | `solo fork`        | Metro TMB hecho (2026-10-17): sobre la vía, relleno y color de línea. Siguiente: E-3 (Suiza, falta la clave) |
+| 3. Datos abiertos de Suiza (SBB y otras)  | [switzerland-open-data.md](switzerland-open-data.md)             | `solo fork` (tren) | Sin empezar. Trenes bloqueados en CH-0 (clave de opentransportdata.swiss); otras plataformas por investigar  |
 
 ## Otros planes
 

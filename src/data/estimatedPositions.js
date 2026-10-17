@@ -178,14 +178,20 @@ function segmentBearing(from, to, segmentPath) {
  *
  * @param {object} timeline
  * @param {number} t ms epoch.
- * @param {{segmentPath?: (from: object, to: object) => number[][]|null}} [options]
+ * @param {{segmentPath?: (from: object, to: object, timeline: object) => number[][]|null}} [options]
+ *   `segmentPath` gets the timeline too, so a source can pick the track of
+ *   the vehicle's own line.
  * @returns {{lat: number, lon: number, bearing: number|null,
  *   status: 'STOPPED_AT'|'IN_TRANSIT_TO', stopId: string, stopName: string|null,
  *   fromStopId: string, toStopId: string, fraction: number,
  *   nextIndex: number}|null}
  *   `nextIndex` is the first stop still ahead (or the one stood at).
  */
-export function positionOnTimeline(timeline, t, { segmentPath } = {}) {
+export function positionOnTimeline(timeline, t, options = {}) {
+  const segmentPath =
+    typeof options.segmentPath === 'function'
+      ? (from, to) => options.segmentPath(from, to, timeline)
+      : null;
   const stops = timelineStops(timeline);
   if (!stops.length || !finite(t)) return null;
   const at = (i) => {

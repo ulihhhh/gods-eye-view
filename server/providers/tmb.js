@@ -24,6 +24,7 @@ import {
 import {
   buildTmbMetroNetwork,
   tmbMetroNetworkCodes,
+  tmbMetroSegmentPaths,
   tmbMetroTimelines,
 } from '../../src/data/tmbMetroTimelines.js';
 
@@ -43,6 +44,9 @@ import {
  *   GET /api/tmb/stations → {metro: [...], bus: [...], lines: [...], fetchedAt}
  *     Metro station groups, bus stops and metro line geometry, trimmed and
  *     cached for a day.
+ *   GET /api/tmb/metro-lines → {lines: [{name, paths}], fetchedAt}: the
+ *     metro track alone (from the stations catalogue), which the Transit
+ *     layer follows between estimated metro fixes.
  *   GET /api/tmb/bus-lines → {lines: [{name, desc, color, paths}], fetchedAt}
  *     Bus line geometry, cached for a day; asked for apart from the
  *     stations because it is larger and only drawn at street scale.
@@ -658,6 +662,16 @@ const TMB_METRO_NETWORK_FIELDS = [
   'GEOMETRY',
 ];
 
+/** A failed line-geometry read is retried after this, not after a day. */
+export const TMB_METRO_TRACK_RETRY_MS = 10 * 60_000;
+
+/** The metro lines' geometry, for putting estimated trains on the track. */
+export function tmbMetroLinesUrl(credentials) {
+  return tmbApiUrl('/transit/linies/metro', credentials, {
+    propertyName: 'NOM_LINIA,GEOMETRY',
+  });
+}
+
 /** Every metro station with its line order: the estimator's network. */
 export function tmbMetroNetworkUrl(credentials) {
   return tmbApiUrl('/transit/linies/metro/estacions', credentials, {
@@ -720,14 +734,45 @@ export function createTmbMetroEstimator({
         );
         const value = buildTmbMetroNetwork(body);
         if (!value) throw new TmbError('unavailable');
+        // The line geometry puts the trains on the track; without it they
+        // run straight between stations, as before.
+        const lines = await fetchTmbJson(
+          fetchImpl,
+          tmbMetroLinesUrl(credentials),
+          TMB_CATALOG_MAX_BYTES,
+        ).catch((error) => {
+          if (error?.code === 'rejected') throw error;
+          return null;
+        });
+        value.segmentPath = tmbMetroSegmentPaths(buildTmbMetroLines(lines));
         network = { pair, value, fetchedAt: now() };
         return value;
       });
     } catch (error) {
-      if (network?.pair === pair && error?.code !== 'rejected')
+      if (network?.pair === pair && error?.code !== 'rejected') {
+        // Keep the old network, and do not ask again before the retry wait.
+        network = {
+          ...network,
+          fetchedAt: Math.max(
+            network.fetchedAt,
+            now() - TMB_CATALOG_TTL_MS + TMB_METRO_TRACK_RETRY_MS,
+          ),
+        };
         return network.value;
+      }
       throw error;
     }
+  }
+
+  /** The network, re-read early when its line geometry did not load. */
+  async function currentNetwork(credentials, pair) {
+    if (
+      network?.pair === pair &&
+      !network.value.segmentPath &&
+      now() - network.fetchedAt >= TMB_METRO_TRACK_RETRY_MS
+    )
+      network = { ...network, fetchedAt: -Infinity };
+    return networkFor(credentials, pair);
   }
 
   async function predictionsFor(credentials, pair) {
@@ -736,7 +781,7 @@ export function createTmbMetroEstimator({
       now() - predictions.fetchedAt < TMB_METRO_ESTIMATE_TTL_MS
     )
       return predictions;
-    const net = await networkFor(credentials, pair);
+    const net = await currentNetwork(credentials, pair);
     try {
       return await once(`predictions:${pair}`, async () => {
         const body = await fetchTmbJson(
@@ -750,6 +795,7 @@ export function createTmbMetroEstimator({
         // Running times are learned once per answer, not once per estimate.
         predictions = {
           pair,
+          segmentPath: net.segmentPath,
           timelines: tmbMetroTimelines(body, net, { runtimes }),
           timestamp: Number.isFinite(stamp) ? Math.floor(stamp / 1000) : null,
           fetchedAt,
@@ -790,10 +836,30 @@ export function createTmbMetroEstimator({
         vehicles: estimateVehicles(
           current.timelines,
           at + (Number.isFinite(leadMs) && leadMs > 0 ? leadMs : 0),
-          { smoother, source: 'predictions', madeAt: at },
+          {
+            smoother,
+            source: 'predictions',
+            madeAt: at,
+            segmentPath: current.segmentPath ?? undefined,
+          },
         ),
       };
     },
+  };
+}
+
+/**
+ * The metro lines' track alone, for the Transit layer to follow between two
+ * estimated fixes (registry `trackGeometry` of `tmb-metro-estimated`): the
+ * stations catalogue without its stations and stops.
+ * @param {{lines?: Array<{name: string, paths: number[][]}>, fetchedAt?: number}} catalog
+ */
+export function tmbMetroLinesBody(catalog) {
+  return {
+    lines: (Array.isArray(catalog?.lines) ? catalog.lines : []).map(
+      ({ name, paths }) => ({ name, paths }),
+    ),
+    fetchedAt: catalog?.fetchedAt ?? null,
   };
 }
 
@@ -849,6 +915,21 @@ export function tmbProxy(options = {}) {
           return sendJson(res, 405, { error: 'Method not allowed' });
         try {
           return sendJson(res, 200, await catalog.catalog());
+        } catch (error) {
+          return sendTmbError(res, error);
+        }
+      }),
+    );
+    server.middlewares.use(
+      '/api/tmb/metro-lines',
+      sameSiteGated(async (req, res) => {
+        const rest = String(req.url || '/').split('?')[0];
+        if (rest !== '/' && rest !== '')
+          return sendJson(res, 404, { error: 'not_found' });
+        if (req.method !== 'GET')
+          return sendJson(res, 405, { error: 'Method not allowed' });
+        try {
+          return sendJson(res, 200, tmbMetroLinesBody(await catalog.catalog()));
         } catch (error) {
           return sendTmbError(res, error);
         }
