@@ -498,8 +498,10 @@ sin el cambio. El 2026-10-17 solo cambiaba `- Verkstedet`.
 
 - **`src/layers/bikeshare/registry.js`:** las 10 filas de la tabla, después de las del
   pack 1, con `loadRadiusKm: 40` (la más lejana está a 7,9 km).
-  - **Pendiente de decidir:** filas escritas a mano o un ayudante `nextbikeEntry` que
-    incluya también AMBici (ver "Ayudante o filas a mano" más abajo).
+  - **Decidido (2026-10-17): escritas a mano**, como AMBici, PBSC y JCDecaux:
+    `https://gbfs.nextbike.net/maps/gbfs/v2/nextbike_<xx>/en/station_{information,status}.json`.
+    La PR solo añade filas. Los ayudantes van en una PR de limpieza aparte (ver "Fuera
+    de alcance").
   - Un comentario corto encima, como el de AMBici: BiciMislata cubre la red MiBisi
     (Alaquàs, la UPV) y Bizkaibizi varios municipios de las dos márgenes de la ría.
 - **`src/layers/bikeshare/spainNextbikeSystems.test.mjs`**, calcado de
@@ -512,7 +514,7 @@ sin el cambio. El 2026-10-17 solo cambiaba `- Verkstedet`.
      TorrentBici; una en Bilbao, Bilbao Bizi y Bizkaibizi.
   5. Los nombres de Bizkaibizi llegan sin `-` a la capa.
 
-#### Ayudante o filas a mano (pendiente)
+#### Ayudante o filas a mano (decidido: a mano)
 
 Cómo están las URLs en el registro (upstream 1df2a272 más el pack 1):
 
@@ -536,6 +538,9 @@ Cómo están las URLs en el registro (upstream 1df2a272 más el pack 1):
   nuestra #1176). Unas 40 líneas menos y el código `xx` escrito una vez por fila. Cambia
   una fila ya fusionada y añade una función que revisar.
 - **Opción a mano:** igual que PBSC, JCDecaux y AMBici. La PR solo añade.
+- **Decisión:** a mano. Un ayudante solo para nextbike dejaría mezcladas las filas
+  españolas (nextbike con ayudante, las 27 de PBSC a mano) y obligaría a tocar AMBici
+  dentro de una PR que solo añade sistemas.
 
 ### Commit 3 — `docs: credit and document the Spanish nextbike systems`
 
@@ -564,6 +569,21 @@ Cómo están las URLs en el registro (upstream 1df2a272 más el pack 1):
 - **Cuando se fusione:** sincronizar `mi-main` con el proceso normal.
 
 ## Fuera de alcance (por ahora)
+
+- **PR futura de limpieza: ayudantes del registro** (decidido proponerla el 2026-10-17,
+  después del pack 2). Sin cambiar ningún sistema, pasar a ayudantes las plataformas que
+  comparten forma de URL y hoy van a mano, como ya hacen `bcycleEntry`,
+  `urbanSharingEntry` y `enturEntry`:
+  - `pbscEntry` (27 filas, `https://<x>.publicbikesystem.net/customer/gbfs/v2/en/`);
+  - `nextbikeEntry` (11 filas con AMBici, `…/maps/gbfs/v2/nextbike_<xx>/en/`);
+  - `jcdecauxEntry` (3 filas, `https://api.cyclocity.fr/contracts/<x>/gbfs/`);
+  - quizá Lyft (4 filas, `https://gbfs.lyft.com/gbfs/2.3/<id>/en/`) y las dos de BCycle
+    escritas a mano (Indego, LA Metro), si sus URLs encajan en `bcycleEntry`.
+
+  Prueba de que no cambia nada: el `GBFS_CITY_REGISTRY` normalizado tiene que ser
+  idéntico antes y después (un test o la comparación en la descripción). Antes de
+  abrirla, preguntar en upstream si la quieren, porque toca filas de otros
+  contribuidores.
 
 - **Pack 3** (necesita un host nuevo en el proxy): Ganxeta Reus
   (`gbfs.ganxeta.cat`, 24 estaciones, sin licencia) y MugiBIKE Vitoria
