@@ -415,48 +415,93 @@ como en el pack 1).
 
 ### Paso 0 — Antes de escribir código
 
-1. **Esperar a que se fusione #1190** y sacar la rama del `upstream/main` que lo
-   contenga. Dos motivos:
+1. **Empezar cuando #1190 se fusione en upstream** (decidido) y sacar la rama del
+   `upstream/main` que lo contenga. No se apila sobre la rama del pack 1. Dos motivos:
    - las filas de los dos packs van al mismo sitio (al final de
      `RAW_GBFS_CITY_REGISTRY`, después de AMBici), así que dos PRs abiertas a la vez
      chocan;
    - el commit 1 amplía `tidyStationName()`, que llega con #1190.
-
-   Si #1190 tarda, la alternativa es apilar la rama sobre `feat/bikeshare-spain-cities`
-   y abrir la PR cuando se fusione, rebasando antes.
-
 2. **Volver a sondear los 10 feeds** con un script desechable: `gbfs.json` en
-   `/nextbike_<xx>/`, el resto en `/en/`, pasados por los parsers de GEV. Actualizar las estaciones del test si han cambiado.
+   `/nextbike_<xx>/`, el resto en `/en/`, pasados por los parsers de GEV. Actualizar las
+   estaciones del test si han cambiado.
 
 ### Commit 1 — `fix(gbfs): drop leading hyphens from station names`
 
-**Propuesta (a confirmar):** ampliar `tidyStationName()` de `src/sources/gbfsStations.js`
-para quitar los guiones del principio (`^\s*-+\s*`), además de los `_`.
+**Decidido (2026-10-17): opción A**, una regla común para todos los sistemas, con límites
+escritos. Además del guion, el commit deja documentado qué se formatea y cómo se añade
+una regla nueva, para que la función no crezca sin control ni toque feeds cuya licencia
+no permite modificar.
+
+**El cambio:**
 
 - Bizkaibizi pone `-` delante de los 109 nombres (`-ABANDO`, `-METRO LUTXANA-ERANDIO`).
   Sin el arreglo, la tarjeta y `get_bike_share` dicen "-ABANDO".
-- Solo se toca el principio del nombre: los guiones interiores (`JUSTINO AZCÁRATE-
-OLÍMPICO`, `El Vedat - Av. Sant Llorenç`, `313 - Alaquàs`) se quedan.
-- Efecto en upstream: un solo nombre, `- Verkstedet` → `Verkstedet` (Stavanger). Se dice
-  en la PR.
-- Casos nuevos en `src/sources/gbfsStations.test.mjs`: `-ABANDO` → `ABANDO`,
-  `- Verkstedet` → `Verkstedet`, un nombre que es solo `-` cae al `short_name`, y los
-  guiones interiores no cambian.
-- **Alternativa:** dejar los nombres como vienen. Más simple, pero se lee peor.
-- **Prueba en la descripción de la PR:** pasar los feeds del registro por el parser con y
-  sin el cambio. El 2026-10-17 solo cambiaba `- Verkstedet`.
+- Se quitan solo los guiones del principio (`^\s*-+\s*`). Los interiores se quedan:
+  `JUSTINO AZCÁRATE- OLÍMPICO DE LEÓN`, `El Vedat - Av. Sant Llorenç`, `313 - Alaquàs`.
+- Efecto en upstream: un solo nombre, `- Verkstedet` → `Verkstedet` (Stavanger, NLOD,
+  que permite modificar). En los 9 feeds del pack 1 no cambia ninguno (comprobado el
+  2026-10-17). BiciMAD, el único con condiciones que piden no alterar el contenido, no
+  tiene ningún nombre que empiece por `-`.
+
+**Cómo queda el código** (`src/sources/gbfsStations.js`):
+
+- Las reglas pasan a ser una **lista con nombre**, una entrada por regla, cada una con un
+  comentario que dice qué feeds la necesitan y su licencia. Por ejemplo:
+  - `_` como separador → espacio: JCDecaux España (Valenbisi, Sevici), Licence Ouverte;
+  - guiones al principio → nada: nextbike Bizkaibizi, CC0.
+
+  `tidyStationName()` aplica la lista en orden y recorta. Así cada regla se ve, se prueba
+  y se puede quitar por separado, y crecer la lista se nota en el diff.
+
+- **JSDoc de la lista**, con el criterio y los pasos para añadir una regla (ver abajo).
+
+**Criterio — qué entra y qué no:**
+
+- **Entra** solo la puntuación que no significa nada: relleno o separadores sobrantes
+  al principio o al final, y `_` usado como espacio.
+- **No entra nunca:** mayúsculas o minúsculas, códigos o números delante (`123 - …`),
+  abreviaturas, acentos, palabras, el orden o una traducción. Para eso el nombre se
+  deja como lo publica el operador, aunque se lea peor.
+
+**Cómo añadir una regla nueva** (va en el JSDoc y, completo, en `docs/CURRENT-STATE.md`,
+sección "GBFS upstream bounds"):
+
+1. Comprobar que la regla cumple el criterio. Si no, no se añade.
+2. Pasar **todos los feeds del registro** por el parser con y sin la regla, y apuntar
+   cada sistema y nombre que cambia.
+3. **Licencia:** cada sistema que cambie tiene que tener una licencia que permita
+   modificar (CC0, Licence Ouverte, NLOD, CC BY…). Si alguno publica condiciones de no
+   alterar el contenido (hoy BiciMAD, condiciones de EMT), la regla no puede tocar sus
+   nombres. Se acota o no se añade.
+4. Las reglas que ya hay y sus tests se quedan como están. Si la regla nueva cambia un
+   nombre que otra ya formateaba, hay que explicarlo.
+5. Tests: casos que cambian, casos parecidos que no deben cambiar, y el caso en que el
+   nombre se queda vacío (cae al `short_name` y después a vacío).
+6. En la descripción de la PR: la regla, la lista del paso 2 y las licencias del paso 3.
+
+**Tests** (`src/sources/gbfsStations.test.mjs`); los de los `_` de #1190 se quedan tal
+cual:
+
+- `-ABANDO` → `ABANDO`, `- Verkstedet` → `Verkstedet`, `--X` → `X`;
+- los guiones interiores no cambian (los tres nombres de arriba);
+- un nombre que es solo `-` cae al `short_name` y después a vacío;
+- las dos reglas juntas: `_-ABANDO` y `-_X_Y` dan lo mismo que si se aplican una a una;
+- un nombre localizado de v3 con `-` delante;
+- **guarda de licencia:** unos cuantos nombres reales de BiciMAD, copiados del feed al
+  implementar, no cambian. Si una regla futura los toca, el test falla y obliga a hacer
+  el paso 3.
+
+**Prueba en la descripción de la PR:** pasar los feeds del registro por el parser con y
+sin el cambio. El 2026-10-17 solo cambiaba `- Verkstedet`.
 
 ### Commit 2 — `feat(bikeshare): add ten Spanish nextbike systems`
 
 - **`src/layers/bikeshare/registry.js`:** las 10 filas de la tabla, después de las del
   pack 1, con `loadRadiusKm: 40` (la más lejana está a 7,9 km).
-  - **Propuesta:** un ayudante `nextbikeEntry({ id, city, centerLat, centerLon, domain,
-provider, loadRadiusKm = 40 })` que monta
-    `https://gbfs.nextbike.net/maps/gbfs/v2/nextbike_${domain}/en/station_{information,status}.json`,
-    como ya hacen `bcycleEntry`, `urbanSharingEntry` y `enturEntry`. La fila de AMBici
-    se queda escrita a mano para no tocar código ajeno.
+  - **Pendiente de decidir:** filas escritas a mano o un ayudante `nextbikeEntry` que
+    incluya también AMBici (ver "Ayudante o filas a mano" más abajo).
   - Un comentario corto encima, como el de AMBici: BiciMislata cubre la red MiBisi
-    (Alaquàs, la UPV) y Bizkaibizi varios municipios de la margen derecha e izquierda.
+    (Alaquàs, la UPV) y Bizkaibizi varios municipios de las dos márgenes de la ría.
 - **`src/layers/bikeshare/spainNextbikeSystems.test.mjs`**, calcado de
   `spainCitiesSystems.test.mjs`:
   1. Los 10 están registrados, con su `provider` y `hosts: ['gbfs.nextbike.net']`, y el
@@ -465,7 +510,32 @@ provider, loadRadiusKm = 40 })` que monta
   3. El `loadRadiusKm` de cada sistema alcanza sus estaciones más lejanas.
   4. Solapes: una cámara en el centro de Valencia activa Valenbisi, BiciMislata y
      TorrentBici; una en Bilbao, Bilbao Bizi y Bizkaibizi.
-  5. Los nombres de Bizkaibizi llegan sin `-` a la capa (si se acepta el commit 1).
+  5. Los nombres de Bizkaibizi llegan sin `-` a la capa.
+
+#### Ayudante o filas a mano (pendiente)
+
+Cómo están las URLs en el registro (upstream 1df2a272 más el pack 1):
+
+| Plataforma            | Filas | Forma de la URL                                            | Cómo se escriben    |
+| --------------------- | ----- | ---------------------------------------------------------- | ------------------- |
+| PBSC                  | 27    | `https://<x>.publicbikesystem.net/customer/gbfs/v2/en/`    | a mano              |
+| BCycle                | 16+2  | `https://gbfs.bcycle.com/<id>/`                            | `bcycleEntry` (16)  |
+| nextbike (con pack 2) | 11    | `https://gbfs.nextbike.net/maps/gbfs/v2/nextbike_<xx>/en/` | a mano hoy (AMBici) |
+| Lyft                  | 4     | `https://gbfs.lyft.com/gbfs/2.3/<id>/en/`                  | a mano              |
+| Urban Sharing         | 3     | `https://gbfs.urbansharing.com/<id>/`                      | `urbanSharingEntry` |
+| JCDecaux              | 3     | `https://api.cyclocity.fr/contracts/<x>/gbfs/`             | a mano              |
+| Entur                 | 2     | `https://api.entur.io/mobility/v2/gbfs/v2/<id>/`           | `enturEntry`        |
+
+- Las filas de PBSC y JCDecaux **sí** comparten forma de URL. En el pack 1 se escribieron
+  a mano porque upstream escribe así las 20 de PBSC, no porque no se pudiera.
+- Upstream no tiene una regla: quien añadió un grupo de golpe creó su ayudante
+  (Urban Sharing con 3 filas en 42543c1f, Entur con 2 en fa61955c), y PBSC y Lyft
+  siguieron a mano. Dos filas de BCycle (Indego, LA Metro) van a mano aunque hay
+  ayudante.
+- **Opción ayudante:** `nextbikeEntry` con las 11 filas, AMBici incluida (AMBici es de
+  nuestra #1176). Unas 40 líneas menos y el código `xx` escrito una vez por fila. Cambia
+  una fila ya fusionada y añade una función que revisar.
+- **Opción a mano:** igual que PBSC, JCDecaux y AMBici. La PR solo añade.
 
 ### Commit 3 — `docs: credit and document the Spanish nextbike systems`
 
