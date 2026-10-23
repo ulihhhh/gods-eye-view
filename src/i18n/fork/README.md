@@ -1,10 +1,10 @@
 # Fork-only translations
 
-Spanish and Russian text of the fork's own layers (AEMET, Liveuamap, Rail network,
+Spanish, Russian and Simplified Chinese text of the fork's own layers (AEMET, Liveuamap, Rail network,
 Barcelona Arrivals, the Transit card's Spanish-feed lines). Upstream's catalogs in
 `src/i18n/locales/` stay untouched, so syncs don't conflict on them.
 
-- `es.json`, `ru.json`: merged over upstream's catalogs at load (`src/i18n/index.js`) and
+- `es.json`, `ru.json`, `zh-CN.json`: merged over upstream's catalogs at load (`src/i18n/index.js`) and
   by `npm run i18n` (`scripts/i18n.mjs`, `readCatalog`).
 - `same-as-english.json`: fork entries that read the same as the English on purpose
   (`METRO`, `{minutes} min`), merged with upstream's list.
@@ -13,7 +13,7 @@ Barcelona Arrivals, the Transit card's Spanish-feed lines). Upstream's catalogs 
 - `src/i18n/forkLayers.test.mjs` renders some of the cards in Spanish and Russian.
 
 Workflow for new fork text: mark it with `t()`, `tn()` or `msg()` (see `docs/I18N.md`).
-Then run `npm run i18n -- --missing es` and `npm run i18n -- --missing ru`, and add the
+Then run `npm run i18n -- --missing <locale>` for `es`, `ru` and `zh-CN`, and add the
 entries **here**, not in `src/i18n/locales/`.
 
 Card builders that the server or AI tools also import must not load the catalogs. They

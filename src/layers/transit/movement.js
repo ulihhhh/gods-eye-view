@@ -9,7 +9,9 @@ import {
   correctHeight,
   setTimeOffsetMs,
 } from '../../data/contactPlayback.js';
-const MODE_MAX_SPEED_MPS = Object.freeze({
+/** Floor (ms) on the display lag the fork's ingestion holds back. */
+export const DISPLAY_LAG_MIN_MS = 25_000;
+export const MODE_MAX_SPEED_MPS = Object.freeze({
   bus: 36, // ~130 km/h — a coach on a motorway
   tram: 28, // ~100 km/h — interurban light rail
   subway: 42, // ~150 km/h
@@ -61,7 +63,7 @@ const COURSE_STEP_MAX_S = 0.25;
  * otherwise is the same overreach as reading STOPPED off a stale status. Ninety
  * seconds matches the threshold at which a whole feed reads as gone quiet.
  */
-const MOTION_UNKNOWN_AFTER_MS = 90_000;
+export const MOTION_UNKNOWN_AFTER_MS = 90_000;
 
 const EARTH_M_PER_DEG = 111_320;
 

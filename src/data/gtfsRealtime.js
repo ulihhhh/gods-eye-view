@@ -42,7 +42,7 @@ const VEHICLE_STOP_STATUS = Object.freeze({
 });
 
 /** VehiclePosition.OccupancyStatus enum → label. */
-const OCCUPANCY_STATUS = Object.freeze({
+export const OCCUPANCY_STATUS = Object.freeze({
   0: 'EMPTY',
   1: 'MANY_SEATS_AVAILABLE',
   2: 'FEW_SEATS_AVAILABLE',
