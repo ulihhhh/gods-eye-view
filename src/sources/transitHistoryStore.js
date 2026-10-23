@@ -2,7 +2,7 @@ import { validTransitIdentifier } from './transitHistory.js';
 import { transitStopRelation } from '../data/transitStopRelation.js';
 export { validTransitIdentifier } from './transitHistory.js';
 /** Bounded, process-local operator position history. No upstream or scene access. */
-export const TRANSIT_HISTORY_LIMITS = Object.freeze({
+const TRANSIT_HISTORY_LIMITS = Object.freeze({
   retentionMs: 900000,
   fixes: 128,
   feedBytes: 16 * 1024 * 1024,

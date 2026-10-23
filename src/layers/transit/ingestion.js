@@ -10,7 +10,6 @@ import {
   FEED_STALE_AFTER_MS,
   MAX_VEHICLES_TOTAL,
   MISSED_POLLS_TO_DROP,
-  TRANSIT_POLL_MS,
   isStaleVehicleFix,
   transitFeedTiming,
   transitVehicleKey,

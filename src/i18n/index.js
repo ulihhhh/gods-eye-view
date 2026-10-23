@@ -18,6 +18,7 @@ import {
 } from './locale.js';
 import es from './locales/es.json' with { type: 'json' };
 import ru from './locales/ru.json' with { type: 'json' };
+import zhCN from './locales/zh-CN.json' with { type: 'json' };
 // Fork-only layers' text, kept apart so syncs never touch upstream's catalogs.
 import forkEs from './fork/es.json' with { type: 'json' };
 import forkRu from './fork/ru.json' with { type: 'json' };
@@ -25,6 +26,7 @@ import forkRu from './fork/ru.json' with { type: 'json' };
 const CATALOGS = Object.freeze({
   es: { ...es, ...forkEs },
   ru: { ...ru, ...forkRu },
+  'zh-CN': zhCN,
 });
 
 let currentLocale = DEFAULT_LOCALE;
@@ -215,7 +217,7 @@ export function formatRelativeTime(value, unit = 'second', options) {
 }
 
 /** Collapse markup whitespace so a message reads the same in HTML and JS. */
-export function normalizeMarkupText(text) {
+function normalizeMarkupText(text) {
   return String(text ?? '')
     .replace(/\s+/g, ' ')
     .trim();

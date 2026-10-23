@@ -48,8 +48,6 @@ import {
   reduceScenario,
   reduceSensorContrast,
   reduceScriptedMotion,
-  reduceMotion,
-  reduceFleet,
 } from '../src/layers/transit/qaMetrics.js';
 
 const BASE = process.env.QA_BASE_URL || 'http://localhost:4173';
