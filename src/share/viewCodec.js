@@ -299,6 +299,27 @@ export const SHARE_VIEW_LAYER_OPTION_ABSENT = Object.freeze({
     sinceDays: 0,
   }),
   radio: Object.freeze({ filter: 'all', volume: 0.8 }),
+  // Fork-local option owners (see the `za`–`zi` block in layerState.js).
+  liveuamap: Object.freeze({
+    showLabels: true,
+    showFields: true,
+    verifiedOnly: false,
+  }),
+  'spain-rail-network': Object.freeze({
+    cercanias: true,
+    fgc: true,
+    national: true,
+    stations: true,
+    alerts: false,
+  }),
+  'tmb-arrivals': Object.freeze({
+    metro: true,
+    tmbBus: true,
+    ambBus: true,
+    lines: true,
+    alerts: false,
+  }),
+  transit: Object.freeze({ estimated: true }),
 });
 
 /** The frozen meaning of an omitted option; unlisted options are always written. */
