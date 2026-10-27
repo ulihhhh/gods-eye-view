@@ -402,6 +402,23 @@ const FIELD_BY_KEY = new Map(SHARE_VIEW_FIELDS.map((f) => [f.key, f]));
 const fieldNumber = (key) => FIELD_BY_KEY.get(key).number;
 
 /**
+ * Fork-local: layers in the fork's `za`–`zz` token block (layerState.js) sit
+ * at bit 1306+ of field 10, which would cost ~164 bytes. They are written to
+ * their own bitset instead, offset so `za` is bit 0. The field number is far
+ * above upstream's registry so a future upstream field cannot take it, and
+ * upstream decoders skip it as unknown. Option entries keep the full token
+ * number (a two-byte varint), so they need no remap.
+ */
+export const FORK_LAYER_STATE_FIELD = 100;
+const FORK_LAYER_TOKEN_FIRST = 36 + 35 * 36; // layerTokenNumber('za')
+const FORK_LAYER_TOKEN_COUNT = 36; // `za`–`zz`
+const forkLayerBit = (number) =>
+  number >= FORK_LAYER_TOKEN_FIRST &&
+  number < FORK_LAYER_TOKEN_FIRST + FORK_LAYER_TOKEN_COUNT
+    ? number - FORK_LAYER_TOKEN_FIRST
+    : null;
+
+/**
  * Fields inside the thing message (top-level field 13). Permanent. Fields 1–4
  * are the entity ids, one per SHARE_VIEW_ENTITY_KINDS code; exactly one is
  * present. The follow offset and the last-known fix are flat fields here, not
@@ -829,14 +846,19 @@ function writeEnum(writer, field, value) {
 
 function encodeLayers(writer, layerState, impliedLayerId) {
   const bitset = [];
+  const forkBitset = [];
   for (const id of layerState.enabledLayerIds) {
     if (id === impliedLayerId) continue;
-    const number = layerTokenNumber(REGISTRY_BY_ID.get(id).token);
+    const tokenNumber = layerTokenNumber(REGISTRY_BY_ID.get(id).token);
+    const forkBit = forkLayerBit(tokenNumber);
+    const target = forkBit === null ? bitset : forkBitset;
+    const number = forkBit ?? tokenNumber;
     const byte = Math.floor(number / 8);
-    while (bitset.length <= byte) bitset.push(0);
-    bitset[byte] |= 1 << (number % 8);
+    while (target.length <= byte) target.push(0);
+    target[byte] |= 1 << (number % 8);
   }
   writer.bytesField(fieldNumber('layerState'), bitset);
+  if (forkBitset.length) writer.bytesField(FORK_LAYER_STATE_FIELD, forkBitset);
   const blob = new WireWriter();
   for (const [ownerId, options] of Object.entries(layerState.options)) {
     const ownerToken = REGISTRY_BY_ID.get(ownerId).token;
@@ -1072,6 +1094,7 @@ const TOP_LEVEL_WIRE_TYPES = new Map(
     WIRE_TYPES_BY_TYPE[f.type],
   ]),
 );
+TOP_LEVEL_WIRE_TYPES.set(FORK_LAYER_STATE_FIELD, [WIRE_LEN]);
 const THING_WIRE_TYPES = new Map([
   ...SHARE_VIEW_ENTITY_KINDS.map((e) => [e.code, [WIRE_VARINT, WIRE_LEN]]),
   ...Object.values(SHARE_VIEW_THING_FIELDS).map((n) => [n, [WIRE_VARINT]]),
@@ -1100,17 +1123,25 @@ function readEnum(entry, field, unknown) {
   return name;
 }
 
-function decodeLayers(bitsReader, optionsReader, unknown) {
+function decodeLayers(bitsReader, optionsReader, unknown, forkBitsReader) {
   const enabledLayerIds = [];
-  const bits = bitsReader.rest();
-  for (let byte = 0; byte < bits.length; byte += 1) {
-    for (let bit = 0; bit < 8; bit += 1) {
-      if (!(bits[byte] & (1 << bit))) continue;
-      const number = byte * 8 + bit;
-      const entry = REGISTRY_BY_TOKEN.get(layerTokenFromNumber(number));
-      if (entry) enabledLayerIds.push(entry.id);
-      else unknown.code('layer', number);
+  const readBitset = (bits, offset) => {
+    for (let byte = 0; byte < bits.length; byte += 1) {
+      for (let bit = 0; bit < 8; bit += 1) {
+        if (!(bits[byte] & (1 << bit))) continue;
+        const number = offset + byte * 8 + bit;
+        const entry = REGISTRY_BY_TOKEN.get(layerTokenFromNumber(number));
+        if (entry) enabledLayerIds.push(entry.id);
+        else unknown.code('layer', number);
+      }
     }
+  };
+  readBitset(bitsReader.rest(), 0);
+  if (forkBitsReader) {
+    const forkBits = forkBitsReader.rest();
+    if (forkBits.length > Math.ceil(FORK_LAYER_TOKEN_COUNT / 8))
+      throw new ShareWireError('out-of-range', 'fork layer');
+    readBitset(forkBits, FORK_LAYER_TOKEN_FIRST);
   }
   const options = {};
   const seen = new Set();
@@ -1373,9 +1404,12 @@ export function decodeShareView(code, { nowMs = Date.now() } = {}) {
         get('layerState').len,
         get('layerOptions')?.len ?? null,
         unknown,
+        fields.get(FORK_LAYER_STATE_FIELD)?.len ?? null,
       );
     else if (get('layerOptions'))
       unknown.code('layer-option', 'without-layers');
+    else if (fields.has(FORK_LAYER_STATE_FIELD))
+      unknown.code('layer', 'fork-without-layers');
     if (get('panelState'))
       raw.panelState = decodePanels(get('panelState').len, unknown);
     if (get('styleParams'))

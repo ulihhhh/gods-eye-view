@@ -203,6 +203,12 @@ thing view, present-but-empty means "only the entity's layer", and an absent
 field opens with only the entity's layer on (the app writes the field
 whenever it has a layer set).
 
+Fork-local (field 100): layers whose token is in the fork's `za`–`zz` block
+(numbers 1306–1341) are not written to field 10, where they would cost ~164
+bytes. Field 100 is a bitset like field 10, offset so `za` is bit 0, written
+only when one of them is on and read only together with field 10. Upstream
+decoders skip it as an unknown field. Field 11 keeps the full layer number.
+
 Field 11 repeats `(layer number, option key, value)` for each option that
 differs from its frozen absent meaning (`SHARE_VIEW_LAYER_OPTION_ABSENT`). The
 option key is `option token index × 2 + kind`: kind 0 means the value is a
