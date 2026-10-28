@@ -23,11 +23,13 @@ import zhCN from './locales/zh-CN.json' with { type: 'json' };
 import forkEs from './fork/es.json' with { type: 'json' };
 import forkRu from './fork/ru.json' with { type: 'json' };
 import forkZhCN from './fork/zh-CN.json' with { type: 'json' };
+import zhHant from './locales/zh-Hant.json' with { type: 'json' };
 
 const CATALOGS = Object.freeze({
   es: { ...es, ...forkEs },
   ru: { ...ru, ...forkRu },
   'zh-CN': { ...zhCN, ...forkZhCN },
+  'zh-Hant': zhHant,
 });
 
 let currentLocale = DEFAULT_LOCALE;
