@@ -1,4 +1,34 @@
 {
+  "de": [
+    "CERCANÍAS",
+    "METRO",
+    "Orange",
+    "VIDEO",
+    "Wind {value}",
+    "Wind: {value}",
+    "Zone"
+  ],
   "es": ["CERCANÍAS", "METRO", "RUMOR", "{minutes} min"],
+  "fr": [
+    "Altitude",
+    "CERCANÍAS",
+    "OZONE",
+    "Orange",
+    "Ozone {value} DU",
+    "POINTS",
+    "STATIONS",
+    "Zone",
+    "arr. {time}",
+    "{minutes} min"
+  ],
+  "it": [
+    "CERCANÍAS",
+    "METRO",
+    "UV max {value}",
+    "VIDEO",
+    "arr. {time}",
+    "{minutes} min"
+  ],
+  "pt": ["Altitude", "CERCANÍAS", "{minutes} min"],
   "ru": []
 }
