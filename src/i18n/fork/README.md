@@ -1,6 +1,6 @@
 # Fork-only translations
 
-Spanish, Russian, German, French, Italian, Japanese, Brazilian Portuguese, Ukrainian, Simplified and Traditional Chinese text of the fork's own layers (AEMET, Liveuamap, Rail network,
+Arabic, Spanish, Russian, German, French, Italian, Japanese, Brazilian Portuguese, Ukrainian, Simplified and Traditional Chinese text of the fork's own layers (AEMET, Liveuamap, Rail network,
 Barcelona Arrivals, the Transit card's Spanish-feed lines). Upstream's catalogs in
 `src/i18n/locales/` stay untouched, so syncs don't conflict on them.
 
