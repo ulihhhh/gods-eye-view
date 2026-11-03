@@ -17,6 +17,12 @@ import {
   aemetWarningsProxy,
 } from '../../server/providers/weather.js';
 import { localProviderPlugins } from '../../server/providers/local.js';
+import { makeFixtureRoot } from './fixtureRoot.mjs';
+
+const nominatimStorageDir = await makeFixtureRoot(
+  'gev-environment-composition-',
+);
+test.after(() => fsp.rm(nominatimStorageDir, { recursive: true, force: true }));
 
 function install(plugin, hook = 'configureServer') {
   const routes = new Map();
@@ -99,7 +105,7 @@ test('standalone composition mounts every extracted provider exactly once withou
   t.mock.method(globalThis, 'fetch', () => {
     throw Error('construction must not fetch');
   });
-  const plugins = localProviderPlugins();
+  const plugins = localProviderPlugins({ nominatimStorageDir });
   for (const factory of [
     terrainHeightsProxy,
     tomtomProxy,
