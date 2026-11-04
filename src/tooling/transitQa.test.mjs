@@ -707,7 +707,7 @@ test('public transit documentation uses courtesy attribution and the approved gr
   );
   assert.ok(
     readme.includes(
-      'Twenty-six layers and map sources. **Eighteen have a keyless path.**',
+      'Twenty-seven layers and map sources. **Nineteen have a keyless path.**',
     ),
   );
   assert.ok(
