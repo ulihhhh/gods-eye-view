@@ -293,5 +293,9 @@
     "./tools/services": "./src/tools/services.js",
     "./view": "./src/view/index.js",
     "./agent/world-packet": "./src/agent/worldPacket.js"
+  },
+  "overrides": {
+    "minimatch@^10.0.0": "^11.0.4",
+    "glob": "^14.0.3"
   }
 }
