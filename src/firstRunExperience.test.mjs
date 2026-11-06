@@ -1020,6 +1020,14 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
     'noir',
   ]);
   visualStyle.enum = [...visualStyle.enum, 'snow'];
+  // Tilt to an angle adds pitchDeg and rewords direction; restore
+  // the legacy camera fields to keep the pin.
+  const camera = legacyTools.find((tool) => tool.name === 'move_camera')
+    .parameters.properties;
+  assert.equal(camera.pitchDeg.type, 'number');
+  delete camera.pitchDeg;
+  camera.direction.description =
+    'Required for pan/tilt/rotate; orbit/rotate_globe default right.';
   const block = JSON.stringify(legacyTools);
   // Re-derived for the voice layer manifest (generated layer enums, alias and
   // field hints), point-and-ask's pointer/referent arguments and the prompt
@@ -1039,11 +1047,12 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // The Utilities panel adds one set_panel_open target; Sea Marks and Ski
   // Pistes extend the generated layer enums and alias hint; voice geometry
   // adds the analyst area scopes and the osm-places layer.
+  // control_cockpit states the own-layer entry rule (Contacts not required).
   // The fork's AEMET, Liveuamap, TMB and rail network manifest entries add theirs.
-  assert.equal(block.length, 32235, 'serialized tool schema length drifted');
+  assert.equal(block.length, 32289, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'e5a8a9f0e19a129cae21a3cef1e5594d18990e3105d7c0ec2650c8b4f99c5c92',
+    '85336bca2002e51233c603b4a15f64651ff19a2f85958771bce1ecc93898d2a2',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(
