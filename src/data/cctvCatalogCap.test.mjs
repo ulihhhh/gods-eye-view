@@ -129,7 +129,8 @@ test('at the default cap reserved packs are whole and shared packs keep the floo
   assert.equal(sources.length, DEFAULT_CCTV_MAX_SOURCES);
   assert.equal(kept.quebec, 1120);
   assert.equal(kept.world, 2230);
-  for (let i = 0; i < 20; i++) assert.equal(kept[`shared${i}`], 200);
+  for (let i = 0; i < 20; i++)
+    assert.equal(kept[`shared${i}`], CCTV_SHARED_SOURCE_SLOTS / 20);
   assert.match(
     sources[0].id,
     /^shared0-/,

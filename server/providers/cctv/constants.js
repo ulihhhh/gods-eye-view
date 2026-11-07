@@ -9,12 +9,12 @@ export const DEFAULT_AUSTIN_MAX_SOURCES = 250;
  * reserved pack (Québec, World) only takes capacity above this floor, so a
  * cap at or below it thins every region evenly (see cap.js).
  */
-export const CCTV_SHARED_SOURCE_SLOTS = 4000;
+export const CCTV_SHARED_SOURCE_SLOTS = 4200;
 /**
- * Catalog-wide default: the 4,000 shared slots plus room reserved for the
+ * Catalog-wide default: the 4,200 shared slots plus room reserved for the
  * 1,120 Québec and 2,230 World image locations.
  */
-export const DEFAULT_CCTV_MAX_SOURCES = 7350;
+export const DEFAULT_CCTV_MAX_SOURCES = 7550;
 /** Hard upper bound for CCTV_MAX_SOURCES; also sizes the health map. */
 export const CCTV_MAX_SOURCES_CEILING = 8000;
 /** Reference point for Austin camera prioritization (Congress & 6th). */

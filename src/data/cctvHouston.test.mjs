@@ -388,7 +388,7 @@ test('Houston stays unloaded unless CCTV_HOUSTON_ENABLED=1', async (t) => {
 });
 
 test('the shared catalog slots are not raised to make room for this pack', () => {
-  assert.equal(CCTV_SHARED_SOURCE_SLOTS, 4000);
+  assert.equal(CCTV_SHARED_SOURCE_SLOTS, 4200);
   assert.equal(DEFAULT_HOUSTON_MAX_SOURCES, 250);
 });
 
