@@ -332,7 +332,7 @@ test('the pills switch Cercanías, FGC, the national network and the stations on
         ['CERCANÍAS', true],
         ['FGC', true],
         ['AV/LD', true],
-        ['STATIONS', true],
+        ['RAIL STATIONS', true],
         ['ALERTS', false],
       ],
     );

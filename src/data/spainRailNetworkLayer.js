@@ -474,7 +474,7 @@ const SPAIN_RAIL_CHIPS = Object.freeze([
   }),
   Object.freeze({
     key: 'stations',
-    label: msg('STATIONS'),
+    label: msg('RAIL STATIONS'),
     title: msg('Station points'),
   }),
   Object.freeze({
