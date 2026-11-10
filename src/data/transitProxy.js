@@ -297,14 +297,21 @@ export const TRANSIT_MAX_MIN_INTERVAL_MS = 10 * 60_000;
  * again: the proxy TTL, or the feed's own `minIntervalMs` when it is longer.
  * Operators with a daily quota (FGC's open-data API allows 5,000 requests a
  * day per IP) set it so a session polling all day stays inside the quota;
- * browsers still poll every 15 s and get the cached snapshot.
- * @param {object|null} feed Registry entry.
+ * browsers still poll every 15 s and get the cached snapshot. A registry
+ * `refreshMs` stretches it the same way for upstreams that rate-limit below
+ * one request per TTL (data.gov.my allows 4 a minute). Never shorter than
+ * the shared TTL.
+ * @param {{ minIntervalMs?: number, refreshMs?: number }|null|undefined} feed Registry entry.
  * @returns {number} ms.
  */
 export function transitFeedTtlMs(feed) {
+  const refresh = feed?.refreshMs;
+  const base =
+    Number.isFinite(refresh) && refresh > TRANSIT_PROXY_TTL_MS
+      ? refresh
+      : TRANSIT_PROXY_TTL_MS;
   const own = Number(feed?.minIntervalMs);
-  if (!Number.isFinite(own) || own <= TRANSIT_PROXY_TTL_MS)
-    return TRANSIT_PROXY_TTL_MS;
+  if (!Number.isFinite(own) || own <= base) return base;
   return Math.min(own, TRANSIT_MAX_MIN_INTERVAL_MS);
 }
 
@@ -399,7 +406,16 @@ export function snapshotFromDecoded(
           applyStopNames(
             applyStatusSemantics(
               feed,
-              applyDerivedRoutes(feed, decoded.vehicles),
+              applyDerivedRoutes(
+                feed,
+                feed.speedUnit === 'km/h'
+                  ? decoded.vehicles.map((v) =>
+                      v.speedMps === null
+                        ? v
+                        : { ...v, speedMps: v.speedMps / 3.6 },
+                    )
+                  : decoded.vehicles,
+              ),
             ),
             stopNames,
           ),
@@ -590,7 +606,7 @@ export function transitRetryAfterMs(value, now = Date.now()) {
  * Classify a cache entry for the request policy.
  * @param {{ at: number }|null|undefined} entry Cached snapshot (`at` = fetch ms).
  * @param {number} now
- * @param {number} [ttlMs] Fresh window for this feed (`transitFeedTtlMs`).
+ * @param {number} [ttlMs] Fresh window; `transitFeedTtlMs(feed)` for a feed.
  * @returns {'none'|'fresh'|'stale'|'expired'}
  */
 export function transitCacheState(entry, now, ttlMs = TRANSIT_PROXY_TTL_MS) {
