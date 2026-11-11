@@ -1,10 +1,10 @@
 # Fork-only translations
 
-Arabic, Spanish, Russian, German, French, Italian, Japanese, Brazilian Portuguese, Ukrainian, Simplified and Traditional Chinese text of the fork's own layers (AEMET, Liveuamap, Rail network,
+Arabic, Hebrew, Spanish, Russian, German, French, Italian, Japanese, Brazilian Portuguese, Ukrainian, Simplified and Traditional Chinese text of the fork's own layers (AEMET, Liveuamap, Rail network,
 Barcelona Arrivals, the Transit card's Spanish-feed lines). Upstream's catalogs in
 `src/i18n/locales/` stay untouched, so syncs don't conflict on them.
 
-- `<locale>.json` (one per upstream locale: `de`, `es`, `fr`, `it`, `ja`, `pt`, `ru`, `uk`, `zh-CN`, `zh-Hant`): merged over upstream's catalogs at load (`src/i18n/index.js`) and
+- `<locale>.json` (one per upstream locale: `ar`, `de`, `es`, `fr`, `he`, `it`, `ja`, `pt`, `ru`, `uk`, `zh-CN`, `zh-Hant`): merged over upstream's catalogs at load (`src/i18n/index.js`) and
   by `npm run i18n` (`scripts/i18n.mjs`, `readCatalog`).
 - `same-as-english.json`: fork entries that read the same as the English on purpose
   (`METRO`, `{minutes} min`), merged with upstream's list.

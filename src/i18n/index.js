@@ -22,6 +22,7 @@ import ar from './locales/ar.json' with { type: 'json' };
 import de from './locales/de.json' with { type: 'json' };
 import es from './locales/es.json' with { type: 'json' };
 import fr from './locales/fr.json' with { type: 'json' };
+import he from './locales/he.json' with { type: 'json' };
 import it from './locales/it.json' with { type: 'json' };
 import ja from './locales/ja.json' with { type: 'json' };
 import pt from './locales/pt.json' with { type: 'json' };
@@ -34,6 +35,7 @@ import forkAr from './fork/ar.json' with { type: 'json' };
 import forkDe from './fork/de.json' with { type: 'json' };
 import forkEs from './fork/es.json' with { type: 'json' };
 import forkFr from './fork/fr.json' with { type: 'json' };
+import forkHe from './fork/he.json' with { type: 'json' };
 import forkIt from './fork/it.json' with { type: 'json' };
 import forkJa from './fork/ja.json' with { type: 'json' };
 import forkPt from './fork/pt.json' with { type: 'json' };
@@ -47,6 +49,7 @@ const CATALOGS = Object.freeze({
   de: { ...de, ...forkDe },
   es: { ...es, ...forkEs },
   fr: { ...fr, ...forkFr },
+  he: { ...he, ...forkHe },
   it: { ...it, ...forkIt },
   ja: { ...ja, ...forkJa },
   pt: { ...pt, ...forkPt },

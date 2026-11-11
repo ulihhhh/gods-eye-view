@@ -9,7 +9,7 @@
     "Wind: {value}",
     "Zone"
   ],
-  "es": ["CERCANÍAS", "METRO", "RUMOR", "{minutes} min"],
+  "es": ["CERCANÍAS", "METRO", "RUMOR"],
   "fr": [
     "Altitude",
     "CERCANÍAS",
@@ -18,17 +18,10 @@
     "Ozone {value} DU",
     "POINTS",
     "Zone",
-    "arr. {time}",
-    "{minutes} min"
+    "arr. {time}"
   ],
-  "it": [
-    "CERCANÍAS",
-    "METRO",
-    "UV max {value}",
-    "VIDEO",
-    "arr. {time}",
-    "{minutes} min"
-  ],
-  "pt": ["Altitude", "CERCANÍAS", "{minutes} min"],
+  "he": ["CERCANÍAS"],
+  "it": ["CERCANÍAS", "METRO", "UV max {value}", "VIDEO", "arr. {time}"],
+  "pt": ["Altitude", "CERCANÍAS"],
   "ru": []
 }
