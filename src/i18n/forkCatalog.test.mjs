@@ -16,6 +16,7 @@ for (const locale of [
   'ja',
   'pt',
   'ru',
+  'sv',
   'uk',
 ]) {
   test(`${locale}: the fork catalog repeats nothing upstream already translates`, () => {

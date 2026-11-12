@@ -59,7 +59,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // control_cockpit states the own-layer entry rule (Contacts not required).
     // move_camera tilt takes an optional pitchDeg angle, described as
     // absolute with its -45 default, with steps sent as a direction.
-    'fd616cf2cb9f68891ba8d5f343807989f3b091c38617264100a06fa8611a447a',
+    // show_street_level (map, source, photo) adds one tool.
+    '286057c7466b77fe51eed7bf3fcf99c443f904eb204772d39cacb8d9b5d6847f',
   );
 });
 
@@ -156,6 +157,7 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'resolve_area',
         'find_imagery',
         'osm_query',
+        'show_street_level',
       ].includes(tool.name),
   );
   // Layer enums are generated from the voice layer manifest and pinned by

@@ -23,5 +23,6 @@
   "he": ["CERCANÍAS"],
   "it": ["CERCANÍAS", "METRO", "UV max {value}", "VIDEO", "arr. {time}"],
   "pt": ["Altitude", "CERCANÍAS"],
-  "ru": []
+  "ru": [],
+  "sv": ["CERCANÍAS", "GRADIENT", "Orange", "UV max {value}", "VIDEO"]
 }

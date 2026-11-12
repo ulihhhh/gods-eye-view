@@ -27,6 +27,7 @@ import it from './locales/it.json' with { type: 'json' };
 import ja from './locales/ja.json' with { type: 'json' };
 import pt from './locales/pt.json' with { type: 'json' };
 import ru from './locales/ru.json' with { type: 'json' };
+import sv from './locales/sv.json' with { type: 'json' };
 import uk from './locales/uk.json' with { type: 'json' };
 import zhCN from './locales/zh-CN.json' with { type: 'json' };
 import zhHant from './locales/zh-Hant.json' with { type: 'json' };
@@ -40,6 +41,7 @@ import forkIt from './fork/it.json' with { type: 'json' };
 import forkJa from './fork/ja.json' with { type: 'json' };
 import forkPt from './fork/pt.json' with { type: 'json' };
 import forkRu from './fork/ru.json' with { type: 'json' };
+import forkSv from './fork/sv.json' with { type: 'json' };
 import forkUk from './fork/uk.json' with { type: 'json' };
 import forkZhCN from './fork/zh-CN.json' with { type: 'json' };
 import forkZhHant from './fork/zh-Hant.json' with { type: 'json' };
@@ -54,6 +56,7 @@ const CATALOGS = Object.freeze({
   ja: { ...ja, ...forkJa },
   pt: { ...pt, ...forkPt },
   ru: { ...ru, ...forkRu },
+  sv: { ...sv, ...forkSv },
   uk: { ...uk, ...forkUk },
   'zh-CN': { ...zhCN, ...forkZhCN },
   'zh-Hant': { ...zhHant, ...forkZhHant },
