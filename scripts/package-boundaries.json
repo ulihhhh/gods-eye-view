@@ -206,7 +206,20 @@
       "src/i18n/locales/sv.json",
       "src/i18n/locales/uk.json",
       "src/i18n/locales/zh-CN.json",
-      "src/i18n/locales/zh-Hant.json"
+      "src/i18n/locales/zh-Hant.json",
+      "src/i18n/fork/ar.json",
+      "src/i18n/fork/de.json",
+      "src/i18n/fork/es.json",
+      "src/i18n/fork/fr.json",
+      "src/i18n/fork/he.json",
+      "src/i18n/fork/it.json",
+      "src/i18n/fork/ja.json",
+      "src/i18n/fork/pt.json",
+      "src/i18n/fork/ru.json",
+      "src/i18n/fork/sv.json",
+      "src/i18n/fork/uk.json",
+      "src/i18n/fork/zh-CN.json",
+      "src/i18n/fork/zh-Hant.json"
     ],
     "external": []
   },
