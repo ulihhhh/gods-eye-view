@@ -28,6 +28,8 @@ function setup({ rows }) {
     _enabled: true,
     _viewer: viewerOverBarcelona(),
     _activeFeeds: new Map(),
+    _vehicles: new Map(),
+    _cockpitSubjectKey: null,
     _inFlight: new Map(),
     _feedStatus: new Map(),
     _showEstimated: true,
