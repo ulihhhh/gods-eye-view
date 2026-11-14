@@ -118,6 +118,8 @@ export function createApplicationCatalog({
     const vessels = createApplicationVessels({
       source: sources.vessels,
       options: vesselOptions,
+      displayParams: () => flights.getParams(),
+      ...(resolveAsset ? { resolveAsset } : {}),
     });
     const installations = createApplicationInstallations({
       surface,
@@ -176,7 +178,12 @@ export function createApplicationCatalog({
         createApplicationTraffic({ source: sources.traffic, surface }),
         createApplicationCctv({ surface, source: sources.cctv }),
         createApplicationRadio({ surface, source: sources.radio }),
-        createApplicationTransit({ surface, source: sources.transit }),
+        createApplicationTransit({
+          surface,
+          source: sources.transit,
+          displayParams: () => flights.getParams(),
+          ...(resolveAsset ? { resolveAsset } : {}),
+        }),
         createApplicationBikeshare({ source: sources.bikeshare }),
         createApplicationDirections({ source: sources.directions }),
         createApplicationRecentImagery({ source: sources['recent-imagery'] }),
@@ -209,7 +216,12 @@ export function createApplicationCatalog({
         ...createOsmOverlayLayers(),
         ...createInfrastructureLayers(localGeoJsonServices),
         createApplicationCables({ source: sources.cables }),
-        createApplicationRail({ surface, source: sources.rail }),
+        createApplicationRail({
+          surface,
+          source: sources.rail,
+          displayParams: () => flights.getParams(),
+          ...(resolveAsset ? { resolveAsset } : {}),
+        }),
         createApplicationFirms({
           surface,
           id: 'local-firms',
