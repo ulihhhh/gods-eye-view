@@ -4,8 +4,10 @@ import {
   perspectiveProjectedRotation,
 } from '../../data/iconOrientation.js';
 import {
+  PLACED_WAKE_MS,
   updatePlayback,
   applyDisplayCourse,
+  playbackMoving,
   syncPlayback,
 } from './movement.js';
 import {
@@ -166,7 +168,7 @@ export function createRendering({ state, services, parts }) {
       migrateMarker(entry, false);
       return;
     }
-    const positional = sample.phase === 'playing' && sample.segmentSpeedMps > 0;
+    const positional = playbackMoving(entry);
     const turning =
       Number.isFinite(sample.segmentCourseDeg) &&
       Number.isFinite(entry.courseDeg) &&
@@ -179,7 +181,19 @@ export function createRendering({ state, services, parts }) {
     } else {
       state._moving.delete(entry);
       migrateMarker(entry, false);
-      if (Number.isFinite(sample.nextWakeMonoMs)) {
+      // A vehicle a host-supplied placement holds still is asked again every
+      // PLACED_WAKE_MS: it moves on once the placement does.
+      const monoNow = performance.now();
+      const placedWake = entry.placed === true;
+      const boundary = sample.nextWakeMonoMs;
+      const wakeMonoMs = placedWake
+        ? Math.min(
+            Number.isFinite(boundary) ? boundary : Infinity,
+            monoNow + PLACED_WAKE_MS,
+          )
+        : boundary;
+      if (Number.isFinite(wakeMonoMs)) {
+        const atBoundary = !placedWake || boundary <= wakeMonoMs;
         entry.wakeTimer = setTimeout(
           () => {
             entry.wakeTimer = null;
@@ -188,9 +202,10 @@ export function createRendering({ state, services, parts }) {
             placeSample(entry);
             schedulePlayback(entry);
             syncRenderHold();
-            governorRequestRender('transit-motion-boundary');
+            if (atBoundary || state._moving.has(entry))
+              governorRequestRender('transit-motion-boundary');
           },
-          Math.max(1, sample.nextWakeMonoMs - performance.now()),
+          Math.max(1, wakeMonoMs - monoNow),
         );
       }
     }
@@ -460,7 +475,8 @@ export function createRendering({ state, services, parts }) {
       if (
         !entry.surfaceReady ||
         entry.sample.phase !== 'playing' ||
-        entry.sample.segmentSpeedMps === 0
+        entry.sample.segmentSpeedMps === 0 ||
+        (entry.placed === true && entry.placedMoving !== true)
       )
         schedulePlayback(entry);
       if (!state._moving.has(entry)) settleSelectedCard(entry);
@@ -550,9 +566,15 @@ export function createRendering({ state, services, parts }) {
           groundLiftM,
         };
       }
-      if (item.mode !== entry.mode) {
+      if (item.mode !== entry.mode || item.routeType !== entry.routeType) {
         item.mode = entry.mode;
-        item.spec = transitModelSpec(set, { mode: entry.mode });
+        item.routeType = entry.routeType;
+        // The route type picks the finer model (a coach, a high-speed set);
+        // the mode is the fallback for a type the model table lacks.
+        item.spec = transitModelSpec(set, {
+          routeType: entry.routeType,
+          mode: entry.mode,
+        });
         item.tint =
           MODE_CESIUM_COLORS[entry.mode] || MODE_CESIUM_COLORS.unknown;
       }

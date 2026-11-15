@@ -25,6 +25,7 @@ import {
   TRANSIT_STANDARD_STOP_RELATION,
   TRANSIT_STOP_RELATIONS,
 } from './transitStopRelation.js';
+export { transitModeFor, transitRouteType } from './transitFeeds.js';
 
 /** Fresh window: a snapshot younger than this is served without refetching. */
 export const TRANSIT_PROXY_TTL_MS = 15_000;
