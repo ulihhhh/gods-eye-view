@@ -1,0 +1,12 @@
+[
+  "src/data/aemetBeaches.js",
+  "src/data/aemetEnvironmental.js",
+  "src/data/aemetStations.js",
+  "src/data/aemetUvIndex.js",
+  "src/data/aemetWarnings.js",
+  "src/data/aemetWeatherImagery.js",
+  "src/data/liveuamap.js",
+  "src/data/spainRailNetworkLayer.js",
+  "src/data/tmbArrivalsLayer.js",
+  "src/layers/transit/follow.js"
+]

@@ -8,7 +8,7 @@ import {
 } from './liveuamapPresentation.js';
 import { iconUriForCategory } from './liveuamapIcons.js';
 import { msg, t, translateKnown } from '../i18n/index.js';
-import { horizonOccluder } from './iconOrientation.js';
+import { horizonOccluder } from '../render/cesium/iconOrientation.js';
 import { governorRequestRender } from '../renderGovernor.js';
 
 /**

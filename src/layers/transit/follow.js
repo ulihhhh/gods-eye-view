@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { cameraFlightActive } from '../../render/cesium/internals.js';
 import {
   TRANSIT_SELECTED_OVERLAY_SOURCE_ID,
   TRANSIT_SELECTED_OVERLAY_SOURCE_OPTIONS,
@@ -160,7 +161,7 @@ export function createFollow({ state, services, parts }) {
     // Something else took the camera: a flight, aircraft tracking, a reset.
     if (
       v.trackedEntity ||
-      camera._currentFlight ||
+      cameraFlightActive(camera) ||
       v.scene.mode !== Cesium.SceneMode.SCENE3D ||
       (follow.transform &&
         !Cesium.Matrix4.equals(camera.transform, follow.transform))

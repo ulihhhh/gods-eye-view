@@ -2,23 +2,29 @@
 // layer polls it only once the server's catalog says it is offered.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as Cesium from 'cesium';
 import {
   OFFERED_ESTIMATES_REFRESH_MS,
   OFFERED_ESTIMATES_RETRY_MS,
   createViewport,
 } from './viewport.js';
+import { bindRenderer } from '../../render/rendererOf.js';
 
-/** A camera 5 km over central Barcelona. */
+/** A camera port 5 km over central Barcelona. */
 function viewerOverBarcelona() {
-  const rect = Cesium.Rectangle.fromDegrees(2.12, 41.36, 2.2, 41.42);
-  return {
+  const host = {};
+  bindRenderer(host, {
     camera: {
-      positionCartographic: { height: 5_000 },
-      computeViewRectangle: () => rect,
+      pose: () => ({ lon: 2.16, lat: 41.39, height: 5_000 }),
+      viewRectangle: () => ({
+        west: 2.12,
+        south: 41.36,
+        east: 2.2,
+        north: 41.42,
+      }),
+      on: () => () => {},
     },
-    scene: { globe: { ellipsoid: Cesium.Ellipsoid.WGS84 } },
-  };
+  });
+  return host;
 }
 
 function setup({ rows }) {
