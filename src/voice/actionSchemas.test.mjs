@@ -60,7 +60,8 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // move_camera tilt takes an optional pitchDeg angle, described as
     // absolute with its -45 default, with steps sent as a direction.
     // show_street_level (map, source, photo) adds one tool.
-    '286057c7466b77fe51eed7bf3fcf99c443f904eb204772d39cacb8d9b5d6847f',
+    // open_stories adds the Stories Explore entry action.
+    '8bf475be998fd4c3ac2a417f0f45f95e687d8b204fdbf7b6bc7cccb3bb707c78',
   );
 });
 
@@ -158,6 +159,7 @@ test('all legacy action arguments are byte-identical after removing the delibera
         'find_imagery',
         'osm_query',
         'show_street_level',
+        'open_stories',
       ].includes(tool.name),
   );
   // Layer enums are generated from the voice layer manifest and pinned by
