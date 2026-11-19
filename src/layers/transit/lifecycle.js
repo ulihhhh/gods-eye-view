@@ -165,6 +165,8 @@ export function createLifecycle({ state, services, parts }) {
       state._visible.clear();
       clearTimeout(state._cameraDebounceTimer);
       state._cameraDebounceTimer = null;
+      // A hold ends with the layer (cockpitSubject.js).
+      state._cockpitSubjectKey = null;
       parts.selection.clearSelection();
       parts.follow?.destroy();
       state._overlayHost.setVisible(TRANSIT_SELECTED_OVERLAY_SOURCE_ID, false);

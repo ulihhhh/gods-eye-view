@@ -8,6 +8,7 @@ import {
 } from './policy.js';
 import { getRegisteredTransitFeed } from '../../data/transitFeeds.js';
 import { inputFor } from '../../input/dispatcher.js';
+import { isUnderOtherCard } from '../../data/pickRegistry.js';
 import { t } from '../../i18n/index.js';
 
 /**
@@ -170,6 +171,9 @@ export function createSelection({ state, services, parts }) {
         collection:
           set === 'moving' ? 'animated' : set === 'still' ? 'stationary' : null,
       };
+      // Another layer's card or label painted on top takes the click: the item
+      // under it does not act, and the click is not empty space either.
+      if (isUnderOtherCard(event)) return;
       if (key) {
         selectVehicle(key, { byUser: true });
         return;
