@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { h, render as renderVue } from 'vue';
 import {
   sideColorCss,
   statusBadge,
@@ -10,6 +11,7 @@ import { iconUriForCategory } from './liveuamapIcons.js';
 import { msg, t, translateKnown } from '../i18n/index.js';
 import { horizonOccluder } from '../render/cesium/iconOrientation.js';
 import { governorRequestRender } from '../renderGovernor.js';
+import UiCloseButton from '../ui/kit/UiCloseButton.vue';
 
 /**
  * Liveuamap conflict feed — LOCAL PROTOTYPE layer.
@@ -128,6 +130,7 @@ export function createLiveuamapLayer() {
   let _lastRegions = [];
   let _clickHandler = null;
   let _popupEl = null;
+  let _popupCloseSlot = null;
   let _params = { showLabels: true, showFields: true, verifiedOnly: false };
   let _viewer = null;
   let _horizonTimer = null;
@@ -145,6 +148,8 @@ export function createLiveuamapLayer() {
   }
 
   function closePopup() {
+    if (_popupCloseSlot) renderVue(null, _popupCloseSlot);
+    _popupCloseSlot = null;
     if (_popupEl) _popupEl.remove();
     _popupEl = null;
   }
@@ -171,8 +176,7 @@ export function createLiveuamapLayer() {
     el.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
         <span class="panel-title">LIVEUAMAP &middot; ${escapeHtml(region.toUpperCase())}</span>
-        <button type="button" data-luam-close aria-label="${escapeHtml(t('Close'))}"
-          style="background:none;border:0;color:var(--accent);cursor:pointer;font:14px/1 var(--font-mono);padding:0 2px">&#10005;</button>
+        <span data-luam-close></span>
       </div>
       <div style="font:600 12px/1.35 var(--font-mono);letter-spacing:.02em;color:var(--text-primary);margin-top:8px">${escapeHtml(ev.name || t('(untitled)'))}</div>
       ${badge ? `<div style="display:inline-block;margin-top:6px;padding:2px 7px;border-radius:3px;font:8px/1 var(--font-mono);letter-spacing:.06em;background:${badge.color};color:#0a0a0f"${ev.status?.label ? ` title="${escapeHtml(translateKnown(ev.status.label))}"` : ''}>${escapeHtml(t(badge.label))}</div>` : ''}
@@ -197,10 +201,20 @@ export function createLiveuamapLayer() {
           : ''
       }
     `;
-    el.querySelector('[data-luam-close]')?.addEventListener(
-      'click',
-      closePopup,
-    );
+    // The close control is the kit's UiCloseButton, mounted into its slot.
+    const closeSlot = el.querySelector('[data-luam-close]');
+    if (closeSlot) {
+      renderVue(
+        h(UiCloseButton, {
+          label: t('Close'),
+          style:
+            'color:var(--accent);font:14px/1 var(--font-mono);padding:0 2px',
+          onClick: closePopup,
+        }),
+        closeSlot,
+      );
+      _popupCloseSlot = closeSlot;
+    }
     document.body.appendChild(el);
     _popupEl = el;
   }
