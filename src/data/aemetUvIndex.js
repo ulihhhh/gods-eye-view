@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { viewerBehind } from '../render/cesium/viewers.js';
 import {
   registerPickOwner,
   resolvePickId,
@@ -315,7 +316,8 @@ export function createAemetUvIndexLayer({
     source: 'AEMET OpenData · Spain',
     updateInterval: 300000,
 
-    init(viewer) {
+    init(host) {
+      const viewer = viewerBehind(host);
       _viewer = viewer;
       _dataSource = new Cesium.CustomDataSource('aemet-uv-index');
       _dataSource.show = false;
@@ -329,7 +331,8 @@ export function createAemetUvIndexLayer({
       console.log('[Data:AemetUvIndex] Initialized');
     },
 
-    enable(viewer) {
+    enable(host) {
+      const viewer = viewerBehind(host);
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
       overlayHost.setVisible(AEMET_UV_INDEX_SELECTED_OVERLAY_SOURCE_ID, true);
@@ -416,7 +419,8 @@ export function createAemetUvIndexLayer({
       }
     },
 
-    destroy(viewer) {
+    destroy(host) {
+      const viewer = viewerBehind(host);
       _clearSelection();
       _removeClickHandler();
       unregisterPickOwner('aemet-uv-index');

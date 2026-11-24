@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { viewerBehind } from '../render/cesium/viewers.js';
 import {
   registerPickOwner,
   resolvePickId,
@@ -989,7 +990,8 @@ export function createTmbArrivalsLayer({
     // only re-reads the server's copy.
     updateInterval: 3_600_000,
 
-    init(viewer) {
+    init(host) {
+      const viewer = viewerBehind(host);
       _viewer = viewer;
       _dataSource = new Cesium.CustomDataSource(LAYER_ID);
       _dataSource.show = false;
@@ -1002,7 +1004,8 @@ export function createTmbArrivalsLayer({
       overlayHost.setVisible(TMB_ARRIVALS_SELECTED_OVERLAY_SOURCE_ID, false);
     },
 
-    enable(viewer) {
+    enable(host) {
+      const viewer = viewerBehind(host);
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
       _applyVisibility();
@@ -1071,7 +1074,8 @@ export function createTmbArrivalsLayer({
       return true;
     },
 
-    destroy(viewer) {
+    destroy(host) {
+      const viewer = viewerBehind(host);
       if (_alertTick !== null) clearIntervalImpl(_alertTick);
       _alertTick = null;
       _removeAlertHalo();

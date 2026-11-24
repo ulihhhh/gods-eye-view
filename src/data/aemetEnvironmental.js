@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { viewerBehind } from '../render/cesium/viewers.js';
 import {
   registerPickOwner,
   resolvePickId,
@@ -347,7 +348,8 @@ export function createAemetEnvironmentalLayer({
     source: 'AEMET OpenData · Spain',
     updateInterval: 300000,
 
-    init(viewer) {
+    init(host) {
+      const viewer = viewerBehind(host);
       _viewer = viewer;
       _dataSource = new Cesium.CustomDataSource('aemet-environmental');
       _dataSource.show = false;
@@ -365,7 +367,8 @@ export function createAemetEnvironmentalLayer({
       console.log('[Data:AemetEnvironmental] Initialized');
     },
 
-    enable(viewer) {
+    enable(host) {
+      const viewer = viewerBehind(host);
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
       overlayHost.setVisible(
@@ -505,7 +508,8 @@ export function createAemetEnvironmentalLayer({
       }
     },
 
-    destroy(viewer) {
+    destroy(host) {
+      const viewer = viewerBehind(host);
       _clearSelection();
       _removeClickHandler();
       unregisterPickOwner('aemet-environmental');

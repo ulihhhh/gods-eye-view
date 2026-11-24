@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { viewerBehind } from '../render/cesium/viewers.js';
 import {
   registerPickOwner,
   resolvePickId,
@@ -1169,7 +1170,8 @@ export function createSpainRailNetworkLayer({
     // Static packs: read once; the interval only re-checks a failed read.
     updateInterval: 3_600_000,
 
-    init(viewer) {
+    init(host) {
+      const viewer = viewerBehind(host);
       _viewer = viewer;
       _dataSource = new Cesium.CustomDataSource(LAYER_ID);
       _dataSource.show = false;
@@ -1177,7 +1179,8 @@ export function createSpainRailNetworkLayer({
       overlayHost.setVisible(SPAIN_RAIL_SELECTED_OVERLAY_SOURCE_ID, false);
     },
 
-    enable(viewer) {
+    enable(host) {
+      const viewer = viewerBehind(host);
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
       _applyVisibility();
@@ -1242,7 +1245,8 @@ export function createSpainRailNetworkLayer({
       }
     },
 
-    destroy(viewer) {
+    destroy(host) {
+      const viewer = viewerBehind(host);
       _clearSelection();
       if (_alertTick !== null) clearIntervalImpl(_alertTick);
       _alertTick = null;

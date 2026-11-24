@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { viewerBehind } from '../render/cesium/viewers.js';
 import { h, render as renderVue } from 'vue';
 import {
   sideColorCss,
@@ -506,7 +507,8 @@ export function createLiveuamapLayer() {
     source: 'Liveuamap (local prototype — not redistributable)',
     updateInterval: 90000,
 
-    init(viewer) {
+    init(host) {
+      const viewer = viewerBehind(host);
       _viewer = viewer;
       _dataSource = new Cesium.CustomDataSource('liveuamap');
       _dataSource.show = false;
@@ -648,7 +650,8 @@ export function createLiveuamapLayer() {
       return out;
     },
 
-    destroy(viewer) {
+    destroy(host) {
+      const viewer = viewerBehind(host);
       _enabled = false;
       closePopup();
       if (_horizonTimer) {

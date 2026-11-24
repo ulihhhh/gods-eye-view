@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { viewerBehind } from '../render/cesium/viewers.js';
 import {
   registerPickOwner,
   resolvePickId,
@@ -328,7 +329,8 @@ export function createAemetWarningsLayer({
     source: 'AEMET OpenData · Spain',
     updateInterval: 300000,
 
-    init(viewer) {
+    init(host) {
+      const viewer = viewerBehind(host);
       _viewer = viewer;
       _dataSource = new Cesium.CustomDataSource('aemet-warnings');
       _dataSource.show = false;
@@ -343,7 +345,8 @@ export function createAemetWarningsLayer({
       console.log('[Data:AemetWarnings] Initialized');
     },
 
-    enable(viewer) {
+    enable(host) {
+      const viewer = viewerBehind(host);
       _enabled = true;
       if (_dataSource) _dataSource.show = true;
       overlayHost.setVisible(AEMET_WARNINGS_SELECTED_OVERLAY_SOURCE_ID, true);
@@ -353,7 +356,8 @@ export function createAemetWarningsLayer({
       );
     },
 
-    disable(viewer) {
+    disable(host) {
+      const viewer = viewerBehind(host);
       _enabled = false;
       _clearSelection();
       if (_dataSource) _dataSource.show = false;
@@ -362,7 +366,8 @@ export function createAemetWarningsLayer({
       unregisterPickOwner('aemet-warnings');
     },
 
-    async update(viewer) {
+    async update(host) {
+      const viewer = viewerBehind(host);
       try {
         const response = await fetch(API_URL);
         if (response.status === 503) {
@@ -452,7 +457,8 @@ export function createAemetWarningsLayer({
       }
     },
 
-    destroy(viewer) {
+    destroy(host) {
+      const viewer = viewerBehind(host);
       _clearSelection();
       _removeClickHandler();
       unregisterPickOwner('aemet-warnings');

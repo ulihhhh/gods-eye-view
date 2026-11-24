@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium';
+import { viewerBehind } from '../render/cesium/viewers.js';
 import {
   clearOverlaySource,
   hitTestWorldOverlay,
@@ -412,7 +413,8 @@ export function createAemetWeatherImageryLayer({
     source: 'AEMET OpenData · Spain / EUMETSAT OSI SAF',
     updateInterval: 300000,
 
-    init(viewer) {
+    init(host) {
+      const viewer = viewerBehind(host);
       _viewer = viewer;
       _enabled = false;
       _activeMap = 'lightning';
@@ -426,7 +428,8 @@ export function createAemetWeatherImageryLayer({
       console.log('[Data:AemetWeatherImagery] Initialized');
     },
 
-    enable(viewer) {
+    enable(host) {
+      const viewer = viewerBehind(host);
       _enabled = true;
       overlayHost.setVisible(AEMET_WEATHER_IMAGERY_OVERLAY_SOURCE_ID, true);
       _installClickHandler(viewer || _viewer);

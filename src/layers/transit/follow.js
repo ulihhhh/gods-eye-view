@@ -1,5 +1,6 @@
 import * as Cesium from 'cesium';
 import { cameraFlightActive } from '../../render/cesium/internals.js';
+import { viewerBehind } from '../../render/cesium/viewers.js';
 import {
   TRANSIT_SELECTED_OVERLAY_SOURCE_ID,
   TRANSIT_SELECTED_OVERLAY_SOURCE_OPTIONS,
@@ -82,7 +83,7 @@ export function createFollow({ state, services, parts }) {
   const scratchRotation = new Cesium.Matrix3();
   const scratchQuaternion = new Cesium.Quaternion();
 
-  const viewer = () => state._viewer;
+  const viewer = () => viewerBehind(state._viewer);
   const markerPosition = (entry) => {
     const p = entry?.marker?.show !== false ? entry?.marker?.position : null;
     return p &&
