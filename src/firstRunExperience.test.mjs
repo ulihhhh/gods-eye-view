@@ -920,7 +920,7 @@ test('the Stories announcement waits behind the welcome card', () => {
   // the card is dismissed.
   assert.match(
     css,
-    /body:has\(#first-run-launcher\) #gev-stories #hPop,\s*body\.first-run-opening-stories #gev-stories #hPop \{\s*visibility: hidden;\s*pointer-events: none;\s*\}/,
+    /body:is\(\.launcher-shown \*, #first-run-launcher\) #gev-stories #hPop,\s*body\.first-run-opening-stories #gev-stories #hPop \{\s*visibility: hidden;\s*pointer-events: none;\s*\}/,
   );
   // The selector only works while Stories still renders the popup as #hPop
   // inside #gev-stories.
@@ -1110,11 +1110,12 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // Pistes extend the generated layer enums and alias hint; voice geometry
   // adds the analyst area scopes and the osm-places layer.
   // control_cockpit states the own-layer entry rule (Contacts not required).
+  // Fire Perimeters queries add lastGrowthTime.
   // The fork's AEMET, Liveuamap, TMB and rail network manifest entries add theirs.
-  assert.equal(block.length, 32289, 'serialized tool schema length drifted');
+  assert.equal(block.length, 32304, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    '85336bca2002e51233c603b4a15f64651ff19a2f85958771bce1ecc93898d2a2',
+    'b894acf2de102d682a8a054dea479e7dbacae7ac6936e6287e8c2e5065f7dbdc',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(
