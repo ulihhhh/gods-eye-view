@@ -1096,7 +1096,7 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // schema, which may not carry top-level anyOf), and Contacts requested-radius
   // list descriptions; the missions still ride existing tools.
   // Street Level and GNSS extend the manifest; broadcast caveats describe tracked and analyst aircraft.
-  // Air quality (ECCC AQHI) extends the manifest.
+  // Air quality includes station fields. First-run missions add no tools.
   // Globe rotation adds one camera motion and its descriptions; Globe View
   // framing/default guidance updates only move_camera and mode descriptions.
   // Radio markup and the complete production-request comparison pin locality.
@@ -1109,11 +1109,13 @@ test('the voice TOOL SCHEMA matches the pinned contract — the mission mapping 
   // adds the analyst area scopes and the osm-places layer.
   // control_cockpit states the own-layer entry rule (Contacts not required).
   // Fire Perimeters queries add lastGrowthTime.
-  // The fork's AEMET, Liveuamap, TMB and rail network manifest entries add theirs.
-  assert.equal(block.length, 32304, 'serialized tool schema length drifted');
+  // The fork's AEMET, Liveuamap, TMB and rail network manifest entries add theirs;
+  // The dock's Location and Visual Presets trays leave set_panel_open's
+  // targets; Visual (pp-toggles) takes the presets' names.
+  assert.equal(block.length, 32392, 'serialized tool schema length drifted');
   assert.equal(
     crypto.createHash('sha256').update(block).digest('hex'),
-    'b894acf2de102d682a8a054dea479e7dbacae7ac6936e6287e8c2e5065f7dbdc',
+    '88ba330d12ec515942e316ac6c55e945075555ac7b8d4fac780cb3d4f05fa7d1',
     'the first-run missions must ride EXISTING tools: no schema edit, no cache bust',
   );
   const instructions = fs.readFileSync(

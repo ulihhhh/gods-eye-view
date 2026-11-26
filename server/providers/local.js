@@ -1,4 +1,7 @@
 import path from 'node:path';
+
+import { openAqProxy } from './openAq.js';
+import { airQualityFieldProxy } from './airQualityField.js';
 import { openSkyProxy } from './aircraft/opensky.js';
 import { celestrakProxy, rocketLaunchesProxy } from './space.js';
 import { issTelemetryProxy } from './space/issTelemetry.js';
@@ -52,6 +55,7 @@ import { acartiaProxy } from './acartia.js';
 import { cycloneProxy } from './cyclones.js';
 import { windProxy } from './wind.js';
 import { libraryProxy } from './library.js';
+import { layerCountsEndpoint } from './common/layerCounts.js';
 
 /**
  * Construct the local provider plugins in their established order.
@@ -70,13 +74,18 @@ function localProviderPlugins({
     !path.isAbsolute(nominatimStorageDir)
   )
     throw new TypeError('nominatimStorageDir must be an absolute directory');
+  const countReaders = {};
+  function withCount(layerId, provider) {
+    countReaders[layerId] = provider.api.readLayerCount;
+    return provider;
+  }
   return [
-    openSkyProxy(),
+    withCount('flights', openSkyProxy()),
     liveuamapProxy(),
-    celestrakProxy(),
+    withCount('satellites', celestrakProxy()),
     issTelemetryProxy(),
     tomtomProxy(),
-    firmsProxy(),
+    withCount('local-firms', firmsProxy()),
     aemetStationsProxy(),
     aemetWarningsProxy(),
     aemetForecastProxy(),
@@ -94,7 +103,7 @@ function localProviderPlugins({
     regionalBriefProxy(),
     geocodeProxy({ storageDir: nominatimStorageDir }),
     weatherEffectsProxy(),
-    cctvProxy({ sourceRoot: defaultSourceRoot }),
+    withCount('cctv', cctvProxy({ sourceRoot: defaultSourceRoot })),
     radioBrowserProxy(),
     gbfsProxy(),
     localReceiversProxy(),
@@ -105,7 +114,7 @@ function localProviderPlugins({
     tmbProxy(),
     ambProxy(),
     adsbLolProxy(),
-    aisLiveProxy(),
+    withCount('ais-live-vessels', aisLiveProxy()),
     trackBackfillProxies(),
     openAiRealtimeProxy({ realtime }),
     ...(gemini ? [geminiLiveProxy({ realtime: gemini })] : []),
@@ -113,6 +122,8 @@ function localProviderPlugins({
     windProxy(),
     weatherProxy(),
     cycloneProxy(),
+    openAqProxy(),
+    airQualityFieldProxy(),
     mapillaryProxy(),
     firePerimetersProxy(),
     gnssIntegrityProxy(),
@@ -123,6 +134,7 @@ function localProviderPlugins({
     newsProxy(),
     inaturalistProxy(),
     acartiaProxy(),
+    layerCountsEndpoint(countReaders),
     keySetupEndpoint(),
   ];
 }

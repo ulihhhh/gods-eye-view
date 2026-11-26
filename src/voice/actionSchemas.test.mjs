@@ -42,7 +42,7 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // omit top-level anyOf (OpenAI rejects it). Contacts list routing preserves
     // requested radius and center authority in descriptions only.
     // Street Level and GNSS extend the manifest; tracked and analyst aircraft describe broadcasts.
-    // Air quality (ECCC AQHI) extends the manifest.
+    // Air quality includes each station's value, pollutant, averaging period, kind and method note.
     // Globe rotation adds one motion; visual keyhole fit and explicit
     // reset guidance/defaults update only move_camera and mode descriptions.
     // S2 GhostMaps extends the generated layer enums.
@@ -65,7 +65,9 @@ test('the complete Realtime tool payload pins the manifest-generated layer relea
     // visual style; set_cyber_sonar is excluded above).
     // The Space Missions panel adds one panel target (fork entries on top).
     // Fire Perimeters queries add lastGrowthTime.
-    'f8e853fe46c2e0ad1004538baf9ec443e3fb5492e0226e55935ac61bdbf188f5',
+    // The dock's Location and Visual Presets trays leave set_panel_open's
+    // targets; Visual (pp-toggles) takes the presets' and map sources' names.
+    '97776c60880b106ef00d3a6c87cd3292ea9ea6b749615a3ed048fc8b3c6d984f',
   );
 });
 
@@ -174,6 +176,14 @@ test('all legacy action arguments are byte-identical after removing the delibera
   delete property('set_layer_visibility').layerId.enum;
   delete property('show_data_layers_menu').layerId.enum;
   delete property('get_entity_context').layerId.enum;
+  // The dock's Location and Visual Presets trays are gone, and their panel
+  // ids with them.
+  property('set_panel_open').panelId.enum.splice(
+    1,
+    0,
+    'location-bar',
+    'control-panel',
+  );
   delete property('analyst_query').layers.items.enum;
   // Earth-centered rotation is additive; local camera yaw keeps its contract.
   const motion = property('move_camera').motion;
