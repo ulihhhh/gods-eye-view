@@ -159,7 +159,7 @@ export function createViewport({ state, services, parts, source }) {
     }
     if (estimatedInRange !== state._estimatedInRange) {
       state._estimatedInRange = estimatedInRange;
-      state._dataManager?.refreshLayerStats?.();
+      state._panel?.invalidate();
     }
     // A vehicle a first-person view rides keeps its feed polled.
     const held = state._vehicles.get(state._cockpitSubjectKey);
@@ -188,7 +188,7 @@ export function createViewport({ state, services, parts, source }) {
     parts.rendering.syncRenderHold();
     governorRequestRender('transit-proximity');
     // Repaint now: the row follows the camera, the manager tick is 15 s.
-    if (changed) state._dataManager?.refreshLayerStats?.('transit');
+    if (changed) state._panel?.invalidate();
   }
 
   function onCameraChanged() {

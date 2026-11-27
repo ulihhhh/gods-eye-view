@@ -104,7 +104,7 @@ function controlsWith({ enabled = true, inRange = true } = {}) {
     _enabled: enabled,
     _showEstimated: true,
     _estimatedInRange: inRange,
-    _dataManager: { refreshLayerStats: () => (calls.stats += 1) },
+    _panel: { invalidate: () => (calls.stats += 1) },
   };
   const parts = {
     viewport: { runProximityCheck: () => (calls.proximity += 1) },

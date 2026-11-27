@@ -14,21 +14,13 @@ const ESTIMATED_CHIP = Object.freeze({
 });
 
 /**
- * Manager wiring. Transit's data arrives from camera-driven proximity polls,
- * not only from the manager's own tick, so the layer keeps a handle it can use
- * to repaint its panel row the moment a snapshot lands.
+ * The ESTIMATED pill's params and row controls. The panel is repainted
+ * through the `panel.invalidate()` handle the layer gets at init.
  * @param {object} context
  * @returns {object}
  */
 export function createControls({ state, parts }) {
   const methods = {
-    /**
-     * @param {object} dataManager DataLayerManager instance.
-     */
-    attachDataManager(dataManager) {
-      state._dataManager = dataManager;
-    },
-
     /**
      * `{estimated}`: whether estimated feeds are polled and drawn. Turning
      * it off drops their vehicles at once; on, they come back on the next
@@ -40,7 +32,7 @@ export function createControls({ state, parts }) {
       if (next === state._showEstimated) return true;
       state._showEstimated = next;
       if (state._enabled) parts.viewport.runProximityCheck();
-      state._dataManager?.refreshLayerStats?.();
+      state._panel?.invalidate();
       return true;
     },
 
