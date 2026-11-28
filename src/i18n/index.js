@@ -9,7 +9,8 @@
 //
 // English needs no catalog. Every other locale is one flat JSON file,
 // locales/<code>.json, keyed by the English text (for tn, by the English
-// plural form). A missing or empty entry falls back to English.
+// plural form), loaded when its locale is chosen (setLocale waits for it).
+// A missing or empty entry falls back to English.
 // `npm run i18n` keeps the catalogs in step with the code. Guide: docs/I18N.md.
 import {
   DEFAULT_LOCALE,
@@ -18,49 +19,108 @@ import {
   normalizeLocale,
   writeStoredLocale,
 } from './locale.js';
-import ar from './locales/ar.json' with { type: 'json' };
-import de from './locales/de.json' with { type: 'json' };
-import es from './locales/es.json' with { type: 'json' };
-import fr from './locales/fr.json' with { type: 'json' };
-import he from './locales/he.json' with { type: 'json' };
-import it from './locales/it.json' with { type: 'json' };
-import ja from './locales/ja.json' with { type: 'json' };
-import pt from './locales/pt.json' with { type: 'json' };
-import ru from './locales/ru.json' with { type: 'json' };
-import sv from './locales/sv.json' with { type: 'json' };
-import uk from './locales/uk.json' with { type: 'json' };
-import zhCN from './locales/zh-CN.json' with { type: 'json' };
-import zhHant from './locales/zh-Hant.json' with { type: 'json' };
-// Fork-only layers' text, kept apart so syncs never touch upstream's catalogs.
-import forkAr from './fork/ar.json' with { type: 'json' };
-import forkDe from './fork/de.json' with { type: 'json' };
-import forkEs from './fork/es.json' with { type: 'json' };
-import forkFr from './fork/fr.json' with { type: 'json' };
-import forkHe from './fork/he.json' with { type: 'json' };
-import forkIt from './fork/it.json' with { type: 'json' };
-import forkJa from './fork/ja.json' with { type: 'json' };
-import forkPt from './fork/pt.json' with { type: 'json' };
-import forkRu from './fork/ru.json' with { type: 'json' };
-import forkSv from './fork/sv.json' with { type: 'json' };
-import forkUk from './fork/uk.json' with { type: 'json' };
-import forkZhCN from './fork/zh-CN.json' with { type: 'json' };
-import forkZhHant from './fork/zh-Hant.json' with { type: 'json' };
-
-const CATALOGS = Object.freeze({
-  ar: { ...ar, ...forkAr },
-  de: { ...de, ...forkDe },
-  es: { ...es, ...forkEs },
-  fr: { ...fr, ...forkFr },
-  he: { ...he, ...forkHe },
-  it: { ...it, ...forkIt },
-  ja: { ...ja, ...forkJa },
-  pt: { ...pt, ...forkPt },
-  ru: { ...ru, ...forkRu },
-  sv: { ...sv, ...forkSv },
-  uk: { ...uk, ...forkUk },
-  'zh-CN': { ...zhCN, ...forkZhCN },
-  'zh-Hant': { ...zhHant, ...forkZhHant },
+// Each catalog is its own chunk, loaded when its locale is chosen: the page
+// loads only the language it starts in, and another one when it switches.
+// Fork-only layers' text lives in fork/<code>.json, kept apart so syncs never
+// touch upstream's catalogs; it loads with its locale and merges on top.
+const withFork = (upstream, fork) => () =>
+  Promise.all([upstream(), fork()]).then(([base, extra]) => ({
+    default: { ...(base.default ?? base), ...(extra.default ?? extra) },
+  }));
+const CATALOG_LOADERS = Object.freeze({
+  ar: withFork(
+    () => import('./locales/ar.json', { with: { type: 'json' } }),
+    () => import('./fork/ar.json', { with: { type: 'json' } }),
+  ),
+  de: withFork(
+    () => import('./locales/de.json', { with: { type: 'json' } }),
+    () => import('./fork/de.json', { with: { type: 'json' } }),
+  ),
+  es: withFork(
+    () => import('./locales/es.json', { with: { type: 'json' } }),
+    () => import('./fork/es.json', { with: { type: 'json' } }),
+  ),
+  fr: withFork(
+    () => import('./locales/fr.json', { with: { type: 'json' } }),
+    () => import('./fork/fr.json', { with: { type: 'json' } }),
+  ),
+  he: withFork(
+    () => import('./locales/he.json', { with: { type: 'json' } }),
+    () => import('./fork/he.json', { with: { type: 'json' } }),
+  ),
+  it: withFork(
+    () => import('./locales/it.json', { with: { type: 'json' } }),
+    () => import('./fork/it.json', { with: { type: 'json' } }),
+  ),
+  ja: withFork(
+    () => import('./locales/ja.json', { with: { type: 'json' } }),
+    () => import('./fork/ja.json', { with: { type: 'json' } }),
+  ),
+  pt: withFork(
+    () => import('./locales/pt.json', { with: { type: 'json' } }),
+    () => import('./fork/pt.json', { with: { type: 'json' } }),
+  ),
+  ru: withFork(
+    () => import('./locales/ru.json', { with: { type: 'json' } }),
+    () => import('./fork/ru.json', { with: { type: 'json' } }),
+  ),
+  sv: withFork(
+    () => import('./locales/sv.json', { with: { type: 'json' } }),
+    () => import('./fork/sv.json', { with: { type: 'json' } }),
+  ),
+  uk: withFork(
+    () => import('./locales/uk.json', { with: { type: 'json' } }),
+    () => import('./fork/uk.json', { with: { type: 'json' } }),
+  ),
+  'zh-CN': withFork(
+    () => import('./locales/zh-CN.json', { with: { type: 'json' } }),
+    () => import('./fork/zh-CN.json', { with: { type: 'json' } }),
+  ),
+  'zh-Hant': withFork(
+    () => import('./locales/zh-Hant.json', { with: { type: 'json' } }),
+    () => import('./fork/zh-Hant.json', { with: { type: 'json' } }),
+  ),
 });
+
+/** Loaded catalogs by locale. */
+const CATALOGS = new Map();
+/** Catalog loads in flight by locale. */
+const catalogLoads = new Map();
+
+/**
+ * Load a locale's catalog, once. English needs none and resolves at once, as
+ * does a catalog already loaded. A failed load can be tried again.
+ * @param {string} locale
+ * @returns {Promise<object|null>} The catalog; null for English and unknown codes.
+ */
+export function loadCatalog(locale) {
+  const code = normalizeLocale(locale);
+  if (CATALOGS.has(code)) return Promise.resolve(CATALOGS.get(code));
+  const loader = CATALOG_LOADERS[code];
+  if (!loader) return Promise.resolve(null);
+  let load = catalogLoads.get(code);
+  if (!load) {
+    load = loader().then(
+      (module) => {
+        const catalog = module.default ?? module;
+        CATALOGS.set(code, catalog);
+        catalogLoads.delete(code);
+        return catalog;
+      },
+      (error) => {
+        catalogLoads.delete(code);
+        throw error;
+      },
+    );
+    catalogLoads.set(code, load);
+  }
+  return load;
+}
+
+/** Whether a locale's text is ready to show: English, or a loaded catalog. */
+function catalogReady(locale) {
+  return !CATALOG_LOADERS[locale] || CATALOGS.has(locale);
+}
 
 // The page's locale. The UI binds it to its vue-i18n instance's
 // (src/ui/i18n.js), so a Vue render that translates re-renders when it
@@ -108,9 +168,12 @@ export function notifyLocaleChange() {
   }
 }
 
-/** The catalog for a locale; null for English and unknown codes. */
+/**
+ * The catalog for a locale; null for English, unknown codes and a catalog not
+ * loaded yet (loadCatalog).
+ */
 export function getCatalog(locale) {
-  return CATALOGS[normalizeLocale(locale)] ?? null;
+  return CATALOGS.get(normalizeLocale(locale)) ?? null;
 }
 
 let boundValue = DEFAULT_LOCALE;
@@ -149,20 +212,46 @@ export function keepCodesWithValues(text) {
   return String(text).replace(CODE_BEFORE_VALUE, '\u2068$1 $2\u2069');
 }
 
+// Each setLocale call takes a number; only the latest call applies its
+// locale, so a switch whose catalog arrives after a later choice is dropped.
+let latestChoice = 0;
+
 /**
- * Switch the active locale. Views re-render and onLocaleChange listeners
- * word their text again; the application keeps <html lang>/<html dir> and
- * the page's data-i18n markup in step.
- * @returns {string} The locale actually applied (normalized).
+ * Switch the active locale once its catalog is loaded. Views re-render and
+ * onLocaleChange listeners word their text again; the application keeps
+ * <html lang>/<html dir> and the page's data-i18n markup in step. A locale
+ * whose catalog is loaded (English always is) applies before this returns;
+ * another applies when its catalog arrives, unless a later call chose
+ * another locale first: the last choice wins. A catalog that fails to load
+ * changes nothing and rejects the promise.
+ * @returns {Promise<string|null>} The locale applied (normalized); null for
+ *   a call a later one replaced, whether that later call applies or fails.
  */
 export function setLocale(locale) {
   const normalized = normalizeLocale(locale) || DEFAULT_LOCALE;
-  if (normalized !== pageLocale.value) {
-    pageLocale.value = normalized;
-    formatterCache.clear();
-    if (!bound) notifyLocaleChange();
+  const choice = ++latestChoice;
+  if (catalogReady(normalized)) {
+    applyLocale(normalized);
+    return Promise.resolve(normalized);
   }
-  return normalized;
+  return loadCatalog(normalized).then(
+    () => {
+      if (choice !== latestChoice) return null;
+      applyLocale(normalized);
+      return normalized;
+    },
+    (error) => {
+      if (choice !== latestChoice) return null;
+      throw error;
+    },
+  );
+}
+
+function applyLocale(normalized) {
+  if (normalized === pageLocale.value) return;
+  pageLocale.value = normalized;
+  formatterCache.clear();
+  if (!bound) notifyLocaleChange();
 }
 
 /** Development-only warning; silent under node:test and in production. */
@@ -254,7 +343,7 @@ function lookup(text) {
 
 /** Core's own catalog entry for a message in the active locale. */
 function catalogEntry(text) {
-  const catalog = CATALOGS[getLocale()];
+  const catalog = CATALOGS.get(getLocale());
   if (!catalog) return undefined;
   const entry = Object.hasOwn(catalog, text) ? catalog[text] : undefined;
   if (filled(entry) || (entry && typeof entry === 'object')) return entry;
@@ -316,7 +405,7 @@ export function translateKnown(text) {
   if (typeof text !== 'string') return text;
   const host = overridden(text);
   if (host) return host.entry;
-  const catalog = CATALOGS[getLocale()];
+  const catalog = CATALOGS.get(getLocale());
   if (!catalog) return text;
   const entry = Object.hasOwn(catalog, text) ? catalog[text] : undefined;
   return filled(entry) ? entry : text;
